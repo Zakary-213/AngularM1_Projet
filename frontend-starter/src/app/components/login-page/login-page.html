@@ -2,8 +2,14 @@
   <h1>Connexion</h1>
   <form [formGroup]="form" (ngSubmit)="submit()">
     <label>Email<input type="email" formControlName="email" /></label>
+    @if (form.controls.email.invalid && form.controls.email.touched) {
+      <p style="color: red; font-size: 0.8rem; margin: 0">Email invalide ou manquant</p>
+    }
     <label>Mot de passe<input type="password" formControlName="password" /></label>
-    <button type="submit">Se connecter</button>
+    @if (form.controls.password.invalid && form.controls.password.touched) {
+      <p style="color: red; font-size: 0.8rem; margin: 0">Mot de passe requis</p>
+    }
+    <button type="submit" [disabled]="form.invalid">Se connecter</button>
   </form>
   @if (error()) {
     <p class="error">{{ error() }}</p>

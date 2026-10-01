@@ -6,40 +6,134 @@
   </div>
 
   <div class="grid">
+    <!-- Colonne Importation -->
     <article class="card">
       <h2>Importer</h2>
-      <label>Titre<input [formControl]="title" /></label>
-      <label>Fichier audio<input type="file" accept="audio/*" (change)="choose($event)" /></label>
-      <button type="button" (click)="upload()" [disabled]="!file">Envoyer</button>
+      <label>Titre<input [formControl]="title" placeholder="Ex: Solo blues en Lam" /></label>
+      <label>Fichier audio<input #fileInput type="file" accept="audio/*" (change)="choose($event)" /></label>
+      <button type="button" (click)="upload(fileInput)" [disabled]="!file || uploading()">
+        @if (uploading()) {
+          Envoi en cours...
+        } @else {
+          Envoyer
+        }
+      </button>
+
+      @if (uploading()) {
+        <p class="status-info">Envoi en cours vers le serveur…</p>
+      }
+      @if (uploadError()) {
+        <p class="error">{{ uploadError() }}</p>
+      }
+      @if (uploadSuccess()) {
+        <p class="success">Succès ! Piste ajoutée à votre bibliothèque.</p>
+      }
     </article>
 
+    <!-- Colonne Mes Pistes -->
     <article class="card">
-      <div class="row">
+      <div class="row header-row">
         <h2>Mes pistes</h2>
-        <button type="button" (click)="load()">Actualiser</button>
-      </div>
-      @if (loading()) {
-        <p>Chargement…</p>
-      }
-      @for (track of tracks(); track track.id) {
-        <div class="track">
-          <div>
-            <b>{{ track.title }}</b>
-            <small>{{ track.originalName }} · {{ track.size }} Ko</small>
-          </div>
-          <button type="button" (click)="play(track)" [attr.aria-label]="'Lire ' + track.title">▶</button>
+        <div class="header-actions">
+          <input
+            type="search"
+            class="filter-input"
+            placeholder="Filtrer par titre..."
+            [value]="searchFilter()"
+            (input)="onSearch($event)"
+          />
+          <button type="button" class="btn-secondary" (click)="load()">Actualiser</button>
         </div>
-      } @empty {
-        <p>Aucune piste.</p>
-      }
-      <div class="pager">
-        <button type="button" (click)="go(page() - 1)" [disabled]="page() === 1">Préc.</button>
-        <span>Page {{ page() }} / {{ pages() }}</span>
-        <button type="button" (click)="go(page() + 1)" [disabled]="page() === pages()">Suiv.</button>
       </div>
-      @if (audioUrl()) {
-        <audio [src]="audioUrl()" controls autoplay></audio>
+
+      <!-- Lecteur audio et état de lecture -->
+      @if (currentTrack(); as activeTrack) {
+        <div class="player-panel">
+          <div class="player-meta">
+            <span class="pulse-indicator"></span>
+            <div>
+              <small class="player-label">En cours de lecture</small>
+              <strong>{{ activeTrack.title }}</strong>
+              <small class="player-sub">{{ formatMime(activeTrack.mimeType) }} · {{ formatSize(activeTrack.size) }}</small>
+            </div>
+          </div>
+          @if (audioUrl()) {
+            <audio [src]="audioUrl()" controls autoplay></audio>
+          }
+        </div>
       }
+
+      @if (audioError()) {
+        <div class="error-banner">
+          <span>⚠️ {{ audioError() }}</span>
+        </div>
+      }
+
+      @if (loading()) {
+        <p class="status-info">Chargement des morceaux…</p>
+      }
+
+      <!-- Liste des pistes sous forme de cards -->
+      <div class="tracks-list">
+        @for (track of filteredTracks(); track track.id) {
+          <div class="track-card" [class.active]="currentTrack()?.id === track.id">
+            <div class="track-info">
+              <div class="track-title-row">
+                <b>{{ track.title }}</b>
+                <span class="mime-badge">{{ formatMime(track.mimeType) }}</span>
+                @if (currentTrack()?.id === track.id) {
+                  <span class="playing-badge">▶ En lecture</span>
+                }
+              </div>
+              <small class="track-meta">
+                {{ track.originalName }} · {{ formatSize(track.size) }} · Ajouté le {{ formatDate(track.createdAt) }}
+              </small>
+            </div>
+
+            <div class="track-actions">
+              <button
+                type="button"
+                class="btn-play"
+                (click)="play(track)"
+                [disabled]="audioLoading() === track.id"
+                [attr.aria-label]="'Lire ' + track.title"
+              >
+                @if (audioLoading() === track.id) {
+                  Chargement...
+                } @else if (currentTrack()?.id === track.id) {
+                  En lecture
+                } @else {
+                  ▶ Écouter
+                }
+              </button>
+
+              <button
+                type="button"
+                class="btn-delete"
+                (click)="delete(track)"
+                [attr.aria-label]="'Supprimer ' + track.title"
+                title="Supprimer la piste"
+              >
+                🗑️
+              </button>
+            </div>
+          </div>
+        } @empty {
+          <p class="empty-state">
+            @if (searchFilter()) {
+              Aucun morceau ne correspond à votre recherche.
+            } @else {
+              Aucune piste dans votre bibliothèque.
+            }
+          </p>
+        }
+      </div>
+
+      <div class="pager">
+        <button type="button" class="btn-secondary" (click)="go(page() - 1)" [disabled]="page() === 1">Préc.</button>
+        <span class="page-indicator">Page {{ page() }} / {{ pages() }}</span>
+        <button type="button" class="btn-secondary" (click)="go(page() + 1)" [disabled]="page() === pages()">Suiv.</button>
+      </div>
     </article>
   </div>
 </section>

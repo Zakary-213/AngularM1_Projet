@@ -1,20 +1,30 @@
-<header>
-  <div>
-    <b>Guitar Practice Cloud</b>
-    <small>Le cloud qui manque à votre ampli</small>
-  </div>
-  <nav aria-label="Navigation principale">
-    @if (auth.currentUser()) {
-      <a routerLink="/tracks">Backing tracks</a>
-      <a routerLink="/profile">Profil</a>
-      <a (click)="logout()" style="cursor: pointer">Déconnexion</a>
-    } @else {
-      <a routerLink="/login">Connexion</a>
-      <a routerLink="/register">Inscription</a>
-    }
-  </nav>
-</header>
+<a class="skip-link" href="#page-content">Aller au contenu</a>
+<div class="studio-app">
+  <header class="site-header">
+    <a class="brand" routerLink="/home" aria-label="Rap Studio, accueil" (click)="menuOpen.set(false)">
+      <svg width="22" height="26" viewBox="0 0 22 26" fill="none" aria-hidden="true">
+        <path d="M2 10v6m4-11v16m5-20v24m5-19v14m4-11v8" stroke="currentColor" stroke-width="2" />
+      </svg>
+      RAP STUDIO<span class="brand-period">.</span>
+    </a>
+    <button class="menu-toggle" aria-controls="main-navigation" [attr.aria-expanded]="menuOpen()" (click)="menuOpen.set(!menuOpen())">
+      {{ menuOpen() ? 'Fermer −' : 'Menu ＋' }}
+    </button>
+    <nav id="main-navigation" aria-label="Navigation principale" [class.is-open]="menuOpen()">
+      @for (item of navigation; track item.path) {
+        <a [routerLink]="item.path" routerLinkActive="active" ariaCurrentWhenActive="page" (click)="menuOpen.set(false)">{{ item.label }}</a>
+      }
+      <a class="button header-cta" routerLink="/studio" routerLinkActive="active-studio" ariaCurrentWhenActive="page" (click)="menuOpen.set(false)">Ouvrir le studio <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
 
-<main>
-  <router-outlet />
-</main>
+  <main id="page-content" tabindex="-1"><router-outlet /></main>
+
+  <footer class="site-footer">
+    <div class="footer-top">
+      <div><a class="footer-brand" routerLink="/home">RAP STUDIO.</a><p>Vos idées. Votre son. Votre studio.</p></div>
+      <div class="footer-links"><a routerLink="/studio">Studio ↗</a><a routerLink="/projects">Mes projets</a><a routerLink="/collaborations">Créer ensemble</a></div>
+    </div>
+    <div class="footer-bottom"><span>© 2026 RAP STUDIO</span><span>MAQUETTE FRONTEND · DONNÉES DE DÉMONSTRATION</span><span>CONÇU POUR LA CRÉATION.</span></div>
+  </footer>
+</div>

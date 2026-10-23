@@ -1,0 +1,78 @@
+<section class="producer-hero" aria-labelledby="hero-title">
+  <div class="hero-photo">
+    <img ngSrc="/images/recording-studio.jpg" fill priority alt="Console de mixage dans un studio éclairé de lumières ambrées" />
+  </div>
+  <div class="hero-shade" aria-hidden="true"></div>
+  <div class="hero-content">
+    <p class="hero-kicker"><span></span> PRODUCTION · ENREGISTREMENT · COLLABORATION</p>
+    <h1 id="hero-title">VOTRE SON.<br>SANS LIMITES<span>.</span></h1>
+    <p class="hero-description">Transformez vos idées en morceaux.<br>Composez, enregistrez et créez ensemble.<br>Votre studio, là où l’inspiration vous trouve.</p>
+    <div class="hero-actions">
+      <a class="button primary" routerLink="/studio">Entrer dans le studio <span aria-hidden="true">↗</span></a>
+      <a class="button hero-secondary" routerLink="/projects"><span aria-hidden="true">▦</span> Explorer mes projets</a>
+    </div>
+    <p class="hero-footnote">DE LA PREMIÈRE NOTE AU DERNIER MIX.</p>
+  </div>
+  <div class="hero-side-note" aria-hidden="true">INDEPENDENT SOUND. COLLECTIVE ENERGY.</div>
+  <div class="hero-session"><span class="session-led"></span> SESSION 001 <span>48 kHz / 24 BIT</span></div>
+  <div class="hero-waveform" aria-hidden="true">
+    @for (bar of waveform; track $index) {
+      <span [style.height.px]="bar.height" [style.animation-duration.s]="bar.duration" [style.animation-delay.s]="bar.delay"></span>
+    }
+  </div>
+</section>
+
+<div class="genre-strip" aria-label="Hip-hop, R&B, trap, soul, lo-fi et electronic">
+  <div class="genre-track" aria-hidden="true">
+    @for (copy of [1, 2]; track copy) {
+      <span>HIP-HOP <b>✦</b> R&B <b>✦</b> TRAP <b>✦</b> SOUL <b>✦</b> LO-FI <b>✦</b> ELECTRONIC <b>✦</b> AFROBEATS <b>✦</b></span>
+    }
+  </div>
+</div>
+
+<section class="home-section selected-work" aria-labelledby="sessions-title">
+  <div class="editorial-heading">
+    <div><p class="eyebrow">01 / VOTRE ESPACE CRÉATIF</p><h2 id="sessions-title">LES SESSIONS.</h2></div>
+    <a routerLink="/projects">Tous les projets <span>↗</span></a>
+  </div>
+  <div class="project-grid">
+    @for (project of projects; track project.title) {
+      <a class="project-card" routerLink="/studio" [attr.aria-label]="'Ouvrir la maquette de studio — ' + project.title">
+        <div [class]="'cover ' + project.color">
+          <span class="cover-topline">RAP STUDIO / DEMO {{ project.number }}</span>
+          <div class="cover-lines" aria-hidden="true"></div>
+          <span class="cover-number">{{ project.number }}</span>
+          <span class="cover-caption">{{ project.genre }}</span>
+          <span class="cover-open" aria-hidden="true">↗</span>
+        </div>
+        <div class="project-title"><h3>{{ project.title }}</h3><span>↗</span></div>
+        <p>{{ project.genre }} <span>·</span> {{ project.bpm }} BPM</p>
+        <div class="card-footer"><span>{{ project.key }} / {{ project.tracks }} PISTES</span><span class="tag subtle">{{ project.status }}</span></div>
+      </a>
+    }
+  </div>
+  <p class="demo-note">SESSIONS DE DÉMONSTRATION — VOTRE PROCHAINE CRÉATION RESTE À ÉCRIRE.</p>
+</section>
+
+<section class="workflow-section">
+  <div class="home-section">
+    <div class="editorial-heading"><div><p class="eyebrow">02 / L’ESSENTIEL, AU MÊME ENDROIT</p><h2>DU BEAT AU MORCEAU.</h2></div><span class="section-aside">VOTRE VISION.<br>VOTRE SIGNATURE.</span></div>
+    <div class="workflow-grid">
+      @for (workflow of workflows; track workflow.number) {
+        <article>
+          <span class="workflow-number">/ {{ workflow.number }}</span>
+          <h3>{{ workflow.title }}</h3>
+          <p>{{ workflow.description }}</p>
+          <a [routerLink]="workflow.link">{{ workflow.action }} <span>↗</span></a>
+        </article>
+      }
+    </div>
+  </div>
+</section>
+
+<section class="home-section collective-section">
+  <div><p class="eyebrow">03 / LA FORCE DU COLLECTIF</p><h2>PLUSIEURS TALENTS.<br>UNE MÊME VISION.</h2><p>Une voix, un beatmaker, une idée qui rebondit.<br>Votre prochain morceau peut commencer à plusieurs.</p><a class="button secondary" routerLink="/collaborations">Voir les collaborations <span>↗</span></a></div>
+  <div class="session-sheet"><div class="sheet-header"><span>MINUIT SUR LA VILLE</span><span>SESSION / 001</span></div><div class="credit-row"><span>01</span><b>Zakary</b><small>PRODUCTION</small></div><div class="credit-row"><span>02</span><b>Maya</b><small>VOIX</small></div><div class="credit-row"><span>03</span><b>Adam</b><small>MIXAGE</small></div><div class="sheet-footer"><span class="session-led"></span> ÉQUIPE DE DÉMONSTRATION <span>↗</span></div></div>
+</section>
+
+<section class="closing-cta"><p class="eyebrow">LE BON MOMENT, C’EST MAINTENANT.</p><h2>FAITES DU BRUIT<span>.</span></h2><p>Votre prochaine idée mérite mieux qu’une note dans votre téléphone.</p><a class="button primary" routerLink="/studio">Commencer une session <span>↗</span></a><span class="closing-caption">COMPOSEZ. ENREGISTREZ. PARTAGEZ.</span></section>

@@ -1,5 +1,7 @@
 # Instructions pour Claude Code
 
+Avant toute modification, lire intégralement `../AGENTS.md`, puis le `AGENTS.md` de ce dossier. Le guide racine est obligatoire et commun à tous les agents.
+
 Suis `AGENTS.md` et lis `best-practices.md` avant de modifier l’API. Consulte
 `../API_CONTRACT.md` pour connaître les routes et les formats attendus.
 

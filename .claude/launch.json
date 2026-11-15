@@ -4,8 +4,23 @@
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend-starter", "start"],
+      "runtimeArgs": [
+        "--prefix",
+        "frontend-starter",
+        "start"
+      ],
       "port": 4200
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "backend",
+        "start"
+      ],
+      "port": 3000,
+      "autoPort": false
     }
   ]
 }

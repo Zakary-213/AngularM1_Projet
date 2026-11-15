@@ -78,7 +78,7 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 |---|---|---|
 | Comptes | Inscription, connexion JWT, profil, photo de profil, déconnexion depuis l’en-tête | ✅ Fonctionnel |
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
-| Accueil | Hero 3D interactif (instruments lumineux, son d'ambiance synthétisé) | ✅ Fonctionnel |
+| Accueil | Visite 3D d'un studio au défilement : la caméra avance jusqu'au bureau (synthé, enceintes, écran) | ✅ Fonctionnel |
 | Interface | Pages Projets, Studio, Bibliothèque, Collaborations, Publications | 🎨 Maquette |
 | Moteur audio | Transport, BPM, métronome, horloge commune (Tone.js / Web Audio) | ⏳ À faire (M0, M2) |
 | Composition | Drum Rack, Piano Roll, instruments, timeline | ⏳ À faire (M3 → M5) |
@@ -129,7 +129,7 @@ flowchart TB
     subgraph Navigateur
         UI[Angular 22<br/>composants standalone + Signals]
         AUDIO[Moteur audio<br/>Web Audio · Tone.js]
-        GL[Scène 3D d'accueil<br/>three.js, chargée à la demande]
+        GL[Studio 3D de l'accueil<br/>three.js, chargé à la demande]
     end
     subgraph Serveur
         API[Express 5<br/>JWT · Multer]
@@ -314,6 +314,14 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 15 novembre 2026 — Refonte de l'accueil : studio 3D (#39)
+
+- L'ancienne scène (fond gris, instruments en formes simples) est remplacée par **un studio modélisé** : bureau en noyer, écran affichant une session de musique, enceintes de monitoring, clavier synthétiseur 49 touches, carte son, casque, lampe, micro sur pied, lattes de bois, panneaux acoustiques, disques d'or, plante.
+- **Défilement** : plan large → « 01 Le studio » → gros plan « 02 Le synthé » → « 03 La session » face à l'écran, avec l'appel « Entrer dans le studio ». Navigation par étape au clavier, barre de progression.
+- **Rendu** : matériaux PBR, réflexions d'un environnement généré, ombres douces, tone mapping ACES. Éclairage chaud et indirect ; bloom très discret (seuil 0,95) après le retour « lumières trop flash » sur une première version. Une version intermédiaire avec un salon et un Far West a été abandonnée à la demande de l'utilisateur.
+- **Performance** : toutes les textures sont dessinées en code (aucun fichier téléchargé), scène chargée à la demande (≈ 124 ko transférés), qualité réduite automatiquement si les premières images sont trop lentes.
+- Vérifications : `npm test` 44/44, `npm run build` réussi ; rendu contrôlé au navigateur sur ordinateur aux trois étapes. **Non vérifiés** : 360 px, `prefers-reduced-motion` et la fluidité réelle (le panneau du navigateur était souvent masqué pendant les mesures, ce qui fausse le nombre d'images par seconde).
 
 ### 15 novembre 2026 — Photo de profil (#37)
 

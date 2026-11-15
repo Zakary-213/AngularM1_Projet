@@ -1,25 +1,48 @@
 <section class="hero-stage" #stage aria-labelledby="hero-title">
   <div class="hero-sticky">
     <div class="hero-canvas" #canvasHost aria-hidden="true"></div>
+    <div class="hero-vignette" aria-hidden="true"></div>
+    <div class="hero-fade" #fade aria-hidden="true"></div>
+
     <div class="hero-ui" [class.on]="uiVisible()">
-      <div class="hero-center">
+      <div class="hero-center" #intro>
         <p class="hero-brand">ZAKAT RECORD</p>
         <h1 id="hero-title">Produit, pas formaté.</h1>
-        <p class="hero-caption">Né d’une idée brute.<br>Mixé pour ce qui vient.</p>
-        <a class="hero-go" routerLink="/studio" aria-label="Entrer dans le studio"
-           (pointerenter)="setHover(true)" (pointerleave)="setHover(false)" (focus)="setHover(true)" (blur)="setHover(false)">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16M14 6l6 6-6 6" /></svg>
-        </a>
+        <p class="hero-caption">Entre dans le studio.<br>Ton prochain morceau commence ici.</p>
         @if (sceneError()) {
           <p class="hero-notice" role="status">{{ sceneError() }}</p>
         }
       </div>
+
+      @for (step of steps; track step.id; let i = $index) {
+        <div class="step-caption" #caption [attr.aria-hidden]="activeStep() !== i">
+          <p class="step-number">{{ step.number }} <span>/ {{ step.tag }}</span></p>
+          <h2>{{ step.title }}<span>.</span></h2>
+          <p>{{ step.text }}</p>
+          @if ($last) {
+            <a class="step-cta" routerLink="/studio" (pointerenter)="setMuffled(true)" (pointerleave)="setMuffled(false)">
+              Entrer dans le studio <span aria-hidden="true">↗</span>
+            </a>
+          }
+        </div>
+      }
+
+      <nav class="step-nav" aria-label="Étapes de la visite du studio">
+        @for (step of steps; track step.id; let i = $index) {
+          <button type="button" [class.active]="activeStep() === i" [attr.aria-current]="activeStep() === i ? 'step' : null"
+                  (click)="goToStep(i)">
+            <span class="dot" aria-hidden="true"></span><span class="label">{{ step.number }} · {{ step.title }}</span>
+          </button>
+        }
+      </nav>
+
       <div class="hero-corner">
-        <span>Défiler pour explorer</span><i aria-hidden="true"></i>
+        <span class="scroll-hint">Défiler pour entrer</span><i aria-hidden="true"></i>
         <button type="button" class="hero-sound" [attr.aria-pressed]="sound.playing()" aria-label="Son d’ambiance" (click)="toggleSound()">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5Z" /><path class="waves" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /><path class="mute" d="m16 10 4 4m0-4-4 4" /></svg>
         </button>
       </div>
+      <div class="hero-progress" aria-hidden="true"><span #progressBar></span></div>
     </div>
     <div class="hero-loader" [class.gone]="loaded()" aria-hidden="true"><span></span></div>
   </div>

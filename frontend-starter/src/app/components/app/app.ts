@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthService } from '../../shared/services/auth.service';
+import { AvatarService } from '../../shared/services/avatar.service';
 
 @Component({
   selector: 'app-root',
@@ -10,6 +11,7 @@ import { AuthService } from '../../shared/services/auth.service';
 })
 export class AppComponent {
   readonly auth = inject(AuthService);
+  readonly avatar = inject(AvatarService);
   private readonly router = inject(Router);
 
   readonly menuOpen = signal(false);

@@ -76,7 +76,7 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 
 | Domaine | Fonctionnalité | Statut |
 |---|---|---|
-| Comptes | Inscription, connexion JWT, profil, déconnexion depuis l’en-tête | ✅ Fonctionnel |
+| Comptes | Inscription, connexion JWT, profil, photo de profil, déconnexion depuis l’en-tête | ✅ Fonctionnel |
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Hero 3D interactif (instruments lumineux, son d'ambiance synthétisé) | ✅ Fonctionnel |
 | Interface | Pages Projets, Studio, Bibliothèque, Collaborations, Publications | 🎨 Maquette |
@@ -274,10 +274,15 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 | POST | `/auth/login` | `{email,password}` | `200 {token,user}` |
 | GET | `/users/me` | JWT | `200 User` |
 | PUT | `/users/me` | `{name}` + JWT | `200 User` |
+| PUT | `/users/me/avatar` | multipart : `avatar` (JPEG, PNG ou WebP, 2 Mo max) + JWT | `200 User` |
+| GET | `/users/me/avatar` | JWT | image (`Cache-Control: private, no-cache`) ou `404` sans photo |
+| DELETE | `/users/me/avatar` | JWT | `204` |
 | GET | `/tracks?page=1&limit=5` | JWT | `200 Page<Track>` |
 | POST | `/tracks` | multipart : `audio`, `title` + JWT | `201 Track` |
 | GET | `/tracks/:id/audio` | JWT | flux audio |
 | DELETE | `/tracks/:id` | JWT (propriétaire) | `204` |
+
+`User` contient `id`, `name`, `email`, `createdAt`, `hasAvatar` et `avatarUpdatedAt` ; le nom de stockage de la photo n'est jamais exposé. Photo de profil : le type annoncé **et** la signature binaire du fichier sont vérifiés (`400` sinon), `413` au-delà de 2 Mo, l'ancienne photo est supprimée après remplacement.
 
 `Page<Track>` contient `items`, `page`, `limit`, `total` et `pages`. Formats audio acceptés : MP3, WAV, OGG et M4A, 25 Mo maximum. Erreurs courantes : `400` validation, `401` authentification, `404` ressource absente ou non autorisée, `409` email déjà utilisé.
 
@@ -309,6 +314,14 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 15 novembre 2026 — Photo de profil (#37)
+
+- Backend : `PUT`, `GET` et `DELETE /api/users/me/avatar`. Images JPEG, PNG ou WebP de 2 Mo maximum, rangées dans `backend/data/avatars/` sous un nom aléatoire (extension tirée du type validé). Le type annoncé et la signature binaire du fichier sont contrôlés ; l'ancienne photo est supprimée après l'enregistrement de la nouvelle, et le fichier envoyé est nettoyé si MongoDB échoue.
+- Frontend : page profil refaite (photo, informations, nom). Aperçu local avant envoi, boutons Choisir / Changer / Supprimer, validation côté client, état d'envoi et messages accessibles. La photo apparaît aussi dans l'en-tête. Elle est téléchargée avec le JWT puis affichée via un ObjectURL libéré à chaque changement et à la déconnexion.
+- Correction : quand plusieurs requêtes échouaient en 401, la redirection vers `/login` s'empilait (`returnUrl` imbriqué).
+- Suivi : `AGENTS.md` impose désormais à tout agent de tenir à jour les issues et le Kanban à chaque implémentation.
+- Vérifications : backend `npm test` 8/8 (6 nouveaux tests : 401, absence de fichier, type refusé, contenu falsifié, 413, profil public) ; frontend `npm test` 44/44 (10 nouveaux) et `npm run build` réussis. Envoi réel d'une photo vers MongoDB **non vérifié** au moment du commit : le Wi-Fi bloquait le port 27017 et le backend lancé n'avait pas encore les nouvelles routes.
 
 ### 15 novembre 2026 — Inscription et connexion intégrées au site (#35)
 

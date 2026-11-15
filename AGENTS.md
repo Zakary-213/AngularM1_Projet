@@ -144,6 +144,18 @@ Si un fichier de consignes requis est absent ou illisible, signaler précisémen
 - Chaque membre doit pouvoir expliquer le code retenu, les dépendances et les tests. Un code généré doit être relu et compris avant intégration.
 - Ne pas ajouter de TODO vague : décrire le problème restant et son impact, ou créer une mission identifiable.
 
+### Suivi des issues GitHub et du Kanban (obligatoire)
+
+Le suivi du travail se fait dans les issues du dépôt `Zakary-213/AngularM1_Projet` et dans le projet GitHub « Zakat Record — Kanban » (colonnes Backlog, À faire, En cours, En revue, Terminé). **Tout agent IA doit tenir ce suivi à jour à chaque implémentation, fonctionnalité ou correction**, sans attendre qu'on le lui demande :
+
+1. **Avant de coder** : retrouver l'issue concernée (`gh issue list`). S'il n'en existe pas, en créer une avec un titre explicite, une liste de tâches à cocher, un critère de validation et les labels adaptés (type : `feature`, `bug`, `docs`, `test`, `spike`, `design`, `ia` ; priorité ; zone `frontend` / `backend` / `audio`). L'ajouter au Kanban.
+2. **Au démarrage** : passer la carte dans la colonne **En cours** et travailler sur une branche dédiée (`feat/…`, `fix/…`, `docs/…`).
+3. **Pendant le travail** : cocher les tâches réellement terminées dans l'issue ; créer une issue distincte pour tout problème découvert hors du périmètre au lieu de l'ignorer.
+4. **À l'ouverture de la pull request** : référencer l'issue (`Closes #n`) et passer la carte en **En revue**.
+5. **Après la fusion** : vérifier que l'issue est fermée et que la carte est dans **Terminé**. Si une partie n'a pas pu être vérifiée, le noter dans l'issue (commentaire) plutôt que de la cocher.
+
+Ne jamais fermer une issue ni la placer en Terminé pour un travail non fusionné ou non vérifié. Indiquer à l'utilisateur, dans le compte rendu, les issues et cartes mises à jour.
+
 ## 12. Critère de fin d’une mission
 
-Une mission est terminée lorsque le comportement demandé fonctionne, que les erreurs prévisibles sont traitées, que les droits et ressources sont gérés, que l’interface reste utilisable aux tailles concernées, que les vérifications pertinentes ont été exécutées et que la documentation décrit le résultat réel. Signaler clairement toute limite restante.
+Une mission est terminée lorsque le comportement demandé fonctionne, que les erreurs prévisibles sont traitées, que les droits et ressources sont gérés, que l’interface reste utilisable aux tailles concernées, que les vérifications pertinentes ont été exécutées, que la documentation décrit le résultat réel et que l'issue GitHub et sa carte du Kanban reflètent l'état réel du travail. Signaler clairement toute limite restante.

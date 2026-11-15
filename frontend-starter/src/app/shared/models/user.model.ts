@@ -4,4 +4,8 @@ export interface User {
   name: string;
   email: string;
   createdAt: string;
+  /** True when a profile picture can be fetched from `GET /api/users/me/avatar`. */
+  hasAvatar?: boolean;
+  /** ISO date of the last picture change, used to refresh the cached image. */
+  avatarUpdatedAt?: string | null;
 }

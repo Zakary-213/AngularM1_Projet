@@ -1,0 +1,25 @@
+name: 🔬 Spike technique
+description: Prototype court pour lever un risque (audio, export, correction vocale…)
+labels: [spike]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question à trancher
+    validations: { required: true }
+  - type: textarea
+    id: options
+    attributes:
+      label: Options à comparer
+      description: Qualité, latence, licence, taille, maintenance.
+  - type: input
+    id: timebox
+    attributes:
+      label: Durée maximale
+      placeholder: ex. 2 jours
+    validations: { required: true }
+  - type: textarea
+    id: output
+    attributes:
+      label: Livrable attendu
+      value: Choix documenté dans le journal du README, avec ses limites.

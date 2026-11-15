@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Cahier des missions
+    url: https://github.com/Zakary-213/AngularM1_Projet/blob/main/MISSIONS_STUDIO_RAP_ANGULAR.md
+    about: Vérifier si la demande fait déjà partie d'une mission M0 → M11.

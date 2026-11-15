@@ -1,24 +1,27 @@
-<section class="producer-hero" aria-labelledby="hero-title">
-  <div class="hero-photo">
-    <img ngSrc="/images/recording-studio.jpg" fill priority alt="Console de mixage dans un studio éclairé de lumières ambrées" />
-  </div>
-  <div class="hero-shade" aria-hidden="true"></div>
-  <div class="hero-content">
-    <p class="hero-kicker"><span></span> PRODUCTION · ENREGISTREMENT · COLLABORATION</p>
-    <h1 id="hero-title">VOTRE SON.<br>SANS LIMITES<span>.</span></h1>
-    <p class="hero-description">Transformez vos idées en morceaux.<br>Composez, enregistrez et créez ensemble.<br>Votre studio, là où l’inspiration vous trouve.</p>
-    <div class="hero-actions">
-      <a class="button primary" routerLink="/studio">Entrer dans le studio <span aria-hidden="true">↗</span></a>
-      <a class="button hero-secondary" routerLink="/projects"><span aria-hidden="true">▦</span> Explorer mes projets</a>
+<section class="hero-stage" #stage aria-labelledby="hero-title">
+  <div class="hero-sticky">
+    <div class="hero-canvas" #canvasHost aria-hidden="true"></div>
+    <div class="hero-ui" [class.on]="uiVisible()">
+      <div class="hero-center">
+        <p class="hero-brand">ZAKAT RECORD</p>
+        <h1 id="hero-title">Produit, pas formaté.</h1>
+        <p class="hero-caption">Né d’une idée brute.<br>Mixé pour ce qui vient.</p>
+        <a class="hero-go" routerLink="/studio" aria-label="Entrer dans le studio"
+           (pointerenter)="setHover(true)" (pointerleave)="setHover(false)" (focus)="setHover(true)" (blur)="setHover(false)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16M14 6l6 6-6 6" /></svg>
+        </a>
+        @if (sceneError()) {
+          <p class="hero-notice" role="status">{{ sceneError() }}</p>
+        }
+      </div>
+      <div class="hero-corner">
+        <span>Défiler pour explorer</span><i aria-hidden="true"></i>
+        <button type="button" class="hero-sound" [attr.aria-pressed]="sound.playing()" aria-label="Son d’ambiance" (click)="toggleSound()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5Z" /><path class="waves" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /><path class="mute" d="m16 10 4 4m0-4-4 4" /></svg>
+        </button>
+      </div>
     </div>
-    <p class="hero-footnote">DE LA PREMIÈRE NOTE AU DERNIER MIX.</p>
-  </div>
-  <div class="hero-side-note" aria-hidden="true">INDEPENDENT SOUND. COLLECTIVE ENERGY.</div>
-  <div class="hero-session"><span class="session-led"></span> SESSION 001 <span>48 kHz / 24 BIT</span></div>
-  <div class="hero-waveform" aria-hidden="true">
-    @for (bar of waveform; track $index) {
-      <span [style.height.px]="bar.height" [style.animation-duration.s]="bar.duration" [style.animation-delay.s]="bar.delay"></span>
-    }
+    <div class="hero-loader" [class.gone]="loaded()" aria-hidden="true"><span></span></div>
   </div>
 </section>
 
@@ -39,7 +42,7 @@
     @for (project of projects; track project.title) {
       <a class="project-card" routerLink="/studio" [attr.aria-label]="'Ouvrir la maquette de studio — ' + project.title">
         <div [class]="'cover ' + project.color">
-          <span class="cover-topline">RAP STUDIO / DEMO {{ project.number }}</span>
+          <span class="cover-topline">ZAKAT RECORD / DEMO {{ project.number }}</span>
           <div class="cover-lines" aria-hidden="true"></div>
           <span class="cover-number">{{ project.number }}</span>
           <span class="cover-caption">{{ project.genre }}</span>

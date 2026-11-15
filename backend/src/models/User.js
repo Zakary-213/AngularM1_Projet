@@ -17,6 +17,11 @@ const schema = new mongoose.Schema(
     },
     // select:false empêche de renvoyer le hash par défaut dans les requêtes.
     passwordHash: { type: String, required: true, select: false },
+    // Photo de profil : seul un nom de stockage généré par le serveur est
+    // conservé ; il n'est jamais renvoyé au client (select:false).
+    avatarStoredName: { type: String, select: false },
+    avatarMimeType: { type: String },
+    avatarUpdatedAt: { type: Date },
   },
   { timestamps: true },
 );
@@ -55,6 +60,9 @@ schema.methods.toPublic = function () {
     name: this.name,
     email: this.email,
     createdAt: this.createdAt,
+    // Le client sait s'il doit demander l'image ; la date sert à invalider son cache.
+    hasAvatar: Boolean(this.avatarMimeType),
+    avatarUpdatedAt: this.avatarUpdatedAt ?? null,
   };
 };
 

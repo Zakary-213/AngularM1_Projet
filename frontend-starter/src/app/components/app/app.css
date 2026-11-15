@@ -65,6 +65,7 @@ nav > a.active::after {
 }
 
 .header-cta {
+  white-space: nowrap;
   margin-left: 15px;
   color: #0d0d0d;
   background: #f7f7f7;
@@ -75,6 +76,68 @@ nav > a.active::after {
 .menu-toggle {
   display: none;
 }
+
+.header-account {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-left: clamp(14px, 2vw, 28px);
+  border-left: 1px solid #2c2c2c;
+}
+
+.account-login,
+.account-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 12px;
+  color: #d4d4d4;
+}
+
+.account-login:hover,
+.account-link:hover,
+.account-login.active,
+.account-link.active { color: #fff; }
+
+.account-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #111;
+  font: 15px/1 var(--display);
+  overflow: hidden;
+}
+
+.account-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.account-link > span:last-child {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-register {
+  background: transparent;
+  border-color: #5a5a5a;
+  padding: 11px 16px;
+}
+
+.account-register:hover,
+.account-register.active { border-color: var(--accent); color: #fff; }
+
+.account-logout {
+  background: transparent;
+  border-color: #3a3a3a;
+  color: #c9c9c9;
+  padding: 10px 14px;
+}
+
+.account-logout:hover { border-color: #777; color: #fff; }
 
 main {
   max-width: 1600px;
@@ -133,18 +196,29 @@ main:has(app-home-page) {
   nav { gap: 18px; }
   nav > a:not(.button) { font-size: 11px; }
   .header-cta { margin-left: 0; padding-inline: 14px; }
+  .header-account { gap: 10px; padding-left: 14px; }
+  .header-cta > span { display: none; }
+  .account-link > span:last-child { max-width: 90px; }
   .brand { font-size: 26px; }
 }
 
-@media (max-width: 760px) {
-  .site-header { min-height: 74px; padding-inline: 24px; flex-wrap: wrap; gap: 0; }
-  .brand { font-size: 28px; }
+/* Below 1100px the full navigation no longer fits: switch to the collapsible menu. */
+@media (max-width: 1100px) {
+  .site-header { flex-wrap: wrap; }
   .menu-toggle { display: inline-flex; background: transparent; color: white; border-color: #333; font: 11px var(--mono); padding: 9px 12px; }
   nav { display: none; width: 100%; padding: 12px 0 24px; }
   nav.is-open { display: flex; flex-direction: column; align-items: stretch; gap: 5px; }
   nav > a:not(.button) { font-size: 14px; padding: 15px 0; }
   nav > a.active::after { bottom: 8px; }
   .header-cta { margin-top: 12px; }
+  .header-account { flex-wrap: wrap; padding: 14px 0 0; margin-top: 8px; border-left: 0; border-top: 1px solid #2c2c2c; }
+  .account-link > span:last-child { max-width: none; }
+  .header-cta > span { display: inline; }
+}
+
+@media (max-width: 760px) {
+  .site-header { min-height: 74px; padding-inline: 24px; flex-wrap: wrap; gap: 0; }
+  .brand { font-size: 28px; }
   main { padding: 38px 24px 60px; }
   .site-footer { padding: 35px 24px 22px; }
   .footer-top { align-items: flex-start; }

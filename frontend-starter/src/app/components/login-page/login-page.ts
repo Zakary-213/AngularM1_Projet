@@ -1,7 +1,8 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../shared/services/auth.service';
+import { authErrorMessage, safeReturnUrl } from '../../shared/utils/auth-form';
 
 @Component({
   imports: [ReactiveFormsModule, RouterLink],
@@ -11,29 +12,36 @@ import { AuthService } from '../../shared/services/auth.service';
 export class LoginPageComponent {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly returnUrl = safeReturnUrl(inject(ActivatedRoute).snapshot.queryParamMap.get('returnUrl'));
 
   readonly error = signal('');
+  readonly submitting = signal(false);
+  readonly showPassword = signal(false);
   readonly form = new FormGroup({
-    email: new FormControl('demo@example.com', {
-      nonNullable: true,
-      validators: [Validators.required, Validators.email],
-    }),
-    password: new FormControl('Demo1234!', {
-      nonNullable: true,
-      validators: [Validators.required],
-    }),
+    email: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.email] }),
+    password: new FormControl('', { nonNullable: true, validators: [Validators.required] }),
   });
 
   submit(): void {
-    const values = this.form.getRawValue();
-    this.auth.login(values.email, values.password).subscribe({
+    if (this.submitting()) return;
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
+    const { email, password } = this.form.getRawValue();
+    this.error.set('');
+    this.submitting.set(true);
+    this.form.disable();
+    this.auth.login(email.trim(), password).subscribe({
       next: () => {
         console.debug('[LoginPage] Connexion réussie');
-        void this.router.navigateByUrl('/tracks');
+        void this.router.navigateByUrl(this.returnUrl);
       },
-      error: (error: { error?: { message?: string } }) => {
-        console.error('[LoginPage] Échec de connexion', error);
-        this.error.set(error.error?.message ?? 'Erreur de connexion');
+      error: (error: unknown) => {
+        console.error('[LoginPage] Échec de connexion', error instanceof Error ? error.message : error);
+        this.error.set(authErrorMessage(error, 'La connexion a échoué. Réessayez.'));
+        this.submitting.set(false);
+        this.form.enable();
       },
     });
   }

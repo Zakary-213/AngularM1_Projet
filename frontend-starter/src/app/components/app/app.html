@@ -17,7 +17,13 @@
       <div class="header-account">
         @if (auth.isAuthenticated()) {
           <a class="account-link" routerLink="/profile" routerLinkActive="active" ariaCurrentWhenActive="page" (click)="menuOpen.set(false)">
-            <span class="account-avatar" aria-hidden="true">{{ (auth.currentUser()?.name?.charAt(0) ?? '♪').toUpperCase() }}</span>
+            <span class="account-avatar" aria-hidden="true">
+              @if (avatar.url(); as src) {
+                <img [src]="src" alt="" width="30" height="30" />
+              } @else {
+                {{ (auth.currentUser()?.name?.charAt(0) ?? '♪').toUpperCase() }}
+              }
+            </span>
             <span>{{ auth.currentUser()?.name ?? 'Mon compte' }}</span>
           </a>
           <button type="button" class="account-logout" (click)="logout()">Se déconnecter</button>

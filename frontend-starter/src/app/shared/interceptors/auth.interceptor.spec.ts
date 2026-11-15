@@ -47,4 +47,11 @@ describe('authInterceptor', () => {
     expect(auth.token()).toBe('jwt');
     expect(navigate).not.toHaveBeenCalled();
   });
+
+  it('ne redirige qu’une fois quand plusieurs requêtes échouent en 401', () => {
+    vi.spyOn(TestBed.inject(Router), 'url', 'get').mockReturnValue('/login?returnUrl=%2Fprofile');
+    client.get('/api/users/me').subscribe({ error: () => undefined });
+    http.expectOne('/api/users/me').flush(null, { status: 401, statusText: 'Unauthorized' });
+    expect(navigate).not.toHaveBeenCalled();
+  });
 });

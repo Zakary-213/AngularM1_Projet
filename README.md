@@ -14,6 +14,7 @@ Composer une prod, importer une instrumentale, poser sa voix, la corriger, mixer
 ![three.js](https://img.shields.io/badge/three.js-0.187-000000?logo=threedotjs&logoColor=white)
 ![Vitest](https://img.shields.io/badge/tests-Vitest-6E9F18?logo=vitest&logoColor=white)
 ![Statut](https://img.shields.io/badge/statut-en%20d%C3%A9veloppement-f5a623)
+[![CI](https://github.com/Zakary-213/AngularM1_Projet/actions/workflows/ci.yml/badge.svg)](https://github.com/Zakary-213/AngularM1_Projet/actions/workflows/ci.yml)
 
 </div>
 
@@ -169,6 +170,7 @@ flowchart TB
 │   ├── src/app.js               # Routes et middlewares
 │   ├── src/models/              # Schémas Mongoose (User, Track)
 │   └── test/                    # Tests node:test
+├── .github/                     # CI, modèles d'issues et de PR, Dependabot
 ├── captures/                    # Captures de vérification
 ├── MISSIONS_STUDIO_RAP_ANGULAR.md  # Cahier des missions M0 → M11
 └── AGENTS.md                    # Règles de développement communes

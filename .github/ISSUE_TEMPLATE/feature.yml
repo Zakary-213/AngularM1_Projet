@@ -1,0 +1,31 @@
+name: ✨ Fonctionnalité
+description: Proposer une nouvelle fonctionnalité ou une mission
+labels: [feature]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Objectif
+      description: Quel besoin utilisateur cette fonctionnalité couvre-t-elle ?
+    validations: { required: true }
+  - type: dropdown
+    id: area
+    attributes:
+      label: Zone
+      multiple: true
+      options: [frontend, backend, audio]
+    validations: { required: true }
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tâches
+      value: |
+        - [ ] 
+        - [ ] Tests unitaires
+        - [ ] Documentation (README / contrat d'API)
+  - type: textarea
+    id: done
+    attributes:
+      label: Critère de validation
+      description: Comment vérifier que c'est terminé ?
+    validations: { required: true }

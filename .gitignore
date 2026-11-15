@@ -1,2 +1,25 @@
+# Système
 .DS_Store
+Thumbs.db
+
+# Éditeurs
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Dépendances et builds (complète les .gitignore des sous-dossiers)
+node_modules/
+dist/
+.angular/
+coverage/
+
+# Secrets et environnements locaux
+.env
+.env.*
+!.env.example
+
+# Journaux
+*.log
+
+# Claude Code : réglages personnels
 .claude/settings.local.json

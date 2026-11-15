@@ -23,7 +23,7 @@ Si un fichier de consignes requis est absent ou illisible, signaler précisémen
 - La collaboration vise le partage des modifications du projet en direct. Jouer ensemble à distance avec une latence musicale faible constitue un sujet distinct qui nécessite une validation technique.
 - Procéder par petites fonctionnalités utilisables. Réaliser des prototypes courts pour les risques audio : synchronisation, correction vocale, export et collaboration.
 - Ne pas présenter une transposition simple comme une correction automatique de justesse, ni une modification de vitesse comme un changement de tempo préservant la hauteur.
-- Lire les fichiers concernés, les `AGENTS.md` et `best-practices.md` du sous-dossier, ainsi que `API_CONTRACT.md`, avant une modification pertinente.
+- Lire les fichiers concernés, les `AGENTS.md` et `best-practices.md` du sous-dossier, ainsi que la section « Contrat d'API » de `README.md`, avant une modification pertinente.
 - Conserver la structure existante `frontend-starter/` et `backend/`. Ne pas recréer le projet ou renommer ses dossiers sans nécessité.
 - Le cahier `MISSIONS_STUDIO_RAP_ANGULAR.md` exclut encore la collaboration et la plateforme sociale : cette partie doit être alignée avec les demandes de publication et de collaboration avant leur développement. Ne pas supprimer ces objectifs silencieusement.
 - Les instructions explicites de l’utilisateur priment. Signaler les contradictions entre documents ; résoudre les choix courants sans demander une validation à chaque étape.
@@ -102,7 +102,7 @@ Si un fichier de consignes requis est absent ou illisible, signaler précisémen
 - Ne jamais committer ni journaliser `.env`, mots de passe, tokens, clés, URI privées, prises vocales ou autres contenus privés.
 - Hacher les mots de passe ; utiliser HTTPS en déploiement, une configuration CORS ciblée et des limites sur les opérations sensibles.
 - Retourner des erreurs utiles sans stack ni secret. Garder des logs sobres avec le contexte nécessaire au diagnostic.
-- Mettre à jour `API_CONTRACT.md` avec toute évolution : méthode, URL, authentification, paramètres, corps, réponses et erreurs. Documenter aussi les événements collaboratifs.
+- Mettre à jour la section « Contrat d'API » de `README.md` avec toute évolution : méthode, URL, authentification, paramètres, corps, réponses et erreurs. Documenter aussi les événements collaboratifs.
 
 ## 8. Collaboration et protection du travail
 
@@ -140,7 +140,7 @@ Si un fichier de consignes requis est absent ou illisible, signaler précisémen
 - Ne pas committer `node_modules`, les builds, caches, secrets, exports audio et fichiers temporaires. Versionner les lockfiles.
 - Maintenir le README pour l’installation, la configuration, le lancement et les tests. Utiliser `.env.example` avec des valeurs factices.
 - Tenir le suivi des missions à jour sans cocher une fonctionnalité non vérifiée.
-- Maintenir `REPORT.md` pour les choix techniques, fonctionnalités réalisées, résultats des tests, limites et répartition du travail ; conserver un usage cohérent du rapport IA si celui-ci est demandé.
+- Maintenir la section « Journal » de `README.md` pour les choix techniques, fonctionnalités réalisées, résultats des tests, limites et répartition du travail ; conserver un usage cohérent du rapport IA si celui-ci est demandé.
 - Chaque membre doit pouvoir expliquer le code retenu, les dépendances et les tests. Un code généré doit être relu et compris avant intégration.
 - Ne pas ajouter de TODO vague : décrire le problème restant et son impact, ou créer une mission identifiable.
 

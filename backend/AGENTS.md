@@ -1,11 +1,11 @@
 # Instructions pour les assistants de programmation
 
 Ce dossier contient une API Node.js/Express avec Mongoose et MongoDB. Lis
-`../AGENTS.md`, `best-practices.md`, `../API_CONTRACT.md` et `../ATLAS_SETUP.md` avant toute
+`../AGENTS.md`, `best-practices.md`, la section « Contrat d'API » de `../README.md` avant toute
 modification.
 
-- Préserver les routes, les méthodes HTTP et les formats définis dans `API_CONTRACT.md`.
-- Si une route est ajoutée ou modifiée, mettre à jour `../API_CONTRACT.md` dans la même mission : méthode, URL, authentification, paramètres, corps, réponses et erreurs.
+- Préserver les routes, les méthodes HTTP et les formats définis dans la section « Contrat d'API » de `../README.md`.
+- Si une route est ajoutée ou modifiée, mettre à jour la section « Contrat d'API » de `../README.md` dans la même mission : méthode, URL, authentification, paramètres, corps, réponses et erreurs.
 - Ne jamais modifier ou exposer les secrets contenus dans `.env`.
 - Utiliser `async`/`await` avec une gestion explicite des erreurs.
 - Ne jamais laisser un `catch` vide : journaliser l’erreur et transmettre une réponse HTTP appropriée.

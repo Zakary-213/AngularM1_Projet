@@ -20,7 +20,7 @@ Une requête suit généralement ce chemin :
 route -> middleware -> handler/controller -> modèle Mongoose -> MongoDB
 ```
 
-- Les routes décrivent les URL et les méthodes HTTP. Toute route ajoutée ou modifiée doit entraîner la mise à jour de `../API_CONTRACT.md` dans la même mission, avec la méthode, l’URL, l’authentification, les paramètres, le corps, les réponses et les erreurs.
+- Les routes décrivent les URL et les méthodes HTTP. Toute route ajoutée ou modifiée doit entraîner la mise à jour de la section « Contrat d'API » de `../README.md` dans la même mission, avec la méthode, l’URL, l’authentification, les paramètres, le corps, les réponses et les erreurs.
 - Les middlewares traitent l’authentification, la validation, les logs ou les fichiers reçus.
 - Un handler orchestre l’opération et renvoie une réponse une seule fois.
 - Utiliser des codes HTTP cohérents : `2xx` succès, `4xx` requête invalide ou non autorisée, `5xx` erreur serveur.
@@ -106,9 +106,9 @@ du backend.
 
 ```text
 Lis backend/AGENTS.md, backend/best-practices.md et les parties pertinentes de
-API_CONTRACT.md. Analyse d’abord la route concernée, décris son flux et propose
+la section « Contrat d'API » de ../README.md. Analyse d’abord la route concernée, décris son flux et propose
 les fichiers à modifier. Ne change pas le contrat API sans mettre à jour
-`API_CONTRACT.md` dans la même mission et ne touche jamais aux secrets. Après
+la section « Contrat d'API » de `../README.md` dans la même mission et ne touche jamais aux secrets. Après
 validation, implémente une modification limitée, lance les tests et signale
 chaque erreur.
 ```

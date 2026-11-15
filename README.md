@@ -58,6 +58,8 @@ flowchart LR
     B -->|Composer| C[Studio multipiste]
     B -->|Importer| C
     C --> D[🎙️ Enregistrement voix]
+    P[✍️ Paroles IA<br/>thème + cadence] --> D
+    C --> P
     D --> E[🎯 Correction de hauteur]
     E --> F[🎛️ Mixage]
     F --> G[⬇️ Export WAV]
@@ -66,7 +68,7 @@ flowchart LR
 
 ### Hors périmètre (V1)
 
-Génération d'instrumentales par IA, séparation de voix, clonage vocal et correction de hauteur **en direct** pendant la prise. La collaboration temps réel et la publication sont envisagées mais doivent d'abord être validées (voir [AGENTS.md](AGENTS.md)).
+Génération **audio** par IA (instrumentales), séparation de voix, clonage vocal et correction de hauteur **en direct** pendant la prise. La collaboration temps réel et la publication sont envisagées mais doivent d'abord être validées (voir [AGENTS.md](AGENTS.md)).
 
 ---
 
@@ -74,7 +76,7 @@ Génération d'instrumentales par IA, séparation de voix, clonage vocal et corr
 
 | Domaine | Fonctionnalité | Statut |
 |---|---|---|
-| Comptes | Inscription, connexion JWT, profil | ✅ Fonctionnel |
+| Comptes | Inscription, connexion JWT, profil, photo de profil, déconnexion depuis l’en-tête | ✅ Fonctionnel |
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Hero 3D interactif (instruments lumineux, son d'ambiance synthétisé) | ✅ Fonctionnel |
 | Interface | Pages Projets, Studio, Bibliothèque, Collaborations, Publications | 🎨 Maquette |
@@ -83,6 +85,7 @@ Génération d'instrumentales par IA, séparation de voix, clonage vocal et corr
 | Import | Instrumentale MP3 / WAV, forme d'onde, égaliseur | ⏳ À faire (M6) |
 | Mix | Volume, mute / solo, pan, EQ, réverbération, delay | ⏳ À faire (M7) |
 | Voix | Enregistrement multiprise, correction de hauteur | ⏳ À faire (M8, M9) |
+| ✍️ Paroles IA | Génération de couplets selon le thème et la cadence (BPM, mesures, flow), édition, prompteur synchronisé | ⏳ À faire (M12) |
 | Livraison | Sauvegarde complète, export WAV, tests de bout en bout | ⏳ À faire (M10, M11) |
 
 ---
@@ -108,8 +111,10 @@ gantt
     section Voix
     M8 Enregistrement            :m8, after m7, 7d
     M9 Correction de hauteur     :m9, after m8, 7d
+    section Écriture
+    M12 Paroles IA               :m12, after m9, 7d
     section Finalisation
-    M10 Sauvegarde et export     :m10, after m9, 7d
+    M10 Sauvegarde et export     :m10, after m12, 7d
     M11 Tests et livraison       :m11, after m10, 5d
 ```
 
@@ -131,12 +136,14 @@ flowchart TB
         DISK[(Fichiers audio<br/>sur disque)]
     end
     DB[(MongoDB Atlas<br/>utilisateurs, projets, métadonnées)]
+    LLM[[Fournisseur IA<br/>paroles M12]]
 
     UI -- HTTP /api + Bearer JWT --> API
     UI --- AUDIO
     UI --- GL
     API --> DB
     API --> DISK
+    API -. clé d'API côté serveur .-> LLM
 ```
 
 | Couche | Technologies | Responsabilité |
@@ -147,6 +154,7 @@ flowchart TB
 | Backend | Node.js, Express 5, Multer, bcryptjs, jsonwebtoken | API REST, droits, uploads |
 | Données | MongoDB + Mongoose 9 | Utilisateurs, métadonnées des pistes et projets |
 | Stockage audio | Disque serveur | Octets audio séparés des documents MongoDB |
+| Paroles IA *(prévu)* | API d'un modèle de langage, appelée par le backend | Couplets selon thème et cadence, quotas par utilisateur |
 
 **Principes clés :** une seule horloge audio pour toutes les pistes, données de projet sérialisables séparées des objets audio, projets privés par défaut, et vérification des droits côté serveur à chaque requête.
 
@@ -266,10 +274,15 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 | POST | `/auth/login` | `{email,password}` | `200 {token,user}` |
 | GET | `/users/me` | JWT | `200 User` |
 | PUT | `/users/me` | `{name}` + JWT | `200 User` |
+| PUT | `/users/me/avatar` | multipart : `avatar` (JPEG, PNG ou WebP, 2 Mo max) + JWT | `200 User` |
+| GET | `/users/me/avatar` | JWT | image (`Cache-Control: private, no-cache`) ou `404` sans photo |
+| DELETE | `/users/me/avatar` | JWT | `204` |
 | GET | `/tracks?page=1&limit=5` | JWT | `200 Page<Track>` |
 | POST | `/tracks` | multipart : `audio`, `title` + JWT | `201 Track` |
 | GET | `/tracks/:id/audio` | JWT | flux audio |
 | DELETE | `/tracks/:id` | JWT (propriétaire) | `204` |
+
+`User` contient `id`, `name`, `email`, `createdAt`, `hasAvatar` et `avatarUpdatedAt` ; le nom de stockage de la photo n'est jamais exposé. Photo de profil : le type annoncé **et** la signature binaire du fichier sont vérifiés (`400` sinon), `413` au-delà de 2 Mo, l'ancienne photo est supprimée après remplacement.
 
 `Page<Track>` contient `items`, `page`, `limit`, `total` et `pages`. Formats audio acceptés : MP3, WAV, OGG et M4A, 25 Mo maximum. Erreurs courantes : `400` validation, `401` authentification, `404` ressource absente ou non autorisée, `409` email déjà utilisé.
 
@@ -301,6 +314,28 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 15 novembre 2026 — Photo de profil (#37)
+
+- Backend : `PUT`, `GET` et `DELETE /api/users/me/avatar`. Images JPEG, PNG ou WebP de 2 Mo maximum, rangées dans `backend/data/avatars/` sous un nom aléatoire (extension tirée du type validé). Le type annoncé et la signature binaire du fichier sont contrôlés ; l'ancienne photo est supprimée après l'enregistrement de la nouvelle, et le fichier envoyé est nettoyé si MongoDB échoue.
+- Frontend : page profil refaite (photo, informations, nom). Aperçu local avant envoi, boutons Choisir / Changer / Supprimer, validation côté client, état d'envoi et messages accessibles. La photo apparaît aussi dans l'en-tête. Elle est téléchargée avec le JWT puis affichée via un ObjectURL libéré à chaque changement et à la déconnexion.
+- Correction : quand plusieurs requêtes échouaient en 401, la redirection vers `/login` s'empilait (`returnUrl` imbriqué).
+- Suivi : `AGENTS.md` impose désormais à tout agent de tenir à jour les issues et le Kanban à chaque implémentation.
+- Vérifications : backend `npm test` 8/8 (6 nouveaux tests : 401, absence de fichier, type refusé, contenu falsifié, 413, profil public) ; frontend `npm test` 44/44 (10 nouveaux) et `npm run build` réussis. Parcours réel vérifié au navigateur avec le compte de démonstration et MongoDB Atlas : connexion avec retour vers `/profile`, envoi d'une photo (PUT 200), affichage dans le profil et l'en-tête, persistance après rechargement (GET 200), refus côté client d'une image de 3 Mo sans requête, suppression (DELETE 204) avec retour à l'initiale et fichier effacé du disque. Affichage contrôlé à 1280 et 360 px sans débordement.
+
+### 15 novembre 2026 — Inscription et connexion intégrées au site (#35)
+
+- En-tête : liens **Connexion** et **S'inscrire** pour un visiteur ; une fois connecté, le nom de l'utilisateur (lien vers le profil) et **Se déconnecter**. Le profil est rechargé après un rafraîchissement de la page. Sous 1100 px, la navigation passe dans le menu repliable pour éviter tout débordement.
+- Pages `/login` et `/register` refaites au design Zakat Record : erreurs liées aux champs (`aria-describedby`), message global annoncé (`role="alert"`), bouton afficher/masquer le mot de passe, règle des 8 caractères affichée, état « en cours » et blocage des doubles envois. Le compte de démonstration n'est plus prérempli.
+- Retour à la page demandée après connexion (`returnUrl`, limité aux chemins internes pour éviter les redirections ouvertes) ; page par défaut : `/projects`. Un utilisateur déjà connecté est renvoyé hors de `/login` et `/register`.
+- L'intercepteur ne déconnecte plus sur le 401 de la route de connexion (mauvais identifiants). Les erreurs 0 et 502–504 affichent « Serveur injoignable ».
+- Vérifications : `npm test` 34/34 (24 nouveaux tests : pages, guards, intercepteur, en-tête, utilitaires) et `npm run build` réussis. Au navigateur : redirection vers `/login?returnUrl=…`, validations, en-tête connecté et déconnexion à 1280, 1024 et 360 px sans débordement horizontal. **Non vérifié** : une connexion réelle de bout en bout, car le cluster MongoDB Atlas refusait l'adresse IP du poste (backend arrêté au démarrage).
+
+### 15 novembre 2026 — Nouvelle mission M12 : paroles par IA
+
+- Ajout au cahier de la mission **M12 · Assistant d'écriture de paroles par IA** : génération de couplets à partir d'un thème et de la cadence du projet (BPM, mesures, densité de syllabes, schéma de rimes), édition, prompteur synchronisé et sauvegarde.
+- Choix de principe : l'appel au fournisseur d'IA passe **uniquement par le backend** (clé jamais exposée), avec validation des entrées, quotas par utilisateur et refus d'imiter un artiste réel. Le fournisseur reste à choisir via un spike.
+- Aucune ligne de code pour l'instant : documentation et tableau Kanban uniquement.
 
 ### 15 novembre 2026 — Accueil 3D « Zakat Record »
 

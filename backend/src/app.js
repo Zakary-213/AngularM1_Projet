@@ -12,11 +12,14 @@ import { Track } from "./models/Track.js";
 // Les fichiers audio restent sur le disque du serveur dans ce TP.
 // MongoDB ne conserve que leurs métadonnées : titre, nom, taille, etc.
 const UPLOADS = path.resolve("data/uploads");
+// Les photos de profil sont rangées à part pour ne jamais être confondues avec l'audio.
+const AVATARS = path.resolve("data/avatars");
 
 try {
   // mkdirSync est utilisé au démarrage : l'application doit disposer de ce
   // dossier avant de pouvoir accepter le premier upload.
   fs.mkdirSync(UPLOADS, { recursive: true });
+  fs.mkdirSync(AVATARS, { recursive: true });
   console.log(`[startup] Dossier des uploads prêt : ${UPLOADS}`);
 } catch (error) {
   console.error("[startup] Impossible de créer le dossier des uploads", error);
@@ -39,6 +42,69 @@ const allowed = new Set([
   "audio/mp4",
   "audio/x-m4a",
 ]);
+
+// Photo de profil : 2 Mo suffisent pour une image affichée en petit format.
+const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
+
+// Types d'image acceptés et extension de stockage associée. L'extension vient
+// du type validé, jamais du nom de fichier fourni par l'utilisateur.
+const AVATAR_TYPES = new Map([
+  ["image/jpeg", ".jpg"],
+  ["image/png", ".png"],
+  ["image/webp", ".webp"],
+]);
+
+/** Erreur de validation de fichier, renvoyée en 400 par le gestionnaire central. */
+class FileValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "FileValidationError";
+  }
+}
+
+/**
+ * Le type MIME annoncé par le navigateur peut être falsifié : on vérifie aussi
+ * la signature binaire (« magic number ») du fichier écrit sur le disque.
+ */
+async function hasImageSignature(filePath, mimeType) {
+  const handle = await fsPromises.open(filePath, "r");
+  try {
+    const header = Buffer.alloc(12);
+    await handle.read(header, 0, 12, 0);
+    if (mimeType === "image/jpeg") return header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+    if (mimeType === "image/png") return header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    if (mimeType === "image/webp") return header.toString("ascii", 0, 4) === "RIFF" && header.toString("ascii", 8, 12) === "WEBP";
+    return false;
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Supprime un fichier en journalisant l'échec : un fichier orphelin doit rester visible. */
+async function removeFile(filePath, context) {
+  try {
+    await fsPromises.unlink(filePath);
+    console.log(`[${context}] Fichier supprimé : ${path.basename(filePath)}`);
+  } catch (error) {
+    console.error(`[${context}] Fichier non supprimé : ${path.basename(filePath)}`, error);
+  }
+}
+
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_request, _file, callback) => callback(null, AVATARS),
+    filename: (_request, file, callback) =>
+      callback(null, crypto.randomUUID() + AVATAR_TYPES.get(file.mimetype)),
+  }),
+  limits: { fileSize: MAX_AVATAR_SIZE, files: 1 },
+  fileFilter: (_request, file, callback) => {
+    if (AVATAR_TYPES.has(file.mimetype)) {
+      return callback(null, true);
+    }
+    console.warn(`[avatar] Type refusé : ${file.mimetype}`);
+    return callback(new FileValidationError("Image JPEG, PNG ou WebP requise"));
+  },
+});
 
 /**
  * Crée un jeton JWT contenant uniquement l'identité nécessaire à l'API.
@@ -267,6 +333,93 @@ export function createApp() {
     }
   });
 
+  /**
+   * Remplace la photo de profil de l'utilisateur connecté.
+   * Multer écrit le fichier sous un nom aléatoire ; l'ancien fichier n'est
+   * supprimé qu'après l'enregistrement réussi du nouveau dans MongoDB.
+   */
+  app.put("/api/users/me/avatar", auth, avatarUpload.single("avatar"), async (req, res, next) => {
+    if (!req.file) {
+      console.warn(`[avatar] Envoi sans fichier par ${req.auth.sub}`);
+      return res.status(400).json({ message: "Image requise" });
+    }
+    const uploadedPath = path.join(AVATARS, req.file.filename);
+    try {
+      if (!(await hasImageSignature(uploadedPath, req.file.mimetype))) {
+        console.warn(`[avatar] Contenu ne correspondant pas au type ${req.file.mimetype}`);
+        await removeFile(uploadedPath, "avatar");
+        return res.status(400).json({ message: "Le fichier n'est pas une image valide" });
+      }
+
+      const user = await User.findById(req.auth.sub).select("+avatarStoredName");
+      if (!user) {
+        await removeFile(uploadedPath, "avatar");
+        return res.status(404).json({ message: "Utilisateur inconnu" });
+      }
+
+      const previous = user.avatarStoredName;
+      user.avatarStoredName = req.file.filename;
+      user.avatarMimeType = req.file.mimetype;
+      user.avatarUpdatedAt = new Date();
+      await user.save();
+      console.log(`[avatar] Photo mise à jour : ${user.id}`);
+
+      if (previous) {
+        await removeFile(path.join(AVATARS, previous), "avatar");
+      }
+      res.json(user.toPublic());
+    } catch (error) {
+      console.error("[avatar] Erreur d'enregistrement de la photo", error);
+      await removeFile(uploadedPath, "avatar");
+      next(error);
+    }
+  });
+
+  /** Envoie la photo de profil de l'utilisateur connecté. */
+  app.get("/api/users/me/avatar", auth, async (req, res, next) => {
+    try {
+      const user = await User.findById(req.auth.sub).select("+avatarStoredName");
+      if (!user?.avatarStoredName) {
+        return res.status(404).json({ message: "Aucune photo de profil" });
+      }
+      res.type(user.avatarMimeType);
+      // Image personnelle : pas de cache partagé ; nosniff empêche toute réinterprétation du type.
+      res.set({ "Cache-Control": "private, no-cache", "X-Content-Type-Options": "nosniff" });
+      res.sendFile(path.join(AVATARS, user.avatarStoredName), (error) => {
+        if (error) {
+          console.error(`[avatar] Erreur d'envoi de la photo ${user.id}`, error);
+          if (!res.headersSent) next(error);
+        }
+      });
+    } catch (error) {
+      console.error("[avatar] Erreur de lecture de la photo", error);
+      next(error);
+    }
+  });
+
+  /** Retire la photo de profil et supprime son fichier. */
+  app.delete("/api/users/me/avatar", auth, async (req, res, next) => {
+    try {
+      const user = await User.findById(req.auth.sub).select("+avatarStoredName");
+      if (!user) {
+        return res.status(404).json({ message: "Utilisateur inconnu" });
+      }
+      const previous = user.avatarStoredName;
+      user.avatarStoredName = undefined;
+      user.avatarMimeType = undefined;
+      user.avatarUpdatedAt = undefined;
+      await user.save();
+      if (previous) {
+        await removeFile(path.join(AVATARS, previous), "avatar");
+      }
+      console.log(`[avatar] Photo retirée : ${user.id}`);
+      res.status(204).end();
+    } catch (error) {
+      console.error("[avatar] Erreur de suppression de la photo", error);
+      next(error);
+    }
+  });
+
   /** Retourne une page des pistes appartenant exclusivement à l'utilisateur. */
   app.get("/api/tracks", auth, async (req, res, next) => {
     try {
@@ -442,8 +595,12 @@ export function createApp() {
   app.use((error, _req, res, next) => {
     console.error("[error] Erreur reçue par le gestionnaire central", error);
 
+    if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE" && error.field === "avatar") {
+      return res.status(413).json({ message: "Image trop lourde (2 Mo maximum)" });
+    }
     if (
       error instanceof multer.MulterError ||
+      error instanceof FileValidationError ||
       error?.message === "Format audio non accepté"
     ) {
       return res.status(400).json({ message: error.message });

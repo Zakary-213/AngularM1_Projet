@@ -14,6 +14,18 @@
       @for (item of navigation; track item.path) {
         <a [routerLink]="item.path" routerLinkActive="active" ariaCurrentWhenActive="page" (click)="menuOpen.set(false)">{{ item.label }}</a>
       }
+      <div class="header-account">
+        @if (auth.isAuthenticated()) {
+          <a class="account-link" routerLink="/profile" routerLinkActive="active" ariaCurrentWhenActive="page" (click)="menuOpen.set(false)">
+            <span class="account-avatar" aria-hidden="true">{{ (auth.currentUser()?.name?.charAt(0) ?? '♪').toUpperCase() }}</span>
+            <span>{{ auth.currentUser()?.name ?? 'Mon compte' }}</span>
+          </a>
+          <button type="button" class="account-logout" (click)="logout()">Se déconnecter</button>
+        } @else {
+          <a class="account-login" routerLink="/login" routerLinkActive="active" ariaCurrentWhenActive="page" (click)="menuOpen.set(false)">Connexion</a>
+          <a class="button account-register" routerLink="/register" routerLinkActive="active" ariaCurrentWhenActive="page" (click)="menuOpen.set(false)">S’inscrire</a>
+        }
+      </div>
       <a class="button header-cta" routerLink="/studio" routerLinkActive="active-studio" ariaCurrentWhenActive="page" (click)="menuOpen.set(false)">Ouvrir le studio <span aria-hidden="true">↗</span></a>
     </nav>
   </header>

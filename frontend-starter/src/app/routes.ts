@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './shared/guards/auth.guard';
+import { guestGuard } from './shared/guards/guest.guard';
 import { LoginPageComponent } from './components/login-page/login-page';
 import { ProfilePageComponent } from './components/profile-page/profile-page';
 import { RegisterPageComponent } from './components/register-page/register-page';
@@ -13,9 +14,9 @@ export const routes: Routes = [
   { path: 'library', title: 'Bibliothèque · Zakat Record', loadComponent: () => import('./components/library-page/library-page').then(m => m.LibraryPageComponent) },
   { path: 'collaborations', title: 'Collaborations · Zakat Record', loadComponent: () => import('./components/collaborations-page/collaborations-page').then(m => m.CollaborationsPageComponent) },
   { path: 'publications', title: 'Publications · Zakat Record', loadComponent: () => import('./components/publications-page/publications-page').then(m => m.PublicationsPageComponent) },
-  { path: 'login', component: LoginPageComponent },
-  { path: 'register', component: RegisterPageComponent },
-  { path: 'profile', component: ProfilePageComponent, canActivate: [authGuard] },
+  { path: 'login', title: 'Connexion · Zakat Record', component: LoginPageComponent, canActivate: [guestGuard] },
+  { path: 'register', title: 'Inscription · Zakat Record', component: RegisterPageComponent, canActivate: [guestGuard] },
+  { path: 'profile', title: 'Mon profil · Zakat Record', component: ProfilePageComponent, canActivate: [authGuard] },
   { path: 'tracks', component: TracksPageComponent, canActivate: [authGuard] },
   { path: '**', redirectTo: 'home' },
 ];

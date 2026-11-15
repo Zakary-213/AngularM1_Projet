@@ -18,9 +18,10 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
 
   return next(req).pipe(
     catchError((error: HttpErrorResponse) => {
-      if (error.status === 401) {
+      // A 401 on login means wrong credentials: the login page shows it itself.
+      if (error.status === 401 && !request.url.startsWith('/api/auth/')) {
         auth.logout();
-        void router.navigateByUrl('/login');
+        void router.navigate(['/login'], { queryParams: { returnUrl: router.url } });
       }
       return throwError(() => error);
     })

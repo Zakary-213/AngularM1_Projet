@@ -1,22 +1,55 @@
-<section class="card">
-  <h1>Créer un compte</h1>
-  <form [formGroup]="form" (ngSubmit)="submit()">
-    <label>Nom<input formControlName="name" /></label>
-    @if (form.controls.name.invalid && form.controls.name.touched) {
-      <p style="color: red; font-size: 0.8rem; margin: 0">Nom requis</p>
+<section class="auth-page" aria-labelledby="register-title">
+  <div class="auth-intro">
+    <p class="eyebrow">ZAKAT RECORD / NOUVEAU COMPTE</p>
+    <h1 id="register-title">Lancez votre studio<span>.</span></h1>
+    <p>Un compte gratuit pour composer, enregistrer et garder vos projets privés.</p>
+  </div>
+
+  <form class="auth-form" [formGroup]="form" (ngSubmit)="submit()" novalidate>
+    @if (error()) {
+      <p class="auth-alert" role="alert">{{ error() }}</p>
     }
-    <label>Email<input type="email" formControlName="email" /></label>
-    @if (form.controls.email.invalid && form.controls.email.touched) {
-      <p style="color: red; font-size: 0.8rem; margin: 0">Email invalide ou manquant</p>
-    }
-    <label>Mot de passe<input type="password" formControlName="password" /></label>
-    @if (form.controls.password.invalid && form.controls.password.touched) {
-      <p style="color: red; font-size: 0.8rem; margin: 0">Mot de passe requis</p>
-    }
-    <button type="submit" [disabled]="form.invalid">Créer mon compte</button>
+
+    <div class="auth-field">
+      <label for="register-name">Nom d’artiste</label>
+      <input id="register-name" formControlName="name" autocomplete="nickname"
+             [attr.aria-invalid]="form.controls.name.invalid && form.controls.name.touched"
+             [attr.aria-describedby]="form.controls.name.invalid && form.controls.name.touched ? 'register-name-error' : null" />
+      @if (form.controls.name.invalid && form.controls.name.touched) {
+        <p class="field-error" id="register-name-error">Indiquez votre nom ou nom d’artiste.</p>
+      }
+    </div>
+
+    <div class="auth-field">
+      <label for="register-email">Email</label>
+      <input id="register-email" type="email" formControlName="email" autocomplete="email"
+             [attr.aria-invalid]="form.controls.email.invalid && form.controls.email.touched"
+             [attr.aria-describedby]="form.controls.email.invalid && form.controls.email.touched ? 'register-email-error' : null" />
+      @if (form.controls.email.invalid && form.controls.email.touched) {
+        <p class="field-error" id="register-email-error">Saisissez une adresse email valide.</p>
+      }
+    </div>
+
+    <div class="auth-field">
+      <label for="register-password">Mot de passe</label>
+      <div class="password-input">
+        <input id="register-password" [type]="showPassword() ? 'text' : 'password'" formControlName="password" autocomplete="new-password"
+               [attr.aria-invalid]="form.controls.password.invalid && form.controls.password.touched"
+               [attr.aria-describedby]="form.controls.password.invalid && form.controls.password.touched ? 'register-password-hint register-password-error' : 'register-password-hint'" />
+        <button type="button" class="password-toggle" [attr.aria-pressed]="showPassword()" (click)="showPassword.set(!showPassword())">
+          {{ showPassword() ? 'Masquer' : 'Afficher' }}<span class="visually-hidden"> le mot de passe</span>
+        </button>
+      </div>
+      <p class="field-hint" id="register-password-hint">Au moins {{ passwordMinLength }} caractères.</p>
+      @if (form.controls.password.invalid && form.controls.password.touched) {
+        <p class="field-error" id="register-password-error">Le mot de passe doit contenir au moins {{ passwordMinLength }} caractères.</p>
+      }
+    </div>
+
+    <button type="submit" class="button primary auth-submit" [disabled]="submitting()">
+      {{ submitting() ? 'Création du compte…' : 'Créer mon compte' }} <span aria-hidden="true">↗</span>
+    </button>
+
+    <p class="auth-switch">Déjà inscrit ? <a routerLink="/login" queryParamsHandling="preserve">Se connecter</a></p>
   </form>
-  @if (error()) {
-    <p class="error">{{ error() }}</p>
-  }
-  <p><a routerLink="/login">Déjà inscrit ?</a></p>
 </section>

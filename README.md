@@ -76,7 +76,7 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 
 | Domaine | Fonctionnalité | Statut |
 |---|---|---|
-| Comptes | Inscription, connexion JWT, profil | ✅ Fonctionnel |
+| Comptes | Inscription, connexion JWT, profil, déconnexion depuis l’en-tête | ✅ Fonctionnel |
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Hero 3D interactif (instruments lumineux, son d'ambiance synthétisé) | ✅ Fonctionnel |
 | Interface | Pages Projets, Studio, Bibliothèque, Collaborations, Publications | 🎨 Maquette |
@@ -309,6 +309,14 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 15 novembre 2026 — Inscription et connexion intégrées au site (#35)
+
+- En-tête : liens **Connexion** et **S'inscrire** pour un visiteur ; une fois connecté, le nom de l'utilisateur (lien vers le profil) et **Se déconnecter**. Le profil est rechargé après un rafraîchissement de la page. Sous 1100 px, la navigation passe dans le menu repliable pour éviter tout débordement.
+- Pages `/login` et `/register` refaites au design Zakat Record : erreurs liées aux champs (`aria-describedby`), message global annoncé (`role="alert"`), bouton afficher/masquer le mot de passe, règle des 8 caractères affichée, état « en cours » et blocage des doubles envois. Le compte de démonstration n'est plus prérempli.
+- Retour à la page demandée après connexion (`returnUrl`, limité aux chemins internes pour éviter les redirections ouvertes) ; page par défaut : `/projects`. Un utilisateur déjà connecté est renvoyé hors de `/login` et `/register`.
+- L'intercepteur ne déconnecte plus sur le 401 de la route de connexion (mauvais identifiants). Les erreurs 0 et 502–504 affichent « Serveur injoignable ».
+- Vérifications : `npm test` 34/34 (24 nouveaux tests : pages, guards, intercepteur, en-tête, utilitaires) et `npm run build` réussis. Au navigateur : redirection vers `/login?returnUrl=…`, validations, en-tête connecté et déconnexion à 1280, 1024 et 360 px sans débordement horizontal. **Non vérifié** : une connexion réelle de bout en bout, car le cluster MongoDB Atlas refusait l'adresse IP du poste (backend arrêté au démarrage).
 
 ### 15 novembre 2026 — Nouvelle mission M12 : paroles par IA
 

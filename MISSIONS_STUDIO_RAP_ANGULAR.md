@@ -48,7 +48,7 @@ flowchart TD
 
 ### ⛔ Hors périmètre pour cette version
 
-- Génération automatique d'instrumentales par IA.
+- Génération automatique d'instrumentales par IA (l'assistant d'écriture de paroles de **M12** ne génère que du texte).
 - Suppression/séparation de la voix d'un rappeur sur un morceau existant.
 - Clonage de voix, imitation d'artistes, plateforme sociale et collaboration en temps réel.
 - Reproduction complète d'un logiciel commercial comme FL Studio.
@@ -92,6 +92,7 @@ L'interface doit être **riche mais progressive** : les panneaux s'ouvrent selon
 | Formes d'onde | **WaveSurfer.js** ou rendu personnalisé | Représentation des pistes audio |
 | Microphone | **getUserMedia + MediaRecorder** | Capture de voix |
 | Correction de hauteur | **Moteur dédié à sélectionner et tester** | Détection et modification de la hauteur des notes vocales |
+| Paroles IA | **API d'un modèle de langage, appelée uniquement par le backend** | Proposition de couplets selon le thème et la cadence |
 | Export | **OfflineAudioContext et/ou FFmpeg** | Assemblage, rendu, conversion |
 | Stockage audio | Fichiers sur serveur (ou stockage objet ultérieur) | Instrumentales importées, voix, échantillons |
 
@@ -379,6 +380,46 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 ---
 
+## M12 · Assistant d'écriture de paroles par IA
+
+**But :** aider l'artiste à démarrer ou débloquer un texte en générant des paroles adaptées au **thème** choisi et à la **cadence** de la prod.
+
+### A. Paramètres de génération
+
+- [ ] Saisir un **thème** (ex. « la nuit en ville », « revanche », « famille ») et une **ambiance** (sombre, mélancolique, ego-trip, festive…).
+- [ ] Reprendre automatiquement le **BPM**, la **signature rythmique** et la **tonalité** du projet.
+- [ ] Choisir la structure : **couplet / refrain / pont**, et le nombre de **mesures** (4, 8, 16).
+- [ ] Choisir la **densité du flow** (syllabes par temps : posé, standard, rapide) et le **schéma de rimes** (AABB, ABAB, rimes internes).
+- [ ] Choisir la langue (français par défaut) et un niveau de langage.
+
+### B. Génération côté serveur
+
+- [ ] Créer une route protégée `POST /api/projects/:id/lyrics/generate` : le **backend** appelle le fournisseur d'IA, **la clé d'API ne transite jamais par le navigateur**.
+- [ ] Valider et borner chaque entrée (longueur du thème, mesures, options autorisées).
+- [ ] Construire la consigne envoyée au modèle à partir du thème et de la cadence calculée : **nombre de syllabes visé par mesure** dérivé du BPM et de la densité choisie.
+- [ ] Demander une réponse **structurée** (lignes regroupées par mesure, syllabes estimées, rimes) et la valider avant de la renvoyer.
+- [ ] Limiter le nombre de générations par utilisateur et par jour (**coût et abus**), gérer délai dépassé, quota et indisponibilité du fournisseur avec un message clair.
+- [ ] Refuser les demandes visant à **imiter un artiste réel** ou à reproduire des paroles existantes, et ne pas produire de contenu haineux ou harcelant.
+- [ ] Ne pas journaliser les textes ni les thèmes complets ; ne jamais envoyer au fournisseur d'autres données que celles nécessaires.
+
+### C. Interface dans le studio
+
+- [ ] Ajouter un panneau **Paroles** dans l'éditeur inférieur du studio.
+- [ ] Afficher les lignes **alignées sur les mesures** de la timeline, avec le compte de syllabes et les rimes surlignées.
+- [ ] Permettre de **régénérer une ligne ou un bloc**, d'éditer librement le texte et d'annuler.
+- [ ] Faire défiler les paroles pendant la lecture (prompteur) à partir de **l'horloge audio commune**.
+- [ ] Indiquer clairement qu'il s'agit d'une **proposition générée par IA** que l'artiste doit retravailler.
+- [ ] Sauvegarder les paroles dans le projet (version courante + historique court), sans régénération automatique.
+
+> [!NOTE]
+> Le modèle ne « entend » pas la prod : la cadence lui est transmise sous forme de chiffres (BPM, mesures, syllabes visées). Le compte de syllabes reste une **estimation** ; l'artiste ajuste le texte à son flow réel lors de l'enregistrement (M8).
+
+**Livrable :** panneau Paroles avec génération, édition, prompteur synchronisé et sauvegarde.
+
+**Critère de validation :** pour un thème et un BPM donnés, l'assistant propose un couplet de 8 ou 16 mesures dont la longueur des lignes suit la densité demandée ; le texte est modifiable, sauvegardé avec le projet et défile en rythme pendant la lecture. Une panne ou un quota atteint affiche un message sans bloquer le studio.
+
+---
+
 ## 🗂️ 5. Ordre d'exécution conseillé
 
 | Phase | Missions | Ce qu'on peut montrer |
@@ -387,6 +428,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 | **Création musicale** | M3 → M4 → M5 | Une prod complète, écoutable et arrangée |
 | **Import et mix** | M6 → M7 | Une prod MP3/WAV importée, réglable et mixable |
 | **Voix et correction** | M8 → M9 | Enregistrement vocal et correction de hauteur |
+| **Écriture** | M12 | Paroles générées selon le thème et la cadence, éditées et affichées en prompteur |
 | **Finalisation** | M10 → M11 | Projet sauvegardé, morceau exporté, tests |
 
 **Dépendance à garder en tête :** **M9 doit être validée techniquement dès M0**, même si son interface finale est réalisée plus tard. C'est la fonctionnalité la plus incertaine du périmètre.
@@ -402,7 +444,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 3. Ajouter une basse 808 et une mélodie au Piano Roll.
 4. Écouter les éléments ensemble et construire l'arrangement sur la timeline.
 5. Ajuster les niveaux/effets et sauvegarder.
-6. Enregistrer un couplet au micro, créer une deuxième prise si nécessaire.
+6. Générer un couplet avec l'assistant de paroles à partir d'un thème, l'ajuster, puis l'enregistrer au micro en suivant le prompteur ; créer une deuxième prise si nécessaire.
 7. Appliquer la correction vocale et comparer le résultat.
 8. Exporter en WAV, puis rouvrir le projet pour prouver qu'il reste modifiable.
 
@@ -426,8 +468,9 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [ ] Une correction de hauteur vocale est **audible, réglable et conservée**.
 - [ ] Les projets et leurs pistes restent **éditables après sauvegarde et réouverture**.
 - [ ] L'utilisateur peut **exporter un morceau final** synchronisé.
+- [ ] Des **paroles** peuvent être générées selon le thème et la cadence, éditées et sauvegardées.
 - [ ] Les projets privés sont protégés et les principaux parcours sont testés.
 
 ---
 
-> **Résumé :** un **studio unique** avec **2 entrées** (composer ou importer), **1 espace vocal commun**, **1 mixer**, **1 sauvegarde éditable** et **1 export audio**. Pas de génération IA ni de séparation de voix dans cette version.
+> **Résumé :** un **studio unique** avec **2 entrées** (composer ou importer), **1 espace vocal commun**, **1 mixer**, **1 sauvegarde éditable** et **1 export audio**. **1 assistant de paroles par IA**. Pas de génération audio par IA ni de séparation de voix dans cette version.

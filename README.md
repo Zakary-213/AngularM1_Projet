@@ -58,6 +58,8 @@ flowchart LR
     B -->|Composer| C[Studio multipiste]
     B -->|Importer| C
     C --> D[🎙️ Enregistrement voix]
+    P[✍️ Paroles IA<br/>thème + cadence] --> D
+    C --> P
     D --> E[🎯 Correction de hauteur]
     E --> F[🎛️ Mixage]
     F --> G[⬇️ Export WAV]
@@ -66,7 +68,7 @@ flowchart LR
 
 ### Hors périmètre (V1)
 
-Génération d'instrumentales par IA, séparation de voix, clonage vocal et correction de hauteur **en direct** pendant la prise. La collaboration temps réel et la publication sont envisagées mais doivent d'abord être validées (voir [AGENTS.md](AGENTS.md)).
+Génération **audio** par IA (instrumentales), séparation de voix, clonage vocal et correction de hauteur **en direct** pendant la prise. La collaboration temps réel et la publication sont envisagées mais doivent d'abord être validées (voir [AGENTS.md](AGENTS.md)).
 
 ---
 
@@ -83,6 +85,7 @@ Génération d'instrumentales par IA, séparation de voix, clonage vocal et corr
 | Import | Instrumentale MP3 / WAV, forme d'onde, égaliseur | ⏳ À faire (M6) |
 | Mix | Volume, mute / solo, pan, EQ, réverbération, delay | ⏳ À faire (M7) |
 | Voix | Enregistrement multiprise, correction de hauteur | ⏳ À faire (M8, M9) |
+| ✍️ Paroles IA | Génération de couplets selon le thème et la cadence (BPM, mesures, flow), édition, prompteur synchronisé | ⏳ À faire (M12) |
 | Livraison | Sauvegarde complète, export WAV, tests de bout en bout | ⏳ À faire (M10, M11) |
 
 ---
@@ -108,8 +111,10 @@ gantt
     section Voix
     M8 Enregistrement            :m8, after m7, 7d
     M9 Correction de hauteur     :m9, after m8, 7d
+    section Écriture
+    M12 Paroles IA               :m12, after m9, 7d
     section Finalisation
-    M10 Sauvegarde et export     :m10, after m9, 7d
+    M10 Sauvegarde et export     :m10, after m12, 7d
     M11 Tests et livraison       :m11, after m10, 5d
 ```
 
@@ -131,12 +136,14 @@ flowchart TB
         DISK[(Fichiers audio<br/>sur disque)]
     end
     DB[(MongoDB Atlas<br/>utilisateurs, projets, métadonnées)]
+    LLM[[Fournisseur IA<br/>paroles M12]]
 
     UI -- HTTP /api + Bearer JWT --> API
     UI --- AUDIO
     UI --- GL
     API --> DB
     API --> DISK
+    API -. clé d'API côté serveur .-> LLM
 ```
 
 | Couche | Technologies | Responsabilité |
@@ -147,6 +154,7 @@ flowchart TB
 | Backend | Node.js, Express 5, Multer, bcryptjs, jsonwebtoken | API REST, droits, uploads |
 | Données | MongoDB + Mongoose 9 | Utilisateurs, métadonnées des pistes et projets |
 | Stockage audio | Disque serveur | Octets audio séparés des documents MongoDB |
+| Paroles IA *(prévu)* | API d'un modèle de langage, appelée par le backend | Couplets selon thème et cadence, quotas par utilisateur |
 
 **Principes clés :** une seule horloge audio pour toutes les pistes, données de projet sérialisables séparées des objets audio, projets privés par défaut, et vérification des droits côté serveur à chaque requête.
 
@@ -301,6 +309,12 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 15 novembre 2026 — Nouvelle mission M12 : paroles par IA
+
+- Ajout au cahier de la mission **M12 · Assistant d'écriture de paroles par IA** : génération de couplets à partir d'un thème et de la cadence du projet (BPM, mesures, densité de syllabes, schéma de rimes), édition, prompteur synchronisé et sauvegarde.
+- Choix de principe : l'appel au fournisseur d'IA passe **uniquement par le backend** (clé jamais exposée), avec validation des entrées, quotas par utilisateur et refus d'imiter un artiste réel. Le fournisseur reste à choisir via un spike.
+- Aucune ligne de code pour l'instant : documentation et tableau Kanban uniquement.
 
 ### 15 novembre 2026 — Accueil 3D « Zakat Record »
 

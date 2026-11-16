@@ -2,6 +2,7 @@ import { Component, OnDestroy, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { PitchLabPanelComponent } from '../pitch-lab-panel/pitch-lab-panel';
 import { AudioEngineService } from '../../shared/audio/audio-engine.service';
 import { AUDIO_FILE_ACCEPT, validateAudioFile } from '../../shared/audio/audio-file';
 import { DRUM_VOICES, DRUM_VOICE_LABELS, DrumPattern, DrumVoice, createDemoPattern, toggleStep } from '../../shared/audio/drum-pattern';
@@ -40,12 +41,12 @@ interface ExportReport {
 }
 
 /**
- * Prototype M0 : vérifie la lecture synchronisée, le séquenceur, la prise micro
- * et l'export avant de construire le vrai studio. Page volontairement isolée.
+ * Prototype M0 : vérifie la lecture synchronisée, le séquenceur, la prise micro,
+ * l'export et la correction de hauteur avant de construire le vrai studio. Page volontairement isolée.
  */
 @Component({
   selector: 'app-audio-lab-page',
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, PitchLabPanelComponent],
   templateUrl: './audio-lab-page.html',
   styleUrl: './audio-lab-page.css',
 })

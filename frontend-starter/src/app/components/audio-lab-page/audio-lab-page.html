@@ -2,7 +2,7 @@
   <div>
     <p class="eyebrow">PROTOTYPE TECHNIQUE · M0</p>
     <h1>Labo audio<span>.</span></h1>
-    <p class="muted">Banc d'essai du moteur audio : séquenceur, lecture synchronisée, prise micro et export WAV. Rien n'est enregistré sur le serveur.</p>
+    <p class="muted">Banc d'essai du moteur audio : séquenceur, lecture synchronisée, prise micro, export WAV et correction de hauteur. Rien n'est enregistré sur le serveur.</p>
   </div>
   <a class="button secondary" routerLink="/studio">Retour au studio</a>
 </section>
@@ -120,4 +120,8 @@
     }
   </div>
   @if (exportError(); as message) { <p class="error" role="alert">{{ message }}</p> }
+</section>
+
+<section class="panel lab-section" aria-labelledby="pitch-title">
+  <app-pitch-lab-panel [take]="take()?.buffer ?? null" />
 </section>

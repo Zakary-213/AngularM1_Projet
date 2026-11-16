@@ -85,7 +85,8 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Composition | Drum Rack, Piano Roll, instruments, timeline | ⏳ À faire (M3 → M5) |
 | Import | Instrumentale MP3 / WAV, forme d'onde, égaliseur | ⏳ À faire (M6) |
 | Mix | Volume, mute / solo, pan, EQ, réverbération, delay | ⏳ À faire (M7) |
-| Voix | Enregistrement multiprise, correction de hauteur | ⏳ À faire (M8, M9) |
+| Voix | Prototype : prise micro et correction de hauteur (YIN + PSOLA) dans `/audio-lab` | 🧪 Prototype M0 |
+| Voix (studio) | Enregistrement multiprise, correction sur les pistes | ⏳ À faire (M8, M9) |
 | ✍️ Paroles IA | Génération de couplets selon le thème et la cadence (BPM, mesures, flow), édition, prompteur synchronisé | ⏳ À faire (M12) |
 | Livraison | Sauvegarde complète, export WAV, tests de bout en bout | ⏳ À faire (M10, M11) |
 
@@ -179,7 +180,7 @@ flowchart TB
 │   └── public/                  # Polices locales et licences
 ├── backend/                     # API Express
 │   ├── src/app.js               # Routes et middlewares
-│   ├── src/models/              # Schémas Mongoose (User, Track)
+│   ├── src/models/              # Schémas Mongoose (User, Track, MusicalProject)
 │   └── test/                    # Tests node:test
 ├── .github/                     # CI, modèles d'issues et de PR, Dependabot
 ├── captures/                    # Captures de vérification
@@ -262,7 +263,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **67 / 67 tests frontend réussis**, build OK (16 novembre 2026).
+Dernier résultat connu : **81 / 81 tests frontend** et **15 / 15 tests backend** réussis, build OK (16 novembre 2026).
 
 ---
 
@@ -288,6 +289,23 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 `User` contient `id`, `name`, `email`, `createdAt`, `hasAvatar` et `avatarUpdatedAt` ; le nom de stockage de la photo n'est jamais exposé. Photo de profil : le type annoncé **et** la signature binaire du fichier sont vérifiés (`400` sinon), `413` au-delà de 2 Mo, l'ancienne photo est supprimée après remplacement.
 
 `Page<Track>` contient `items`, `page`, `limit`, `total` et `pages`. Formats audio acceptés : MP3, WAV, OGG et M4A, 25 Mo maximum. Erreurs courantes : `400` validation, `401` authentification, `404` ressource absente ou non autorisée, `409` email déjà utilisé.
+
+### Projets musicaux — format v1 et routes prévues (M1, non implémentées)
+
+Définis en M0 (#5) pour l'issue #7. Le schéma est `backend/src/models/MusicalProject.js` (validé par `backend/test/musical-project.test.js`) ; les routes ci-dessous ne répondent pas encore.
+
+| Méthode | Route | Requête | Réponse principale |
+|---|---|---|---|
+| GET | `/projects?page=1&limit=10` | JWT | `200 Page<ProjectSummary>` (id, title, origin, bpm, updatedAt) |
+| POST | `/projects` | `{title, origin: "create"\|"import", bpm?}` + JWT | `201 Project` |
+| GET | `/projects/:id` | JWT (propriétaire) | `200 Project` |
+| PUT | `/projects/:id` | `{revision, title, bpm, key, tracks, patterns, master}` + JWT | `200 Project` (révision + 1) |
+| PATCH | `/projects/:id` | `{title}` + JWT | `200 Project` (renommage) |
+| DELETE | `/projects/:id` | JWT (propriétaire) | `204` |
+
+`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`), `tracks[]` (16 max. ; `id` stable, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `volume` 0 à 1, `pan` −1 à 1, `mute`, `solo`, `clips[]`), `patterns[]` (64 max. ; lignes de batterie de 16 pas, notes MIDI), `master.volume`, `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+
+Règles prévues : `ownerId` vient du JWT, jamais du corps ; seuls les champs listés sont copiés (liste blanche) ; `404` pour un projet absent **ou** d'un autre utilisateur ; `400` validation ; `409` si `revision` ne correspond plus (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `422` si `formatVersion` n'est pas pris en charge (le projet n'est pas réécrit).
 
 ---
 
@@ -317,6 +335,33 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 16 novembre 2026 — M0 (suite) : format de projet et correction de hauteur (#5, #6)
+
+**Format de sauvegarde v1** : schéma Mongoose `MusicalProject` versionné (`formatVersion: 1`), limites nommées (`PROJECT_LIMITS`), identifiants stables générés par le client, positions de clips en temps, octets audio hors du document, `revision` pour refuser une sauvegarde concurrente. Routes M1 décrites dans le « Contrat d'API » (non implémentées).
+
+**Prototype de correction de hauteur** (section 6 du labo `/audio-lab`, code dans `shared/audio/pitch/`) :
+
+- **Analyse** : YIN toutes les 5 ms sur le signal sous-échantillonné à ≈ 11 kHz, fenêtre de 40 ms, tessiture 70 Hz à 1 kHz, trames silencieuses ignorées.
+- **Cible** : note la plus proche dans la tonalité et la gamme (majeur ou mineur) ; **intensité** = part de l'écart corrigée ; **vitesse de recalage** = lissage en ms (0 ms = effet robotique). Préréglages *Naturel* (60 %, 80 ms) et *Effet marqué* (100 %, 0 ms).
+- **Synthèse** : TD-PSOLA (grains de deux périodes ré-espacés) : la hauteur change, **la durée est conservée**. L'original n'est jamais modifié ; la version corrigée est un nouveau buffer, écoutable en A/B et téléchargeable en WAV.
+- **Limites** : traitement sur le thread de l'interface (30 s maximum : ≈ 60 ms mesurées pour 3 s de voix sur la machine de test, à déporter dans un Web Worker si les prises réelles le justifient) ; marques de période approximatives, donc un grain audible possible sur les transitions ; formants non préservés pour les grands écarts ; voix mono.
+
+| Moteur envisagé | Licence | Intérêt | Décision |
+|---|---|---|---|
+| **PSOLA maison** (ce prototype) | Code du projet | Aucune dépendance, compréhensible, testé | **Retenu pour M9**, sous réserve de l'écoute |
+| Rubber Band (wasm) | GPL ou licence commerciale | Très bonne qualité | Écarté : contraintes de licence et taille |
+| SoundTouch | LGPL | Transposition globale robuste | Écarté : pas de correction note par note |
+| Vocodeur WORLD | BSD modifiée | Préserve mieux les formants | Plan B si PSOLA est jugé insuffisant |
+
+Les licences de ce tableau sont citées de mémoire et doivent être reconfirmées avant toute adoption.
+
+**Vérifications**
+
+- Frontend `npm test` : 81/81 (dont 14 tests de hauteur : conversions, gammes, YIN à ±0,5 % de 110 à 880 Hz, rejet du bruit, 230 Hz → 220 Hz et 243 Hz → 246,9 Hz à ±1 % avec durée identique, intensité de 60 %, intensité nulle sans effet, limite de 30 s). `npm run build` réussi.
+- Backend `npm test` : 15/15 (dont 7 tests du format v1 : valeurs par défaut, `toPublic`, bornes de BPM, version inconnue, nombre de pistes, 16 pas par ligne, clip pattern **ou** audio, identifiants et types).
+- Navigateur (Chromium, Playwright) : voix de test, écart moyen à la gamme **37 → 5 cents** en *Effet marqué* et **37 → 23 cents** en *Naturel* ; lecture A/B ; WAV corrigé de 3,00 s ; un fichier de 3 min est refusé (30 s max.). Pas de débordement à 360 px ni à 640 px (équivalent du zoom à 200 %) après correction d'un `fieldset` trop large.
+- **Non vérifié** : la qualité à l'oreille, en particulier sur une vraie voix. Le micro simulé de Chromium n'émet que des bips (0 % de trames voisées), donc aucune vraie prise n'a été corrigée.
 
 ### 16 novembre 2026 — M0 : prototypes audio et cadrage technique (#5)
 
@@ -361,7 +406,7 @@ flowchart LR
 - `npm run build` réussi.
 - Navigateur (Chromium via Playwright, micro simulé) : la tête de lecture avance, un BPM de 300 est refusé avec message, `song1.mp3` est décodé (180,06 s) et un fichier texte est refusé, une prise de 1,56 s est enregistrée en Opus/WebM puis le micro est fermé, l'export de 4 mesures à 140 BPM donne un WAV stéréo 44,1 kHz de 6,86 s (crête −0,6 dBFS). Aucune erreur console. Pas de débordement horizontal à 360 px ni à 800 px ; le séquenceur défile dans son cadre ; les pas se basculent à Entrée et Espace.
 - **Non vérifié** : l'écoute réelle (calage à l'oreille de l'instrumentale, du séquenceur et d'une vraie voix au casque), Firefox et Safari, le zoom à 200 %. La compensation de latence repose sur les valeurs annoncées par le navigateur ; une mesure par boucle (sortie reliée à l'entrée) sera nécessaire en M8.
-- **Reporté** : le format de sauvegarde d'un projet est défini avec le modèle `MusicalProject` dans #7 (M1) ; le prototype de correction de hauteur est dans #6.
+- **Complété le même jour** : format de sauvegarde et prototype de correction de hauteur (entrée ci-dessus).
 
 ### 15 novembre 2026 — Refonte de l'accueil : studio 3D (#39)
 

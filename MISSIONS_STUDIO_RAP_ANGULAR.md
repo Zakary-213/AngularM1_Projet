@@ -315,10 +315,10 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 ### B. Interface utilisateur
 
 - [ ] Ajouter **Auto-Tune : Activé / Désactivé** dans les effets de la piste vocale.
-- [ ] Choisir une **tonalité** (ex. La mineur) et une **gamme**.
-- [ ] Régler l'intensité et, **si le moteur le permet**, la vitesse de correction.
-- [ ] Proposer des préréglages **Naturel** et **Effet marqué**.
-- [ ] Comparer **Avant / Après** sur la même prise.
+- [x] Choisir une **tonalité** (ex. La mineur) et une **gamme**.
+- [x] Régler l'intensité et, **si le moteur le permet**, la vitesse de correction.
+- [x] Proposer des préréglages **Naturel** et **Effet marqué**.
+- [x] Comparer **Avant / Après** sur la même prise.
 - [ ] Enregistrer les réglages de correction.
 - [ ] Inclure la version corrigée dans l'export audio.
 
@@ -328,11 +328,11 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **Interface en deux niveaux**
 
-- [ ] **Niveau simple (par défaut)** : une rangée de cartes de style, un seul bouton rotatif **« Dose d'effet »** (0 à 100 %, qui pilote ensemble intensité et vitesse dans les proportions du style), la tonalité du projet reprise automatiquement, et un bouton **Avant / Après**.
-- [ ] Chaque carte affiche une phrase d'explication (« voix juste mais naturelle », « effet robotique assumé »…) et se prévisualise sur la prise courante avant d'être appliquée.
-- [ ] **Niveau avancé (repliable)** : tous les réglages du style choisi, modifiables ; toute modification bascule sur **« Personnalisé (basé sur Trap) »** au lieu d'écraser le préréglage.
+- [x] **Niveau simple (par défaut)** : une rangée de cartes de style, un seul bouton rotatif **« Dose d'effet »** (0 à 100 %, qui pilote ensemble intensité et vitesse dans les proportions du style), la tonalité du projet reprise automatiquement, et un bouton **Avant / Après**.
+- [x] Chaque carte affiche une phrase d'explication (« voix juste mais naturelle », « effet robotique assumé »…) et se prévisualise sur la prise courante avant d'être appliquée.
+- [x] **Niveau avancé (repliable)** : tous les réglages du style choisi, modifiables ; toute modification bascule sur **« Personnalisé (basé sur Trap) »** au lieu d'écraser le préréglage.
 - [ ] Bouton **Réinitialiser le style** et possibilité d'**enregistrer son propre préréglage** avec le projet.
-- [ ] Afficher la courbe de hauteur (détectée et corrigée) sur la durée de la prise, pour voir où la voix est recalée.
+- [x] Afficher la courbe de hauteur (détectée et corrigée) sur la durée de la prise, pour voir où la voix est recalée.
 
 **Préréglages de style (valeurs de départ, à ajuster à l'écoute)**
 
@@ -348,19 +348,19 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **Réglages du mode avancé / personnalisé**
 
-- [ ] Tonalité, gamme (ajouter **mineure harmonique** et **phrygien dominant** aux gammes majeure et mineure) et **notes autorisées** cochables une par une.
-- [ ] Intensité, vitesse de recalage et **naturel / humanisation** (tolérance en cents avant correction, pour garder les petites variations et le vibrato).
-- [ ] **Spectre de la voix** : égaliseur simple (coupe-bas, corps, présence, air) appliqué à la piste corrigée.
-- [ ] **Formants / timbre** (voix plus grave ou plus claire sans changer la note) **uniquement si le moteur retenu le permet** : le PSOLA actuel ne préserve pas les formants (voir la limite notée en M0) ; sinon documenter la limite et masquer le réglage.
-- [ ] Transposition volontaire (± 12 demi-tons), clairement distinguée de la correction.
+- [x] Tonalité, gamme (ajouter **mineure harmonique** et **phrygien dominant** aux gammes majeure et mineure) et **notes autorisées** cochables une par une.
+- [x] Intensité, vitesse de recalage et **naturel / humanisation** (tolérance en cents avant correction, pour garder les petites variations et le vibrato).
+- [x] **Spectre de la voix** : égaliseur simple (coupe-bas, corps, présence, air) appliqué à la piste corrigée.
+- [x] **Formants / timbre** (voix plus grave ou plus claire sans changer la note) **uniquement si le moteur retenu le permet** : le PSOLA actuel ne préserve pas les formants (voir la limite notée en M0) ; sinon documenter la limite et masquer le réglage.
+- [x] Transposition volontaire (± 12 demi-tons), clairement distinguée de la correction.
 
 **Contraintes**
 
-- [ ] Les préréglages sont des **données** (nom, description, valeurs) dans un seul fichier, testées unitairement (bornes, gammes, valeurs par style).
-- [ ] La prise originale n'est jamais modifiée ; changer de style recalcule la version corrigée.
+- [x] Les préréglages sont des **données** (nom, description, valeurs) dans un seul fichier, testées unitairement (bornes, gammes, valeurs par style).
+- [x] La prise originale n'est jamais modifiée ; changer de style recalcule la version corrigée.
 - [ ] Le traitement d'une prise longue ne bloque pas l'interface (état « calcul en cours », possibilité d'annuler).
-- [ ] Accessible au clavier : cartes de style = boutons radio, réglages avec labels et valeur lue (« 70 % », « 40 ms »).
-- [ ] Les noms de style décrivent un rendu, pas un artiste : ne pas citer ni imiter la voix d'un artiste existant.
+- [x] Accessible au clavier : cartes de style = boutons radio, réglages avec labels et valeur lue (« 70 % », « 40 ms »).
+- [x] Les noms de style décrivent un rendu, pas un artiste : ne pas citer ni imiter la voix d'un artiste existant.
 
 **Critère de validation de l'extension :** sur une même prise, l'utilisateur passe d'un style à l'autre et entend la différence en un clic ; il peut personnaliser un style, l'enregistrer avec le projet et le retrouver à la réouverture.
 

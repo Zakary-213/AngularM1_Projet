@@ -7,6 +7,28 @@ h2 {
   font-size: 18px;
 }
 
+h2 small {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+h3 {
+  margin: 16px 0 8px;
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 12px;
+}
+
+.error {
+  color: #ff8a80;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -15,13 +37,8 @@ h2 {
   margin-bottom: 12px;
 }
 
-.row.tight {
-  margin-bottom: 0;
-  gap: 8px;
-}
-
-.sources {
-  /* Un fieldset garde par défaut la largeur de son contenu : on l'autorise à rétrécir. */
+/* Un fieldset garde par défaut la largeur de son contenu : on l'autorise à rétrécir. */
+.box {
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -29,8 +46,9 @@ h2 {
   margin: 0 0 16px;
 }
 
-.sources legend {
-  font-size: 12px;
+.box > legend,
+.advanced > summary {
+  font-size: 13px;
   font-weight: 650;
   padding: 0 6px;
 }
@@ -42,20 +60,26 @@ h2 {
   min-width: 0;
 }
 
-.field label,
-.field .label {
+.field label {
   font-size: 12px;
   font-weight: 650;
 }
 
-.field select {
+.field select,
+.field input[type='text'] {
   min-height: 44px;
   width: 9rem;
+  max-width: 100%;
   padding: 8px 10px;
   border-radius: 6px;
   border: 1px solid #404040;
   background: #0d0d0d;
   color: inherit;
+}
+
+.field select.wide,
+.field input[type='text'] {
+  width: 16rem;
 }
 
 .field input[type='file'] {
@@ -72,19 +96,118 @@ h2 {
   accent-color: var(--accent);
 }
 
-.small {
-  font-size: 12px;
+/* Cartes de style : de vrais boutons radio, toute la carte est cliquable. */
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-.error {
-  color: #ff8a80;
+.style-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 84px;
+  padding: 12px;
+  border: 1px solid #404040;
+  border-radius: 8px;
+  background: #141414;
+  cursor: pointer;
+}
+
+.style-card input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.style-card b {
+  font-size: 14px;
+}
+
+.style-card span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* L'état choisi ne repose pas que sur la couleur : bordure épaisse et coche. */
+.style-card.selected {
+  border: 2px solid var(--accent);
+  padding: 11px;
+  background: #1d1a12;
+}
+
+.style-card.selected b::after {
+  content: ' ✓';
+  color: var(--accent);
+}
+
+.style-card.user {
+  border-style: dashed;
+}
+
+.style-card:has(input:focus-visible) {
+  outline: 3px solid #8bc8dd;
+  outline-offset: 2px;
+}
+
+.dose-row {
+  align-items: center;
+}
+
+.custom-note {
+  margin: 0;
+  font-size: 13px;
+}
+
+.key-note {
+  margin: 0;
+}
+
+.busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #555555;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .spinner {
+    animation: spin 0.8s linear infinite;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.track-row {
+  align-items: center;
+}
+
+.track-row p {
+  margin: 0;
 }
 
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
-  margin: 16px 0;
+  margin: 12px 0;
 }
 
 .facts dt {
@@ -98,9 +221,101 @@ h2 {
   font-size: 12px;
 }
 
+.curve {
+  margin: 0;
+}
+
+.curve svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+  background: #101010;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.curve path {
+  fill: none;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.curve path.detected {
+  stroke: #8bc8dd;
+  stroke-dasharray: 4 3;
+}
+
+.curve path.corrected {
+  stroke: #f5a623;
+}
+
+.legend.detected {
+  color: #8bc8dd;
+}
+
+.legend.corrected {
+  color: #f5a623;
+}
+
+.advanced > summary {
+  cursor: pointer;
+  min-height: 32px;
+  display: list-item;
+}
+
+.notes {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.notes legend {
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+
+.note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  font-size: 12px;
+}
+
+.note input {
+  width: 18px;
+  height: 18px;
+}
+
+.save-row {
+  margin-top: 16px;
+}
+
+.user-styles {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.link {
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  min-height: 0;
+  color: #8bc8dd;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 button:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+summary:focus-visible {
   outline: 3px solid #8bc8dd;
   outline-offset: 2px;
 }

@@ -1,0 +1,26 @@
+<p class="muted">Batterie synthétisée, sans sample. Cliquez une case pour ajouter ou retirer une frappe ; la boucle d'une mesure se modifie aussi pendant la lecture.</p>
+<div class="sequencer-scroll">
+  <table class="sequencer">
+    <caption class="visually-hidden">Pattern d'une mesure ; chaque bouton active ou désactive une frappe.</caption>
+    <tbody>
+      @for (voice of voices; track voice) {
+        <tr>
+          <th scope="row">{{ voiceLabels[voice] }}</th>
+          @for (step of steps; track step) {
+            <td>
+              <button type="button" class="step"
+                [class.on]="session.pattern()[voice][step]"
+                [class.beat]="step % stepsPerBeat === 0"
+                [class.current]="session.currentStep() === step"
+                [attr.aria-pressed]="session.pattern()[voice][step]"
+                [attr.aria-label]="stepLabel(voice, step)"
+                (click)="session.toggleStep(voice, step)">
+                <span aria-hidden="true">{{ session.pattern()[voice][step] ? '●' : '' }}</span>
+              </button>
+            </td>
+          }
+        </tr>
+      }
+    </tbody>
+  </table>
+</div>

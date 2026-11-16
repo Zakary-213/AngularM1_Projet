@@ -1,0 +1,65 @@
+:host {
+  display: block;
+  padding: 18px 20px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 0;
+}
+
+/* La grille peut défiler horizontalement sans faire déborder la page. */
+.sequencer-scroll {
+  overflow-x: auto;
+}
+
+.sequencer {
+  border-collapse: separate;
+  border-spacing: 4px;
+}
+
+.sequencer th {
+  padding-right: 10px;
+  text-align: left;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.step {
+  width: 36px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 5px;
+  background: #1c1c1c;
+}
+
+.step.beat {
+  background: #262626;
+}
+
+.step.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111111;
+}
+
+/* La tête de lecture ne repose pas que sur la couleur : bordure épaisse en plus. */
+.step.current {
+  outline: 3px solid #f7f7f7;
+  outline-offset: -3px;
+}
+
+.step:focus-visible {
+  outline: 3px solid #8bc8dd;
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

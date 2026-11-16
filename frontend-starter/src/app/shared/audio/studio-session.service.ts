@@ -1,32 +1,26 @@
-import { Component, OnDestroy, inject, signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
-import { RouterLink } from '@angular/router';
-import { PitchLabPanelComponent } from '../pitch-lab-panel/pitch-lab-panel';
-import { AudioEngineService } from '../../shared/audio/audio-engine.service';
-import { AUDIO_FILE_ACCEPT, validateAudioFile } from '../../shared/audio/audio-file';
-import { DRUM_VOICES, DRUM_VOICE_LABELS, DrumPattern, DrumVoice, createDemoPattern, toggleStep } from '../../shared/audio/drum-pattern';
-import { AudioClip, gainToDecibels } from '../../shared/audio/mix-graph';
-import { MicrophoneRecorder, describeMicrophoneError, takeStartSeconds } from '../../shared/audio/microphone-recorder';
-import { DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm } from '../../shared/audio/music-time';
-import { renderMix } from '../../shared/audio/offline-render';
-import { PatternTransport } from '../../shared/audio/pattern-transport';
-import { encodeWav, peakLevel } from '../../shared/audio/wav-encoder';
+import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
+import { AudioEngineService } from './audio-engine.service';
+import { validateAudioFile } from './audio-file';
+import { DrumPattern, DrumVoice, createDemoPattern, toggleStep } from './drum-pattern';
+import { AudioClip, gainToDecibels } from './mix-graph';
+import { MicrophoneRecorder, describeMicrophoneError, takeStartSeconds } from './microphone-recorder';
+import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm } from './music-time';
+import { renderMix } from './offline-render';
+import { PatternTransport } from './pattern-transport';
+import { encodeWav, peakLevel } from './wav-encoder';
 
-/** Gains appliqués aux fichiers audio dans le prototype (linéaires). */
+/** Gains appliqués aux fichiers audio du studio (linéaires). */
 const INSTRUMENTAL_GAIN = 0.7;
 const TAKE_GAIN = 1;
-const EXPORT_BAR_CHOICES = [1, 2, 4, 8] as const;
-const DEFAULT_EXPORT_BARS = 4;
 
-type MicState = 'idle' | 'opening' | 'recording' | 'saving';
+export type MicState = 'idle' | 'opening' | 'recording' | 'saving';
 
-interface LoadedAudio {
+export interface LoadedAudio {
   readonly name: string;
   readonly buffer: AudioBuffer;
 }
 
-interface VocalTake {
+export interface VocalTake {
   readonly buffer: AudioBuffer;
   /** ObjectURL de la prise originale (non modifiée), libéré au remplacement et à la fermeture. */
   readonly url: string;
@@ -35,46 +29,25 @@ interface VocalTake {
   readonly latencyMs: number;
 }
 
-interface ExportReport {
+export interface ExportReport {
   readonly seconds: number;
   readonly peakDb: number;
 }
 
 /**
- * Prototype M0 : vérifie la lecture synchronisée, le séquenceur, la prise micro,
- * l'export et la correction de hauteur avant de construire le vrai studio. Page volontairement isolée.
+ * État audio d'une session de studio : transport, pattern de batterie, instrumentale,
+ * prise vocale et export. Fourni par la page Studio (une instance par ouverture),
+ * il libère micro, sources et ObjectURL à sa destruction.
  */
-@Component({
-  selector: 'app-audio-lab-page',
-  imports: [ReactiveFormsModule, RouterLink, PitchLabPanelComponent],
-  templateUrl: './audio-lab-page.html',
-  styleUrl: './audio-lab-page.css',
-})
-export class AudioLabPageComponent implements OnDestroy {
+@Injectable()
+export class StudioSessionService implements OnDestroy {
   private readonly engine = inject(AudioEngineService);
   private readonly recorder = new MicrophoneRecorder();
   private transport: PatternTransport | null = null;
   private animationFrame = 0;
   private recorderStartedAt: number | null = null;
 
-  readonly voices = DRUM_VOICES;
-  readonly voiceLabels = DRUM_VOICE_LABELS;
-  readonly steps = Array.from({ length: STEPS_PER_BAR }, (_, step) => step);
-  readonly stepsPerBeat = STEPS_PER_BEAT;
-  readonly minBpm = MIN_BPM;
-  readonly maxBpm = MAX_BPM;
-  readonly exportBarChoices = EXPORT_BAR_CHOICES;
-  readonly audioAccept = AUDIO_FILE_ACCEPT;
-
-  readonly bpmControl = new FormControl(DEFAULT_BPM, {
-    nonNullable: true,
-    validators: [Validators.required, Validators.min(MIN_BPM), Validators.max(MAX_BPM)],
-  });
-  readonly includeInstrumental = new FormControl(true, { nonNullable: true });
-  readonly includeTake = new FormControl(true, { nonNullable: true });
-  readonly exportBars = new FormControl<number>(DEFAULT_EXPORT_BARS, { nonNullable: true });
-
-  /** BPM effectivement utilisé : une saisie invalide ne l'écrase pas. */
+  /** BPM effectivement utilisé : une saisie invalide ne l'écrase jamais. */
   readonly bpm = signal(DEFAULT_BPM);
   readonly pattern = signal<DrumPattern>(createDemoPattern());
   readonly playing = signal(false);
@@ -82,24 +55,24 @@ export class AudioLabPageComponent implements OnDestroy {
   readonly engineError = signal<string | null>(null);
 
   readonly instrumental = signal<LoadedAudio | null>(null);
+  readonly instrumentalMuted = signal(false);
   readonly importing = signal(false);
   readonly importError = signal<string | null>(null);
 
   readonly micState = signal<MicState>('idle');
   readonly micError = signal<string | null>(null);
   readonly take = signal<VocalTake | null>(null);
+  readonly takeMuted = signal(false);
 
   readonly exporting = signal(false);
   readonly exportError = signal<string | null>(null);
   readonly exportReport = signal<ExportReport | null>(null);
 
-  constructor() {
-    this.bpmControl.valueChanges.pipe(takeUntilDestroyed()).subscribe(value => {
-      if (isValidBpm(value)) {
-        this.bpm.set(value);
-      }
-    });
-  }
+  /** Position affichée (temps et double-croche dans la mesure en boucle), 1-indexée. */
+  readonly position = computed(() => {
+    const step = Math.max(0, this.currentStep());
+    return { beat: Math.floor(step / STEPS_PER_BEAT) + 1, sixteenth: (step % STEPS_PER_BEAT) + 1 };
+  });
 
   ngOnDestroy(): void {
     this.stopPlayback();
@@ -108,13 +81,16 @@ export class AudioLabPageComponent implements OnDestroy {
     void this.engine.suspend();
   }
 
-  stepLabel(voice: DrumVoice, step: number): string {
-    const state = this.pattern()[voice][step] ? 'actif' : 'inactif';
-    return `${this.voiceLabels[voice]}, pas ${step + 1}, ${state}`;
+  setBpm(value: number): void {
+    if (isValidBpm(value)) {
+      this.bpm.set(value);
+    }
   }
 
-  toggle(voice: DrumVoice, step: number): void {
-    this.pattern.update(pattern => toggleStep(pattern, voice, step));
+  toggleStep(voice: DrumVoice, step: number): void {
+    if (step >= 0 && step < STEPS_PER_BAR) {
+      this.pattern.update(pattern => toggleStep(pattern, voice, step));
+    }
   }
 
   async togglePlayback(): Promise<void> {
@@ -125,13 +101,14 @@ export class AudioLabPageComponent implements OnDestroy {
     await this.startPlayback();
   }
 
-  async onInstrumentalSelected(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) {
-      return;
-    }
+  stopPlayback(): void {
+    cancelAnimationFrame(this.animationFrame);
+    this.transport?.stop();
+    this.playing.set(false);
+    this.currentStep.set(-1);
+  }
+
+  async importInstrumental(file: File): Promise<void> {
     const validationError = validateAudioFile(file);
     this.importError.set(validationError);
     if (validationError) {
@@ -141,9 +118,9 @@ export class AudioLabPageComponent implements OnDestroy {
     try {
       const buffer = await this.engine.decode(await file.arrayBuffer());
       this.instrumental.set({ name: file.name, buffer });
-      console.log('[audio-lab] instrumentale chargée', { durationSeconds: buffer.duration });
+      console.log('[studio] instrumentale chargée', { durationSeconds: buffer.duration });
     } catch (error) {
-      console.error('[audio-lab] décodage impossible', error);
+      console.error('[studio] décodage impossible', error);
       this.importError.set('Fichier illisible ou corrompu : le navigateur ne parvient pas à le décoder.');
     } finally {
       this.importing.set(false);
@@ -152,12 +129,16 @@ export class AudioLabPageComponent implements OnDestroy {
 
   /** Ouvre le micro, lance la prod, puis enregistre la voix sur la même horloge. */
   async startRecording(): Promise<void> {
+    if (this.micState() !== 'idle') {
+      return;
+    }
+    this.stopPlayback();
     this.micError.set(null);
     this.micState.set('opening');
     try {
       await this.recorder.open();
     } catch (error) {
-      console.error('[audio-lab] micro indisponible', error);
+      console.error('[studio] micro indisponible', error);
       this.micError.set(error instanceof Error && !(error instanceof DOMException) ? error.message : describeMicrophoneError(error));
       this.micState.set('idle');
       return;
@@ -171,12 +152,15 @@ export class AudioLabPageComponent implements OnDestroy {
     }
     this.recorderStartedAt = null;
     this.recorder.record(() => {
-      this.recorderStartedAt = this.transportContextTime();
+      this.recorderStartedAt = this.transport ? this.engine.currentTime() : null;
     });
     this.micState.set('recording');
   }
 
   async stopRecording(): Promise<void> {
+    if (this.micState() !== 'recording') {
+      return;
+    }
     const songStart = this.transport?.startTime ?? null;
     this.micState.set('saving');
     this.stopPlayback();
@@ -196,9 +180,9 @@ export class AudioLabPageComponent implements OnDestroy {
         startSeconds,
         latencyMs: Math.round(latencySeconds * 1000),
       });
-      console.log('[audio-lab] prise enregistrée', { durationSeconds: buffer.duration, startSeconds });
+      console.log('[studio] prise enregistrée', { durationSeconds: buffer.duration, startSeconds });
     } catch (error) {
-      console.error('[audio-lab] échec de la prise', error);
+      console.error('[studio] échec de la prise', error);
       this.micError.set(error instanceof Error ? error.message : "La prise n'a pas pu être enregistrée.");
     } finally {
       this.recorder.release();
@@ -206,7 +190,8 @@ export class AudioLabPageComponent implements OnDestroy {
     }
   }
 
-  async exportWav(): Promise<void> {
+  /** Rendu hors temps réel du mix écouté (pistes non muettes) puis téléchargement en WAV. */
+  async exportWav(bars: number): Promise<void> {
     if (this.exporting()) {
       return;
     }
@@ -214,30 +199,17 @@ export class AudioLabPageComponent implements OnDestroy {
     this.exportError.set(null);
     this.exportReport.set(null);
     try {
-      const rendered = await renderMix({
-        pattern: this.pattern(),
-        bpm: this.bpm(),
-        bars: this.exportBars.value,
-        clips: this.activeClips(true),
-      });
+      const rendered = await renderMix({ pattern: this.pattern(), bpm: this.bpm(), bars, clips: this.activeClips(true) });
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
       const wav = new Blob([encodeWav(channels, rendered.sampleRate)], { type: 'audio/wav' });
-      this.download(wav, `zakat-record-prototype-${this.bpm()}bpm.wav`);
+      downloadBlob(wav, `zakat-record-${this.bpm()}bpm.wav`);
       this.exportReport.set({ seconds: rendered.duration, peakDb: gainToDecibels(peakLevel(channels)) });
     } catch (error) {
-      console.error('[audio-lab] export impossible', error);
+      console.error('[studio] export impossible', error);
       this.exportError.set("L'export a échoué. Réessayez avec moins de mesures.");
     } finally {
       this.exporting.set(false);
     }
-  }
-
-  formatSeconds(seconds: number): string {
-    return `${seconds.toFixed(2).replace('.', ',')} s`;
-  }
-
-  formatDecibels(decibels: number): string {
-    return Number.isFinite(decibels) ? `${decibels.toFixed(1).replace('.', ',')} dBFS` : 'silence';
   }
 
   private async startPlayback(includeTake = true): Promise<boolean> {
@@ -250,38 +222,30 @@ export class AudioLabPageComponent implements OnDestroy {
       this.followPlayhead();
       return true;
     } catch (error) {
-      console.error('[audio-lab] démarrage audio impossible', error);
+      console.error('[studio] démarrage audio impossible', error);
       this.engineError.set("Le moteur audio n'a pas pu démarrer dans ce navigateur.");
       return false;
     }
   }
 
-  private stopPlayback(): void {
-    cancelAnimationFrame(this.animationFrame);
-    this.transport?.stop();
-    this.playing.set(false);
-    this.currentStep.set(-1);
-  }
-
   private activeClips(includeTake: boolean): AudioClip[] {
     const clips: AudioClip[] = [];
     const instrumental = this.instrumental();
-    if (instrumental && this.includeInstrumental.value) {
+    if (instrumental && !this.instrumentalMuted()) {
       clips.push({ buffer: instrumental.buffer, startSeconds: 0, gain: INSTRUMENTAL_GAIN });
     }
     const take = this.take();
-    if (includeTake && take && this.includeTake.value) {
+    if (includeTake && take && !this.takeMuted()) {
       clips.push({ buffer: take.buffer, startSeconds: take.startSeconds, gain: TAKE_GAIN });
     }
     return clips;
   }
 
-  /** Tête de lecture : un signal n'est écrit que lorsque le pas change (16 fois par mesure). */
+  /** Tête de lecture : le signal n'est écrit que lorsque le pas change (16 fois par mesure). */
   private followPlayhead(): void {
     const frame = () => {
-      const now = this.transportContextTime();
-      if (this.transport && now !== null) {
-        const step = this.transport.stepAt(now);
+      if (this.transport) {
+        const step = this.transport.stepAt(this.engine.currentTime());
         if (step !== this.currentStep()) {
           this.currentStep.set(step);
         }
@@ -292,24 +256,20 @@ export class AudioLabPageComponent implements OnDestroy {
     this.animationFrame = requestAnimationFrame(frame);
   }
 
-  private transportContextTime(): number | null {
-    return this.transport ? this.engine.currentTime() : null;
-  }
-
   private revokeTakeUrl(): void {
     const take = this.take();
     if (take) {
       URL.revokeObjectURL(take.url);
     }
   }
+}
 
-  private download(blob: Blob, fileName: string): void {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    link.click();
-    // Libéré après le démarrage du téléchargement par le navigateur.
-    setTimeout(() => URL.revokeObjectURL(url));
-  }
+export function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  // Libéré après le démarrage du téléchargement par le navigateur.
+  setTimeout(() => URL.revokeObjectURL(url));
 }

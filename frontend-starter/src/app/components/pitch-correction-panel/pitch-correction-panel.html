@@ -1,11 +1,11 @@
-<h2 id="pitch-title">6. Correction de hauteur <small class="muted">— prototype, appliquée après la prise</small></h2>
+<h2 id="pitch-title">Correction de hauteur <small class="muted">— prototype, appliquée après la prise</small></h2>
 <p class="muted">Détection de la note chantée (YIN) puis recalage sur la gamme choisie (TD-PSOLA) : la durée est conservée. L'original n'est jamais modifié.</p>
 
 <fieldset class="sources">
   <legend>Voix à corriger ({{ maxSeconds }} s maximum)</legend>
   <div class="row">
     <button type="button" class="button" (click)="useTestVoice()">Voix de test</button>
-    <button type="button" class="button" (click)="useTake()" [disabled]="!take()">Dernière prise du labo</button>
+    <button type="button" class="button" (click)="useTake()" [disabled]="!take()">Dernière prise du studio</button>
     <div class="field">
       <label for="pitch-file">Ou un fichier vocal MP3 / WAV</label>
       <input id="pitch-file" type="file" [accept]="audioAccept" (change)="onFileSelected($event)" />

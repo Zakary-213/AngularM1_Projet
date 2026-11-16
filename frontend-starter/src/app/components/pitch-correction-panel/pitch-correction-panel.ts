@@ -48,16 +48,16 @@ function toMono(buffer: AudioBuffer): Float32Array<ArrayBuffer> {
  * modifiée ; la version corrigée est un nouveau buffer, comparable à l'oreille.
  */
 @Component({
-  selector: 'app-pitch-lab-panel',
+  selector: 'app-pitch-correction-panel',
   imports: [ReactiveFormsModule],
-  templateUrl: './pitch-lab-panel.html',
-  styleUrl: './pitch-lab-panel.css',
+  templateUrl: './pitch-correction-panel.html',
+  styleUrl: './pitch-correction-panel.css',
 })
-export class PitchLabPanelComponent implements OnDestroy {
+export class PitchCorrectionPanelComponent implements OnDestroy {
   private readonly engine = inject(AudioEngineService);
   private playingSource: AudioBufferSourceNode | null = null;
 
-  /** Dernière prise du labo, proposée comme source. */
+  /** Dernière prise du studio, proposée comme source. */
   readonly take = input<AudioBuffer | null>(null);
 
   readonly noteNames = NOTE_NAMES;
@@ -92,7 +92,7 @@ export class PitchLabPanelComponent implements OnDestroy {
   useTake(): void {
     const take = this.take();
     if (take) {
-      this.setSource({ label: 'Dernière prise du labo', samples: toMono(take), sampleRate: take.sampleRate });
+      this.setSource({ label: 'Dernière prise du studio', samples: toMono(take), sampleRate: take.sampleRate });
     }
   }
 
@@ -118,7 +118,7 @@ export class PitchLabPanelComponent implements OnDestroy {
       const buffer = await this.engine.decode(await file.arrayBuffer());
       this.setSource({ label: file.name, samples: toMono(buffer), sampleRate: buffer.sampleRate });
     } catch (decodeError) {
-      console.error('[pitch-lab] décodage impossible', decodeError);
+      console.error('[pitch-correction] décodage impossible', decodeError);
       this.sourceError.set('Fichier illisible ou corrompu.');
     }
   }
@@ -150,9 +150,9 @@ export class PitchLabPanelComponent implements OnDestroy {
         voicedPercent: Math.round((100 * frames.filter(frame => frame.detectedHz !== null).length) / Math.max(1, frames.length)),
         processingMs: Math.round(processingMs),
       });
-      console.log('[pitch-lab] correction appliquée', { processingMs: Math.round(processingMs), seconds: output.length / source.sampleRate });
+      console.log('[pitch-correction] correction appliquée', { processingMs: Math.round(processingMs), seconds: output.length / source.sampleRate });
     } catch (error) {
-      console.error('[pitch-lab] correction impossible', error);
+      console.error('[pitch-correction] correction impossible', error);
       this.processError.set(error instanceof RangeError ? error.message : 'La correction a échoué.');
     } finally {
       this.processing.set(false);

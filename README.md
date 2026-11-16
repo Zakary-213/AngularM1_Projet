@@ -80,12 +80,12 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Visite 3D d'un studio au défilement : la caméra avance jusqu'au bureau (synthé, enceintes, écran) | ✅ Fonctionnel |
 | Interface | Pages Projets, Studio, Bibliothèque, Collaborations, Publications | 🎨 Maquette |
-| Moteur audio | Prototype `/audio-lab` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 |
-| Studio | Transport, métronome, pistes branchées sur le moteur | ⏳ À faire (M2) |
+| Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
+| Studio | Lecture / arrêt, enregistrement, tempo et pistes (batterie, instrumentale, voix) branchés sur le moteur ; métronome, pause et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Composition | Drum Rack, Piano Roll, instruments, timeline | ⏳ À faire (M3 → M5) |
 | Import | Instrumentale MP3 / WAV, forme d'onde, égaliseur | ⏳ À faire (M6) |
 | Mix | Volume, mute / solo, pan, EQ, réverbération, delay | ⏳ À faire (M7) |
-| Voix | Prototype : prise micro et correction de hauteur (YIN + PSOLA) dans `/audio-lab` | 🧪 Prototype M0 |
+| Voix | Prise micro (bouton ●) et onglet « Correction vocale » (YIN + PSOLA) dans `/studio` | 🧪 Prototype M0 intégré |
 | Voix (studio) | Enregistrement multiprise, correction sur les pistes | ⏳ À faire (M8, M9) |
 | ✍️ Paroles IA | Génération de couplets selon le thème et la cadence (BPM, mesures, flow), édition, prompteur synchronisé | ⏳ À faire (M12) |
 | Livraison | Sauvegarde complète, export WAV, tests de bout en bout | ⏳ À faire (M10, M11) |
@@ -170,8 +170,10 @@ flowchart TB
 │   ├── src/app/
 │   │   ├── components/          # Une page = un dossier (ts, html, css)
 │   │   │   ├── home-page/       # Accueil + scène 3D (instrument-scene.ts)
-│   │   │   ├── studio-page/     # Studio (maquette)
-│   │   │   ├── audio-lab-page/  # Labo audio : prototype M0
+│   │   │   ├── studio-page/     # Studio : transport, timeline, onglets d'édition
+│   │   │   ├── drum-rack-panel/ # Séquenceur 16 pas du studio
+│   │   │   ├── pitch-correction-panel/ # Correction vocale (chargée à la demande)
+│   │   │   ├── export-panel/    # Export WAV du mix
 │   │   │   ├── tracks-page/     # Fichiers audio : upload, lecture, suppression
 │   │   │   └── ...
 │   │   ├── shared/              # Services, guards, intercepteurs, modèles
@@ -336,11 +338,21 @@ Règles prévues : `ownerId` vient du JWT, jamais du corps ; seuls les champs li
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
 
+### 16 novembre 2026 — Intégration du labo dans le studio (M2)
+
+Le labo `/audio-lab` a été supprimé : tout ce qu'il démontrait est désormais dans `/studio`.
+
+- **Transport** : ▶ / ■ lance ou arrête la boucle, ● enregistre une prise sur la prod (micro demandé au clic, fermé à l'arrêt), ↤ arrête et revient au début ; le tempo est saisi directement dans le transport (60–200 BPM, une valeur invalide est signalée sans être appliquée) ; la position affiche temps et double-croche.
+- **Timeline** : pistes réelles de la session (Batterie, Instrumentale importée, Voix principale) placées selon leur durée et leur position ; bouton **M** pour rendre muette l'instrumentale ou la prise, pris en compte à la lecture et à l'export.
+- **Onglets** : *Batterie* (séquenceur 16 pas), *Correction vocale* (chargée à la demande, propose la dernière prise du studio), *Export* (WAV du mix écouté), *Mixeur* (encore un aperçu).
+- **Architecture** : l'état audio est dans `StudioSessionService`, fourni par la page Studio et libéré à sa sortie ; chaque panneau est un composant distinct.
+- **Vérifications** : `npm run build` réussi (studio 9 ko et correction vocale 5 ko transférés, à la demande) ; `npm test` 81/81. Navigateur : lecture en boucle avec tête de lecture, correction de la voix de test (37 → 23 cents en *Naturel*), onglet Export affiché, pas de débordement à 360 px, console sans erreur. **Non vérifié** : vraie prise micro et téléchargement WAV depuis le studio.
+
 ### 16 novembre 2026 — M0 (suite) : format de projet et correction de hauteur (#5, #6)
 
 **Format de sauvegarde v1** : schéma Mongoose `MusicalProject` versionné (`formatVersion: 1`), limites nommées (`PROJECT_LIMITS`), identifiants stables générés par le client, positions de clips en temps, octets audio hors du document, `revision` pour refuser une sauvegarde concurrente. Routes M1 décrites dans le « Contrat d'API » (non implémentées).
 
-**Prototype de correction de hauteur** (section 6 du labo `/audio-lab`, code dans `shared/audio/pitch/`) :
+**Prototype de correction de hauteur** (onglet « Correction vocale » du studio, code dans `shared/audio/pitch/`) :
 
 - **Analyse** : YIN toutes les 5 ms sur le signal sous-échantillonné à ≈ 11 kHz, fenêtre de 40 ms, tessiture 70 Hz à 1 kHz, trames silencieuses ignorées.
 - **Cible** : note la plus proche dans la tonalité et la gamme (majeur ou mineur) ; **intensité** = part de l'écart corrigée ; **vitesse de recalage** = lissage en ms (0 ms = effet robotique). Préréglages *Naturel* (60 %, 80 ms) et *Effet marqué* (100 %, 0 ms).
@@ -365,7 +377,7 @@ Les licences de ce tableau sont citées de mémoire et doivent être reconfirmé
 
 ### 16 novembre 2026 — M0 : prototypes audio et cadrage technique (#5)
 
-**Démo technique :** page `/audio-lab` (lien « Labo audio » dans l'en-tête du studio), chargée à la demande (≈ 8 ko transférés). Code du moteur dans `frontend-starter/src/app/shared/audio/`.
+**Démo technique :** d'abord une page `/audio-lab` isolée, désormais intégrée au studio (voir l'entrée « Intégration du labo dans le studio »). Code du moteur dans `frontend-starter/src/app/shared/audio/`.
 
 ```mermaid
 flowchart LR

@@ -49,7 +49,7 @@ export const PITCH_PRESETS: Readonly<Record<PitchPreset, Pick<PitchCorrectionSet
 };
 
 /** Durée maximale traitée dans le navigateur, en secondes (calcul dans un Web Worker). */
-export const MAX_CORRECTION_SECONDS = 30;
+export const MAX_CORRECTION_SECONDS = 60;
 export const ANALYSIS_HOP_SECONDS = 0.005;
 const ANALYSIS_WINDOW_SECONDS = 0.04;
 /** Fréquence d'analyse visée : suffisante jusqu'à 1 kHz, et quatre fois moins de calcul qu'à 44,1 kHz. */

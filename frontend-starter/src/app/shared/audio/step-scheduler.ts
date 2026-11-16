@@ -12,6 +12,8 @@ export const SCHEDULER_WAKE_MS = 25;
 export interface StepCursor {
   /** Index du pas dans la mesure (0 à 15). */
   readonly step: number;
+  /** Index absolu du pas depuis le début du morceau (0, 1, … 16 = mesure 2). */
+  readonly songStep: number;
   /** Date du pas sur l'horloge audio, en secondes. */
   readonly time: number;
 }
@@ -29,14 +31,14 @@ export function collectDueSteps(
   let next = cursor;
   while (next.time < until) {
     due.push(next);
-    next = { step: (next.step + 1) % STEPS_PER_BAR, time: next.time + stepDurationSeconds(bpm) };
+    next = { step: (next.songStep + 1) % STEPS_PER_BAR, songStep: next.songStep + 1, time: next.time + stepDurationSeconds(bpm) };
   }
   return { due, next };
 }
 
 export class StepScheduler {
   private timer: ReturnType<typeof setInterval> | null = null;
-  private cursor: StepCursor = { step: 0, time: 0 };
+  private cursor: StepCursor = { step: 0, songStep: 0, time: 0 };
 
   constructor(
     private readonly clock: () => number,
@@ -48,9 +50,10 @@ export class StepScheduler {
     return this.timer !== null;
   }
 
-  start(startTime: number): void {
+  /** Démarre au pas absolu `fromSongStep` (0 = début du morceau, sinon reprise après une pause). */
+  start(startTime: number, fromSongStep = 0): void {
     this.stop();
-    this.cursor = { step: 0, time: startTime };
+    this.cursor = { step: fromSongStep % STEPS_PER_BAR, songStep: fromSongStep, time: startTime };
     this.tick();
     this.timer = setInterval(() => this.tick(), SCHEDULER_WAKE_MS);
   }

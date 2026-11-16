@@ -12,6 +12,9 @@ export interface MixDescription {
   readonly bpm: number;
   /** Nombre de mesures rendues : le pattern d'une mesure est répété. */
   readonly bars: number;
+  /** Gain linéaire de la piste batterie (volume, mute et solo déjà appliqués). Défaut : 1. */
+  readonly drumsGain?: number;
+  /** Clips audio, avec le gain de leur piste déjà multiplié dans `gain`. */
   readonly clips: readonly AudioClip[];
 }
 
@@ -28,9 +31,12 @@ export function renderMix(mix: MixDescription, sampleRate = EXPORT_SAMPLE_RATE):
   const context = new OfflineAudioContext(EXPORT_CHANNELS, Math.ceil(durationSeconds * sampleRate), sampleRate);
   const master = createMasterChain(context);
 
+  const drums = context.createGain();
+  drums.gain.value = mix.drumsGain ?? 1;
+  drums.connect(master);
   const stepSeconds = stepDurationSeconds(mix.bpm);
   for (let step = 0; step < mix.bars * STEPS_PER_BAR; step++) {
-    voicesAtStep(mix.pattern, step).forEach(voice => playDrumHit(context, master, voice, step * stepSeconds));
+    voicesAtStep(mix.pattern, step).forEach(voice => playDrumHit(context, drums, voice, step * stepSeconds));
   }
   mix.clips.forEach(clip => scheduleClip(context, master, clip, 0));
 

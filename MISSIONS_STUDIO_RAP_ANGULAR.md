@@ -167,8 +167,8 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 **But :** disposer du studio commun aux deux parcours.
 
 - [ ] Créer l'écran Studio : transport, bibliothèque, timeline, éditeur inférieur, inspecteur.
-- [ ] Intégrer **Play, Pause, Stop, position courante, BPM, métronome**.
-- [ ] Afficher des pistes avec titre, couleur, mute/solo et volume.
+- [x] Intégrer **Play, Pause, Stop, position courante, BPM, métronome**.
+- [x] Afficher des pistes avec titre, couleur, mute/solo et volume.
 - [ ] Permettre l'ajout, la sélection, le renommage et la suppression d'une piste.
 - [ ] Ajouter zoom horizontal, défilement, règles de mesures et sélection de position.
 - [ ] Prévoir le passage entre **Drum Rack, Piano Roll et Mixer**.

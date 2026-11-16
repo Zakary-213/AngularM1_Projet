@@ -1,12 +1,13 @@
-import { Injectable, OnDestroy, computed, inject, signal } from '@angular/core';
+import { Injectable, OnDestroy, computed, effect, inject, signal } from '@angular/core';
 import { AudioEngineService } from './audio-engine.service';
 import { validateAudioFile } from './audio-file';
 import { DrumPattern, DrumVoice, createDemoPattern, toggleStep } from './drum-pattern';
-import { AudioClip, gainToDecibels } from './mix-graph';
+import { gainToDecibels } from './mix-graph';
 import { MicrophoneRecorder, describeMicrophoneError, takeStartSeconds } from './microphone-recorder';
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm } from './music-time';
 import { renderMix } from './offline-render';
-import { PatternTransport } from './pattern-transport';
+import { PatternTransport, TrackClip } from './pattern-transport';
+import { MixerState, TrackId, TrackMix, clampTrackDb, createDefaultMixer, effectiveTrackGains, updateTrack } from './track-mix';
 import { encodeWav, peakLevel } from './wav-encoder';
 
 /** Gains appliqués aux fichiers audio du studio (linéaires). */
@@ -14,6 +15,7 @@ const INSTRUMENTAL_GAIN = 0.7;
 const TAKE_GAIN = 1;
 
 export type MicState = 'idle' | 'opening' | 'recording' | 'saving';
+export type TransportState = 'stopped' | 'playing' | 'paused';
 
 export interface LoadedAudio {
   readonly name: string;
@@ -50,29 +52,46 @@ export class StudioSessionService implements OnDestroy {
   /** BPM effectivement utilisé : une saisie invalide ne l'écrase jamais. */
   readonly bpm = signal(DEFAULT_BPM);
   readonly pattern = signal<DrumPattern>(createDemoPattern());
-  readonly playing = signal(false);
-  readonly currentStep = signal(-1);
+  readonly transportState = signal<TransportState>('stopped');
+  readonly playing = computed(() => this.transportState() === 'playing');
+  /** Pas absolu de la tête de lecture (0 = début du morceau), conservé pendant une pause. */
+  readonly songStep = signal(0);
+  /** Pas en surbrillance dans le séquenceur, ou -1 à l'arrêt. */
+  readonly currentStep = computed(() => (this.transportState() === 'stopped' ? -1 : this.songStep() % STEPS_PER_BAR));
+  readonly metronome = signal(false);
+  readonly mixer = signal<MixerState>(createDefaultMixer());
   readonly engineError = signal<string | null>(null);
 
   readonly instrumental = signal<LoadedAudio | null>(null);
-  readonly instrumentalMuted = signal(false);
   readonly importing = signal(false);
   readonly importError = signal<string | null>(null);
 
   readonly micState = signal<MicState>('idle');
   readonly micError = signal<string | null>(null);
   readonly take = signal<VocalTake | null>(null);
-  readonly takeMuted = signal(false);
 
   readonly exporting = signal(false);
   readonly exportError = signal<string | null>(null);
   readonly exportReport = signal<ExportReport | null>(null);
 
-  /** Position affichée (temps et double-croche dans la mesure en boucle), 1-indexée. */
+  /** Position affichée (mesure, temps, double-croche), 1-indexée. */
   readonly position = computed(() => {
-    const step = Math.max(0, this.currentStep());
-    return { beat: Math.floor(step / STEPS_PER_BEAT) + 1, sixteenth: (step % STEPS_PER_BEAT) + 1 };
+    const step = Math.max(0, this.songStep());
+    const inBar = step % STEPS_PER_BAR;
+    return {
+      bar: Math.floor(step / STEPS_PER_BAR) + 1,
+      beat: Math.floor(inBar / STEPS_PER_BEAT) + 1,
+      sixteenth: (inBar % STEPS_PER_BEAT) + 1,
+    };
   });
+
+  constructor() {
+    // Volume, mute et solo s'appliquent pendant la lecture, sans la relancer.
+    effect(() => {
+      const gains = effectiveTrackGains(this.mixer());
+      this.transport?.setTrackGains(gains);
+    });
+  }
 
   ngOnDestroy(): void {
     this.stopPlayback();
@@ -93,19 +112,33 @@ export class StudioSessionService implements OnDestroy {
     }
   }
 
+  /** Lecture / pause : la pause garde la position, la lecture reprend au même pas. */
   async togglePlayback(): Promise<void> {
     if (this.playing()) {
-      this.stopPlayback();
+      this.pausePlayback();
       return;
     }
     await this.startPlayback();
   }
 
+  pausePlayback(): void {
+    if (!this.playing()) {
+      return;
+    }
+    this.haltTransport();
+    this.transportState.set('paused');
+  }
+
+  /** Arrête et revient au début du morceau. */
   stopPlayback(): void {
-    cancelAnimationFrame(this.animationFrame);
-    this.transport?.stop();
-    this.playing.set(false);
-    this.currentStep.set(-1);
+    this.haltTransport();
+    this.transportState.set('stopped');
+    this.songStep.set(0);
+  }
+
+  setTrack(track: TrackId, change: Partial<TrackMix>): void {
+    const safe = change.volumeDb === undefined ? change : { ...change, volumeDb: clampTrackDb(change.volumeDb) };
+    this.mixer.update(mixer => updateTrack(mixer, track, safe));
   }
 
   async importInstrumental(file: File): Promise<void> {
@@ -127,12 +160,15 @@ export class StudioSessionService implements OnDestroy {
     }
   }
 
-  /** Ouvre le micro, lance la prod, puis enregistre la voix sur la même horloge. */
+  /**
+   * Ouvre le micro, lance la prod à la position courante (début, ou position de pause),
+   * puis enregistre la voix sur la même horloge.
+   */
   async startRecording(): Promise<void> {
     if (this.micState() !== 'idle') {
       return;
     }
-    this.stopPlayback();
+    this.pausePlayback();
     this.micError.set(null);
     this.micState.set('opening');
     try {
@@ -199,7 +235,9 @@ export class StudioSessionService implements OnDestroy {
     this.exportError.set(null);
     this.exportReport.set(null);
     try {
-      const rendered = await renderMix({ pattern: this.pattern(), bpm: this.bpm(), bars, clips: this.activeClips(true) });
+      const gains = effectiveTrackGains(this.mixer());
+      const clips = this.trackClips(true).map(({ track, clip }) => ({ ...clip, gain: clip.gain * gains[track] }));
+      const rendered = await renderMix({ pattern: this.pattern(), bpm: this.bpm(), bars, drumsGain: gains.drums, clips });
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
       const wav = new Blob([encodeWav(channels, rendered.sampleRate)], { type: 'audio/wav' });
       downloadBlob(wav, `zakat-record-${this.bpm()}bpm.wav`);
@@ -212,13 +250,16 @@ export class StudioSessionService implements OnDestroy {
     }
   }
 
+  /** Démarre la lecture à la position courante (début du morceau, ou reprise après une pause). */
   private async startPlayback(includeTake = true): Promise<boolean> {
     try {
       const { context, master } = await this.engine.start();
-      this.transport ??= new PatternTransport(context, master, () => this.pattern(), () => this.bpm());
-      this.transport.play(this.activeClips(includeTake));
+      this.transport ??= new PatternTransport(context, master, () => this.pattern(), () => this.bpm(), () => this.metronome());
+      const fromSongStep = this.transportState() === 'paused' ? this.songStep() : 0;
+      this.transport.play({ clips: this.trackClips(includeTake), gains: effectiveTrackGains(this.mixer()), fromSongStep }, this.bpm());
       this.engineError.set(null);
-      this.playing.set(true);
+      this.songStep.set(fromSongStep);
+      this.transportState.set('playing');
       this.followPlayhead();
       return true;
     } catch (error) {
@@ -228,26 +269,32 @@ export class StudioSessionService implements OnDestroy {
     }
   }
 
-  private activeClips(includeTake: boolean): AudioClip[] {
-    const clips: AudioClip[] = [];
+  /** Clips à programmer ; le mute et le solo sont appliqués par les gains de piste. */
+  private trackClips(includeTake: boolean): TrackClip[] {
+    const clips: TrackClip[] = [];
     const instrumental = this.instrumental();
-    if (instrumental && !this.instrumentalMuted()) {
-      clips.push({ buffer: instrumental.buffer, startSeconds: 0, gain: INSTRUMENTAL_GAIN });
+    if (instrumental) {
+      clips.push({ track: 'instrumental', clip: { buffer: instrumental.buffer, startSeconds: 0, gain: INSTRUMENTAL_GAIN } });
     }
     const take = this.take();
-    if (includeTake && take && !this.takeMuted()) {
-      clips.push({ buffer: take.buffer, startSeconds: take.startSeconds, gain: TAKE_GAIN });
+    if (includeTake && take) {
+      clips.push({ track: 'voice', clip: { buffer: take.buffer, startSeconds: take.startSeconds, gain: TAKE_GAIN } });
     }
     return clips;
+  }
+
+  private haltTransport(): void {
+    cancelAnimationFrame(this.animationFrame);
+    this.transport?.stop();
   }
 
   /** Tête de lecture : le signal n'est écrit que lorsque le pas change (16 fois par mesure). */
   private followPlayhead(): void {
     const frame = () => {
       if (this.transport) {
-        const step = this.transport.stepAt(this.engine.currentTime());
-        if (step !== this.currentStep()) {
-          this.currentStep.set(step);
+        const step = this.transport.songStepAt(this.engine.currentTime());
+        if (step >= 0 && step !== this.songStep()) {
+          this.songStep.set(step);
         }
       }
       this.animationFrame = requestAnimationFrame(frame);

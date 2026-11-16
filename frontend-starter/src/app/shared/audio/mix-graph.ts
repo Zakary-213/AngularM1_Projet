@@ -35,27 +35,33 @@ export interface AudioClip {
 
 /**
  * Convertit la position d'un clip en arguments de `AudioBufferSourceNode.start()`.
- * Un clip qui commence avant le morceau démarre avec le morceau, son début étant sauté.
+ * `playStartTime` est la date (horloge audio) à laquelle la lecture démarre et
+ * `fromSeconds` la position du morceau à cet instant (0, ou la position de reprise
+ * après une pause). Un clip déjà commencé démarre tout de suite, son début étant sauté.
  */
-export function clipPlacement(songStartTime: number, clipStartSeconds: number): { when: number; offset: number } {
-  return clipStartSeconds >= 0
-    ? { when: songStartTime + clipStartSeconds, offset: 0 }
-    : { when: songStartTime, offset: -clipStartSeconds };
+export function clipPlacement(playStartTime: number, clipStartSeconds: number, fromSeconds = 0): { when: number; offset: number } {
+  const relative = clipStartSeconds - fromSeconds;
+  return relative >= 0 ? { when: playStartTime + relative, offset: 0 } : { when: playStartTime, offset: -relative };
 }
 
 export function scheduleClip(
   context: BaseAudioContext,
   output: AudioNode,
   clip: AudioClip,
-  songStartTime: number,
-): AudioBufferSourceNode {
-  const { when, offset } = clipPlacement(songStartTime, clip.startSeconds);
+  playStartTime: number,
+  fromSeconds = 0,
+): AudioBufferSourceNode | null {
+  const { when, offset } = clipPlacement(playStartTime, clip.startSeconds, fromSeconds);
+  if (offset >= clip.buffer.duration) {
+    // Clip déjà terminé à la position de reprise : rien à jouer.
+    return null;
+  }
   const source = context.createBufferSource();
   source.buffer = clip.buffer;
   const gain = context.createGain();
   gain.gain.value = clip.gain;
   source.connect(gain).connect(output);
-  source.start(when, Math.min(offset, clip.buffer.duration));
+  source.start(when, offset);
   return source;
 }
 

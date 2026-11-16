@@ -80,11 +80,13 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Visite 3D d'un studio au défilement : la caméra avance jusqu'au bureau (synthé, enceintes, écran) | ✅ Fonctionnel |
 | Interface | Pages Projets, Studio, Bibliothèque, Collaborations, Publications | 🎨 Maquette |
-| Moteur audio | Transport, BPM, métronome, horloge commune (Tone.js / Web Audio) | ⏳ À faire (M0, M2) |
+| Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
+| Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Composition | Drum Rack, Piano Roll, instruments, timeline | ⏳ À faire (M3 → M5) |
 | Import | Instrumentale MP3 / WAV, forme d'onde, égaliseur | ⏳ À faire (M6) |
-| Mix | Volume, mute / solo, pan, EQ, réverbération, delay | ⏳ À faire (M7) |
-| Voix | Enregistrement multiprise, correction de hauteur | ⏳ À faire (M8, M9) |
+| Mix | Volume, mute et solo par piste (écoute et export) faits ; pan, EQ, réverbération, delay | ⏳ À faire (M7) |
+| Voix | Prise micro (bouton ●) et onglet « Correction vocale » (YIN + PSOLA) dans `/studio` | 🧪 Prototype M0 intégré |
+| Voix (studio) | Enregistrement multiprise, correction sur les pistes | ⏳ À faire (M8, M9) |
 | ✍️ Paroles IA | Génération de couplets selon le thème et la cadence (BPM, mesures, flow), édition, prompteur synchronisé | ⏳ À faire (M12) |
 | Livraison | Sauvegarde complète, export WAV, tests de bout en bout | ⏳ À faire (M10, M11) |
 
@@ -128,7 +130,7 @@ gantt
 flowchart TB
     subgraph Navigateur
         UI[Angular 22<br/>composants standalone + Signals]
-        AUDIO[Moteur audio<br/>Web Audio · Tone.js]
+        AUDIO[Moteur audio<br/>Web Audio natif]
         GL[Studio 3D de l'accueil<br/>three.js, chargé à la demande]
     end
     subgraph Serveur
@@ -149,7 +151,7 @@ flowchart TB
 | Couche | Technologies | Responsabilité |
 |---|---|---|
 | Frontend | Angular 22, TypeScript strict, Signals, Angular Material | Pages, état du studio, accessibilité |
-| Moteur audio | Web Audio API, Tone.js *(prévu)*, MediaRecorder | Lecture synchronisée, instruments, enregistrement |
+| Moteur audio | Web Audio API native, MediaRecorder, OfflineAudioContext | Lecture synchronisée, instruments, enregistrement, export WAV |
 | 3D | three.js 0.187 (MIT), chunk séparé | Hero interactif de la page d'accueil |
 | Backend | Node.js, Express 5, Multer, bcryptjs, jsonwebtoken | API REST, droits, uploads |
 | Données | MongoDB + Mongoose 9 | Utilisateurs, métadonnées des pistes et projets |
@@ -168,15 +170,19 @@ flowchart TB
 │   ├── src/app/
 │   │   ├── components/          # Une page = un dossier (ts, html, css)
 │   │   │   ├── home-page/       # Accueil + scène 3D (instrument-scene.ts)
-│   │   │   ├── studio-page/     # Studio (maquette)
+│   │   │   ├── studio-page/     # Studio : transport, timeline, onglets d'édition
+│   │   │   ├── drum-rack-panel/ # Séquenceur 16 pas du studio
+│   │   │   ├── pitch-correction-panel/ # Correction vocale (chargée à la demande)
+│   │   │   ├── export-panel/    # Export WAV du mix
 │   │   │   ├── tracks-page/     # Fichiers audio : upload, lecture, suppression
 │   │   │   └── ...
 │   │   ├── shared/              # Services, guards, intercepteurs, modèles
+│   │   │   └── audio/           # Moteur audio (horloge, séquenceur, micro, export WAV)
 │   │   └── routes.ts            # Routes chargées à la demande
 │   └── public/                  # Polices locales et licences
 ├── backend/                     # API Express
 │   ├── src/app.js               # Routes et middlewares
-│   ├── src/models/              # Schémas Mongoose (User, Track)
+│   ├── src/models/              # Schémas Mongoose (User, Track, MusicalProject)
 │   └── test/                    # Tests node:test
 ├── .github/                     # CI, modèles d'issues et de PR, Dependabot
 ├── captures/                    # Captures de vérification
@@ -259,7 +265,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **10 / 10 tests frontend réussis**, build OK.
+Dernier résultat connu : **81 / 81 tests frontend** et **15 / 15 tests backend** réussis, build OK (16 novembre 2026).
 
 ---
 
@@ -285,6 +291,23 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 `User` contient `id`, `name`, `email`, `createdAt`, `hasAvatar` et `avatarUpdatedAt` ; le nom de stockage de la photo n'est jamais exposé. Photo de profil : le type annoncé **et** la signature binaire du fichier sont vérifiés (`400` sinon), `413` au-delà de 2 Mo, l'ancienne photo est supprimée après remplacement.
 
 `Page<Track>` contient `items`, `page`, `limit`, `total` et `pages`. Formats audio acceptés : MP3, WAV, OGG et M4A, 25 Mo maximum. Erreurs courantes : `400` validation, `401` authentification, `404` ressource absente ou non autorisée, `409` email déjà utilisé.
+
+### Projets musicaux — format v1 et routes prévues (M1, non implémentées)
+
+Définis en M0 (#5) pour l'issue #7. Le schéma est `backend/src/models/MusicalProject.js` (validé par `backend/test/musical-project.test.js`) ; les routes ci-dessous ne répondent pas encore.
+
+| Méthode | Route | Requête | Réponse principale |
+|---|---|---|---|
+| GET | `/projects?page=1&limit=10` | JWT | `200 Page<ProjectSummary>` (id, title, origin, bpm, updatedAt) |
+| POST | `/projects` | `{title, origin: "create"\|"import", bpm?}` + JWT | `201 Project` |
+| GET | `/projects/:id` | JWT (propriétaire) | `200 Project` |
+| PUT | `/projects/:id` | `{revision, title, bpm, key, tracks, patterns, master}` + JWT | `200 Project` (révision + 1) |
+| PATCH | `/projects/:id` | `{title}` + JWT | `200 Project` (renommage) |
+| DELETE | `/projects/:id` | JWT (propriétaire) | `204` |
+
+`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`), `tracks[]` (16 max. ; `id` stable, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `volume` 0 à 1, `pan` −1 à 1, `mute`, `solo`, `clips[]`), `patterns[]` (64 max. ; lignes de batterie de 16 pas, notes MIDI), `master.volume`, `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+
+Règles prévues : `ownerId` vient du JWT, jamais du corps ; seuls les champs listés sont copiés (liste blanche) ; `404` pour un projet absent **ou** d'un autre utilisateur ; `400` validation ; `409` si `revision` ne correspond plus (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `422` si `formatVersion` n'est pas pris en charge (le projet n'est pas réécrit).
 
 ---
 
@@ -314,6 +337,98 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 16 novembre 2026 — Pause, métronome, mixage par piste et zoom (M2, #8)
+
+- **Pause** : ▶ / ❚❚ alterne lecture et pause ; la pause garde la position et la reprise repart au même pas, clips compris (le début déjà joué est sauté). ■ arrête et revient au début. Une prise lancée depuis une pause démarre à cette position.
+- **Position** : le compteur affiche mesure : temps : double-croche (le pas est désormais compté depuis le début du morceau, plus seulement dans la boucle d'une mesure) ; une tête de lecture est tracée sur la timeline.
+- **Métronome** : bouton ♩ dans le transport, clic sur chaque temps et accent sur le premier ; il n'est ni mixé ni exporté.
+- **Mixage par piste** : chaque piste (batterie, instrumentale, voix) passe par son propre gain. Volume de −36 à +6 dB, mute et solo (le mute l'emporte) dans l'onglet Mixeur et sur la timeline ; les changements s'appliquent pendant la lecture avec un lissage de 15 ms et sont repris à l'identique dans l'export WAV. Logique pure dans `shared/audio/track-mix.ts`.
+- **Zoom** : boutons − / + de la timeline, 4, 8, 16 ou 32 mesures visibles ; la règle garde 8 repères.
+- **Vérifications** : `npm run build` réussi ; `npm test` 91/91 (10 nouveaux tests : gains, mute, solo, bornes du fader, reprise d'un clip, reprise du séquenceur au pas absolu). Navigateur : pause figée sur 07:03:04 puis reprise à 08:01:01 ; stop revient à 01:01:01 ; zoom à 8 mesures (règle 1 → 8) ; solo de la batterie affiché « Coupée par un solo » sur les deux autres pistes ; fader à −12 dB ; pas de débordement horizontal ; console sans erreur. **Non vérifié** à l'oreille : niveau réel des faders, clic du métronome, absence de claquement au changement de volume (le panneau navigateur ne restitue pas le son de façon fiable).
+- **Reste pour M2** : ajout, renommage et suppression de pistes, sélection de position sur la règle, état de sauvegarde.
+
+### 16 novembre 2026 — Intégration du labo dans le studio (M2)
+
+Le labo `/audio-lab` a été supprimé : tout ce qu'il démontrait est désormais dans `/studio`.
+
+- **Transport** : ▶ / ■ lance ou arrête la boucle, ● enregistre une prise sur la prod (micro demandé au clic, fermé à l'arrêt), ↤ arrête et revient au début ; le tempo est saisi directement dans le transport (60–200 BPM, une valeur invalide est signalée sans être appliquée) ; la position affiche temps et double-croche.
+- **Timeline** : pistes réelles de la session (Batterie, Instrumentale importée, Voix principale) placées selon leur durée et leur position ; bouton **M** pour rendre muette l'instrumentale ou la prise, pris en compte à la lecture et à l'export.
+- **Onglets** : *Batterie* (séquenceur 16 pas), *Correction vocale* (chargée à la demande, propose la dernière prise du studio), *Export* (WAV du mix écouté), *Mixeur* (encore un aperçu).
+- **Architecture** : l'état audio est dans `StudioSessionService`, fourni par la page Studio et libéré à sa sortie ; chaque panneau est un composant distinct.
+- **Vérifications** : `npm run build` réussi (studio 9 ko et correction vocale 5 ko transférés, à la demande) ; `npm test` 81/81. Navigateur : lecture en boucle avec tête de lecture, correction de la voix de test (37 → 23 cents en *Naturel*), onglet Export affiché, pas de débordement à 360 px, console sans erreur. **Non vérifié** : vraie prise micro et téléchargement WAV depuis le studio.
+
+### 16 novembre 2026 — M0 (suite) : format de projet et correction de hauteur (#5, #6)
+
+**Format de sauvegarde v1** : schéma Mongoose `MusicalProject` versionné (`formatVersion: 1`), limites nommées (`PROJECT_LIMITS`), identifiants stables générés par le client, positions de clips en temps, octets audio hors du document, `revision` pour refuser une sauvegarde concurrente. Routes M1 décrites dans le « Contrat d'API » (non implémentées).
+
+**Prototype de correction de hauteur** (onglet « Correction vocale » du studio, code dans `shared/audio/pitch/`) :
+
+- **Analyse** : YIN toutes les 5 ms sur le signal sous-échantillonné à ≈ 11 kHz, fenêtre de 40 ms, tessiture 70 Hz à 1 kHz, trames silencieuses ignorées.
+- **Cible** : note la plus proche dans la tonalité et la gamme (majeur ou mineur) ; **intensité** = part de l'écart corrigée ; **vitesse de recalage** = lissage en ms (0 ms = effet robotique). Préréglages *Naturel* (60 %, 80 ms) et *Effet marqué* (100 %, 0 ms).
+- **Synthèse** : TD-PSOLA (grains de deux périodes ré-espacés) : la hauteur change, **la durée est conservée**. L'original n'est jamais modifié ; la version corrigée est un nouveau buffer, écoutable en A/B et téléchargeable en WAV.
+- **Limites** : traitement sur le thread de l'interface (30 s maximum : ≈ 60 ms mesurées pour 3 s de voix sur la machine de test, à déporter dans un Web Worker si les prises réelles le justifient) ; marques de période approximatives, donc un grain audible possible sur les transitions ; formants non préservés pour les grands écarts ; voix mono.
+
+| Moteur envisagé | Licence | Intérêt | Décision |
+|---|---|---|---|
+| **PSOLA maison** (ce prototype) | Code du projet | Aucune dépendance, compréhensible, testé | **Retenu pour M9**, sous réserve de l'écoute |
+| Rubber Band (wasm) | GPL ou licence commerciale | Très bonne qualité | Écarté : contraintes de licence et taille |
+| SoundTouch | LGPL | Transposition globale robuste | Écarté : pas de correction note par note |
+| Vocodeur WORLD | BSD modifiée | Préserve mieux les formants | Plan B si PSOLA est jugé insuffisant |
+
+Les licences de ce tableau sont citées de mémoire et doivent être reconfirmées avant toute adoption.
+
+**Vérifications**
+
+- Frontend `npm test` : 81/81 (dont 14 tests de hauteur : conversions, gammes, YIN à ±0,5 % de 110 à 880 Hz, rejet du bruit, 230 Hz → 220 Hz et 243 Hz → 246,9 Hz à ±1 % avec durée identique, intensité de 60 %, intensité nulle sans effet, limite de 30 s). `npm run build` réussi.
+- Backend `npm test` : 15/15 (dont 7 tests du format v1 : valeurs par défaut, `toPublic`, bornes de BPM, version inconnue, nombre de pistes, 16 pas par ligne, clip pattern **ou** audio, identifiants et types).
+- Navigateur (Chromium, Playwright) : voix de test, écart moyen à la gamme **37 → 5 cents** en *Effet marqué* et **37 → 23 cents** en *Naturel* ; lecture A/B ; WAV corrigé de 3,00 s ; un fichier de 3 min est refusé (30 s max.). Pas de débordement à 360 px ni à 640 px (équivalent du zoom à 200 %) après correction d'un `fieldset` trop large.
+- **Non vérifié** : la qualité à l'oreille, en particulier sur une vraie voix. Le micro simulé de Chromium n'émet que des bips (0 % de trames voisées), donc aucune vraie prise n'a été corrigée.
+
+### 16 novembre 2026 — M0 : prototypes audio et cadrage technique (#5)
+
+**Démo technique :** d'abord une page `/audio-lab` isolée, désormais intégrée au studio (voir l'entrée « Intégration du labo dans le studio »). Code du moteur dans `frontend-starter/src/app/shared/audio/`.
+
+```mermaid
+flowchart LR
+    UI[Labo audio<br/>Signals] -->|clic| ENG[AudioEngineService<br/>un seul AudioContext]
+    SCH[StepScheduler<br/>réveil 25 ms, anticipation 100 ms] -->|frappes datées| SYN[drum-synth]
+    CLIP[Instrumentale + prise<br/>AudioBufferSourceNode] --> BUS
+    SYN --> BUS[Bus de lecture] --> MASTER[Master<br/>gain 0,8 + limiteur]
+    ENG --> SCH
+    MIC[MicrophoneRecorder<br/>getUserMedia + MediaRecorder] -->|prise séparée| CLIP
+    OFF[OfflineAudioContext<br/>même graphe] --> WAV[encodeWav<br/>PCM 16 bits]
+```
+
+- **Horloge commune** : chaque frappe et chaque fichier est daté sur `AudioContext.currentTime` à partir d'un même `startTime`. Le timer JavaScript ne fait que réveiller le scheduler (« lookahead ») ; un changement de BPM s'applique au pas suivant. La tête de lecture lit la file des pas programmés via `requestAnimationFrame` et n'écrit un signal qu'au changement de pas.
+- **Séquenceur** : 16 pas, kick / snare / hi-hat **synthétisés en code** (aucun sample, donc aucune licence à vérifier pour le prototype), BPM borné entre 60 et 200.
+- **Deux sources synchronisées** : un MP3/WAV local (25 Mo max., MP3 ou WAV contrôlés) démarre sur la même date que le séquenceur. Le fichier reste dans le navigateur : aucun upload en M0.
+- **Prise micro** : micro demandé seulement au clic sur « Enregistrer », traitements de visio désactivés, pas de retour micro, pistes coupées à l'arrêt. Format choisi selon `MediaRecorder.isTypeSupported` (Opus/WebM, Opus/Ogg, puis MP4 pour Safari). La prise originale est conservée telle quelle (ObjectURL libéré au remplacement et à la fermeture) et placée dans le morceau en retranchant la latence de sortie et d'entrée **estimée par le navigateur**.
+- **Export** : rendu `OfflineAudioContext` avec les mêmes fonctions que l'écoute (synthé, clips, Master), puis WAV PCM 16 bits stéréo 44,1 kHz encodé sans dépendance. La crête est affichée en dBFS.
+
+**Comparaison des options d'export**
+
+| Option | Avantages | Limites | Décision |
+|---|---|---|---|
+| `OfflineAudioContext` + encodeur WAV maison | Plus rapide que le temps réel, même graphe que l'écoute, aucune dépendance | WAV volumineux (≈ 10 Mo/min) ; mémoire proportionnelle à la durée | **Retenu pour la V1** |
+| `MediaRecorder` sur `MediaStreamDestination` | Simple | Temps réel (3 min d'attente pour 3 min), format compressé dépendant du navigateur | Écarté |
+| Encodeur MP3 JavaScript dans un Web Worker | Fichiers légers | Dépendance et licence à vérifier, travail supplémentaire | À évaluer en M10 si le MP3 est demandé |
+| FFmpeg (wasm ou serveur) | Tous les formats | ffmpeg.wasm pèse plusieurs dizaines de Mo ; côté serveur, il faut envoyer toutes les pistes | Écarté pour la V1 |
+
+**Choix du moteur : Web Audio natif, pas de Tone.js pour l'instant.** Le scheduler tient en moins de 80 lignes testées, fonctionne aussi hors ligne et n'ajoute aucune dépendance. Tone.js (15.1.22, licence MIT vérifiée sur npm, 5,4 Mo décompressé) reste l'option pour les instruments mélodiques de M4 ; on l'ajoutera si l'écriture des synthés et du sampler devient coûteuse, après mesure de la taille du chunk.
+
+**Licences**
+
+- Web Audio, MediaRecorder et OfflineAudioContext sont des API du navigateur ; le code du moteur est original. Aucun sample n'est utilisé.
+- Les fichiers `frontend-starter/fichiers-audio-de-test/song1.mp3` et `song2.mp3` (déjà présents dans le dépôt) n'ont **pas d'origine ni de licence documentée** : ils ne servent qu'aux tests locaux et ne doivent pas être distribués ni publiés. Le moteur de correction de hauteur est traité dans #6.
+
+**Vérifications**
+
+- `npm test` : 67/67 (dont 23 nouveaux tests : conversions temporelles, scheduler et dérive sur 60 s, pattern, placement des clips et de la prise, validation des fichiers, formats micro et messages d'erreur, encodeur WAV).
+- `npm run build` réussi.
+- Navigateur (Chromium via Playwright, micro simulé) : la tête de lecture avance, un BPM de 300 est refusé avec message, `song1.mp3` est décodé (180,06 s) et un fichier texte est refusé, une prise de 1,56 s est enregistrée en Opus/WebM puis le micro est fermé, l'export de 4 mesures à 140 BPM donne un WAV stéréo 44,1 kHz de 6,86 s (crête −0,6 dBFS). Aucune erreur console. Pas de débordement horizontal à 360 px ni à 800 px ; le séquenceur défile dans son cadre ; les pas se basculent à Entrée et Espace.
+- **Non vérifié** : l'écoute réelle (calage à l'oreille de l'instrumentale, du séquenceur et d'une vraie voix au casque), Firefox et Safari, le zoom à 200 %. La compensation de latence repose sur les valeurs annoncées par le navigateur ; une mesure par boucle (sortie reliée à l'entrée) sera nécessaire en M8.
+- **Complété le même jour** : format de sauvegarde et prototype de correction de hauteur (entrée ci-dessus).
 
 ### 15 novembre 2026 — Refonte de l'accueil : studio 3D (#39)
 

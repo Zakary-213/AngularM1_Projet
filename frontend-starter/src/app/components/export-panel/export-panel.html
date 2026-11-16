@@ -1,0 +1,18 @@
+<p class="muted">Rendu hors temps réel : batterie, instrumentale et prise vocale non muettes, exactement comme à l'écoute.</p>
+<div class="row">
+  <div class="field">
+    <label for="export-bars">Durée</label>
+    <select id="export-bars" [formControl]="bars">
+      @for (choice of barChoices; track choice) { <option [ngValue]="choice">{{ choice }} mesure{{ choice > 1 ? 's' : '' }}</option> }
+    </select>
+  </div>
+  <button type="button" class="button" (click)="exportWav()" [disabled]="session.exporting()">
+    {{ session.exporting() ? 'Rendu en cours…' : '⬇ Exporter en WAV' }}
+  </button>
+</div>
+<div role="status">
+  @if (session.exportReport(); as report) {
+    <p>Fichier généré : {{ formatSeconds(report.seconds) }}, crête {{ formatDecibels(report.peakDb) }}.</p>
+  }
+</div>
+@if (session.exportError(); as message) { <p class="error" role="alert">{{ message }}</p> }

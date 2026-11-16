@@ -1,0 +1,42 @@
+:host {
+  display: block;
+  padding: 18px 20px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.field select {
+  min-height: 44px;
+  width: 9rem;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #404040;
+  background: #0d0d0d;
+  color: inherit;
+}
+
+.error {
+  color: #ff8a80;
+}

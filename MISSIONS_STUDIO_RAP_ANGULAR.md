@@ -130,13 +130,13 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **But :** vérifier les choix les plus risqués avant de construire toute l'interface.
 
-- [ ] Créer les dossiers `frontend` / `backend` et le dépôt Git.
+- [x] Créer les dossiers `frontend` / `backend` et le dépôt Git.
 - [ ] Définir les modèles, les routes API et le format de sauvegarde d'un projet.
 - [ ] Tester la lecture de **deux sources audio synchronisées** avec Tone.js/Web Audio API.
 - [ ] Tester un **séquenceur simple au BPM choisi** et l'écoute en boucle.
 - [ ] Tester l'accès au microphone et le rendu d'une prise séparée de la prod.
 - [ ] Réaliser un **prototype de correction de hauteur sur un court fichier vocal**.
-- [ ] Comparer les options de rendu/export et leurs limites.
+- [x] Comparer les options de rendu/export et leurs limites.
 - [ ] Vérifier les licences des moteurs, instruments et samples retenus.
 
 **Livrable :** démo technique audio + schéma d'architecture + choix documentés.

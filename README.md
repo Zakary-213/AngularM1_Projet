@@ -80,7 +80,8 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Visite 3D d'un studio au défilement : la caméra avance jusqu'au bureau (synthé, enceintes, écran) | ✅ Fonctionnel |
 | Interface | Pages Projets, Studio, Bibliothèque, Collaborations, Publications | 🎨 Maquette |
-| Moteur audio | Transport, BPM, métronome, horloge commune (Tone.js / Web Audio) | ⏳ À faire (M0, M2) |
+| Moteur audio | Prototype `/audio-lab` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 |
+| Studio | Transport, métronome, pistes branchées sur le moteur | ⏳ À faire (M2) |
 | Composition | Drum Rack, Piano Roll, instruments, timeline | ⏳ À faire (M3 → M5) |
 | Import | Instrumentale MP3 / WAV, forme d'onde, égaliseur | ⏳ À faire (M6) |
 | Mix | Volume, mute / solo, pan, EQ, réverbération, delay | ⏳ À faire (M7) |
@@ -128,7 +129,7 @@ gantt
 flowchart TB
     subgraph Navigateur
         UI[Angular 22<br/>composants standalone + Signals]
-        AUDIO[Moteur audio<br/>Web Audio · Tone.js]
+        AUDIO[Moteur audio<br/>Web Audio natif]
         GL[Studio 3D de l'accueil<br/>three.js, chargé à la demande]
     end
     subgraph Serveur
@@ -149,7 +150,7 @@ flowchart TB
 | Couche | Technologies | Responsabilité |
 |---|---|---|
 | Frontend | Angular 22, TypeScript strict, Signals, Angular Material | Pages, état du studio, accessibilité |
-| Moteur audio | Web Audio API, Tone.js *(prévu)*, MediaRecorder | Lecture synchronisée, instruments, enregistrement |
+| Moteur audio | Web Audio API native, MediaRecorder, OfflineAudioContext | Lecture synchronisée, instruments, enregistrement, export WAV |
 | 3D | three.js 0.187 (MIT), chunk séparé | Hero interactif de la page d'accueil |
 | Backend | Node.js, Express 5, Multer, bcryptjs, jsonwebtoken | API REST, droits, uploads |
 | Données | MongoDB + Mongoose 9 | Utilisateurs, métadonnées des pistes et projets |
@@ -169,9 +170,11 @@ flowchart TB
 │   │   ├── components/          # Une page = un dossier (ts, html, css)
 │   │   │   ├── home-page/       # Accueil + scène 3D (instrument-scene.ts)
 │   │   │   ├── studio-page/     # Studio (maquette)
+│   │   │   ├── audio-lab-page/  # Labo audio : prototype M0
 │   │   │   ├── tracks-page/     # Fichiers audio : upload, lecture, suppression
 │   │   │   └── ...
 │   │   ├── shared/              # Services, guards, intercepteurs, modèles
+│   │   │   └── audio/           # Moteur audio (horloge, séquenceur, micro, export WAV)
 │   │   └── routes.ts            # Routes chargées à la demande
 │   └── public/                  # Polices locales et licences
 ├── backend/                     # API Express
@@ -259,7 +262,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **10 / 10 tests frontend réussis**, build OK.
+Dernier résultat connu : **67 / 67 tests frontend réussis**, build OK (16 novembre 2026).
 
 ---
 
@@ -314,6 +317,51 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 16 novembre 2026 — M0 : prototypes audio et cadrage technique (#5)
+
+**Démo technique :** page `/audio-lab` (lien « Labo audio » dans l'en-tête du studio), chargée à la demande (≈ 8 ko transférés). Code du moteur dans `frontend-starter/src/app/shared/audio/`.
+
+```mermaid
+flowchart LR
+    UI[Labo audio<br/>Signals] -->|clic| ENG[AudioEngineService<br/>un seul AudioContext]
+    SCH[StepScheduler<br/>réveil 25 ms, anticipation 100 ms] -->|frappes datées| SYN[drum-synth]
+    CLIP[Instrumentale + prise<br/>AudioBufferSourceNode] --> BUS
+    SYN --> BUS[Bus de lecture] --> MASTER[Master<br/>gain 0,8 + limiteur]
+    ENG --> SCH
+    MIC[MicrophoneRecorder<br/>getUserMedia + MediaRecorder] -->|prise séparée| CLIP
+    OFF[OfflineAudioContext<br/>même graphe] --> WAV[encodeWav<br/>PCM 16 bits]
+```
+
+- **Horloge commune** : chaque frappe et chaque fichier est daté sur `AudioContext.currentTime` à partir d'un même `startTime`. Le timer JavaScript ne fait que réveiller le scheduler (« lookahead ») ; un changement de BPM s'applique au pas suivant. La tête de lecture lit la file des pas programmés via `requestAnimationFrame` et n'écrit un signal qu'au changement de pas.
+- **Séquenceur** : 16 pas, kick / snare / hi-hat **synthétisés en code** (aucun sample, donc aucune licence à vérifier pour le prototype), BPM borné entre 60 et 200.
+- **Deux sources synchronisées** : un MP3/WAV local (25 Mo max., MP3 ou WAV contrôlés) démarre sur la même date que le séquenceur. Le fichier reste dans le navigateur : aucun upload en M0.
+- **Prise micro** : micro demandé seulement au clic sur « Enregistrer », traitements de visio désactivés, pas de retour micro, pistes coupées à l'arrêt. Format choisi selon `MediaRecorder.isTypeSupported` (Opus/WebM, Opus/Ogg, puis MP4 pour Safari). La prise originale est conservée telle quelle (ObjectURL libéré au remplacement et à la fermeture) et placée dans le morceau en retranchant la latence de sortie et d'entrée **estimée par le navigateur**.
+- **Export** : rendu `OfflineAudioContext` avec les mêmes fonctions que l'écoute (synthé, clips, Master), puis WAV PCM 16 bits stéréo 44,1 kHz encodé sans dépendance. La crête est affichée en dBFS.
+
+**Comparaison des options d'export**
+
+| Option | Avantages | Limites | Décision |
+|---|---|---|---|
+| `OfflineAudioContext` + encodeur WAV maison | Plus rapide que le temps réel, même graphe que l'écoute, aucune dépendance | WAV volumineux (≈ 10 Mo/min) ; mémoire proportionnelle à la durée | **Retenu pour la V1** |
+| `MediaRecorder` sur `MediaStreamDestination` | Simple | Temps réel (3 min d'attente pour 3 min), format compressé dépendant du navigateur | Écarté |
+| Encodeur MP3 JavaScript dans un Web Worker | Fichiers légers | Dépendance et licence à vérifier, travail supplémentaire | À évaluer en M10 si le MP3 est demandé |
+| FFmpeg (wasm ou serveur) | Tous les formats | ffmpeg.wasm pèse plusieurs dizaines de Mo ; côté serveur, il faut envoyer toutes les pistes | Écarté pour la V1 |
+
+**Choix du moteur : Web Audio natif, pas de Tone.js pour l'instant.** Le scheduler tient en moins de 80 lignes testées, fonctionne aussi hors ligne et n'ajoute aucune dépendance. Tone.js (15.1.22, licence MIT vérifiée sur npm, 5,4 Mo décompressé) reste l'option pour les instruments mélodiques de M4 ; on l'ajoutera si l'écriture des synthés et du sampler devient coûteuse, après mesure de la taille du chunk.
+
+**Licences**
+
+- Web Audio, MediaRecorder et OfflineAudioContext sont des API du navigateur ; le code du moteur est original. Aucun sample n'est utilisé.
+- Les fichiers `frontend-starter/fichiers-audio-de-test/song1.mp3` et `song2.mp3` (déjà présents dans le dépôt) n'ont **pas d'origine ni de licence documentée** : ils ne servent qu'aux tests locaux et ne doivent pas être distribués ni publiés. Le moteur de correction de hauteur est traité dans #6.
+
+**Vérifications**
+
+- `npm test` : 67/67 (dont 23 nouveaux tests : conversions temporelles, scheduler et dérive sur 60 s, pattern, placement des clips et de la prise, validation des fichiers, formats micro et messages d'erreur, encodeur WAV).
+- `npm run build` réussi.
+- Navigateur (Chromium via Playwright, micro simulé) : la tête de lecture avance, un BPM de 300 est refusé avec message, `song1.mp3` est décodé (180,06 s) et un fichier texte est refusé, une prise de 1,56 s est enregistrée en Opus/WebM puis le micro est fermé, l'export de 4 mesures à 140 BPM donne un WAV stéréo 44,1 kHz de 6,86 s (crête −0,6 dBFS). Aucune erreur console. Pas de débordement horizontal à 360 px ni à 800 px ; le séquenceur défile dans son cadre ; les pas se basculent à Entrée et Espace.
+- **Non vérifié** : l'écoute réelle (calage à l'oreille de l'instrumentale, du séquenceur et d'une vraie voix au casque), Firefox et Safari, le zoom à 200 %. La compensation de latence repose sur les valeurs annoncées par le navigateur ; une mesure par boucle (sortie reliée à l'entrée) sera nécessaire en M8.
+- **Reporté** : le format de sauvegarde d'un projet est défini avec le modèle `MusicalProject` dans #7 (M1) ; le prototype de correction de hauteur est dans #6.
 
 ### 15 novembre 2026 — Refonte de l'accueil : studio 3D (#39)
 

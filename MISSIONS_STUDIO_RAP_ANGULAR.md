@@ -322,6 +322,48 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [ ] Enregistrer les réglages de correction.
 - [ ] Inclure la version corrigée dans l'export audio.
 
+### C. Extension : préréglages par style et mode personnalisé
+
+**But :** rendre la correction vocale utilisable sans connaître la théorie : l'utilisateur choisit un **style** en un clic, l'écoute, puis affine seulement s'il le souhaite.
+
+**Interface en deux niveaux**
+
+- [ ] **Niveau simple (par défaut)** : une rangée de cartes de style, un seul bouton rotatif **« Dose d'effet »** (0 à 100 %, qui pilote ensemble intensité et vitesse dans les proportions du style), la tonalité du projet reprise automatiquement, et un bouton **Avant / Après**.
+- [ ] Chaque carte affiche une phrase d'explication (« voix juste mais naturelle », « effet robotique assumé »…) et se prévisualise sur la prise courante avant d'être appliquée.
+- [ ] **Niveau avancé (repliable)** : tous les réglages du style choisi, modifiables ; toute modification bascule sur **« Personnalisé (basé sur Trap) »** au lieu d'écraser le préréglage.
+- [ ] Bouton **Réinitialiser le style** et possibilité d'**enregistrer son propre préréglage** avec le projet.
+- [ ] Afficher la courbe de hauteur (détectée et corrigée) sur la durée de la prise, pour voir où la voix est recalée.
+
+**Préréglages de style (valeurs de départ, à ajuster à l'écoute)**
+
+| Style | Intention | Intensité | Vitesse de recalage | Gamme suggérée | Spectre / couleur |
+|---|---|---|---|---|---|
+| **Naturel** | Voix juste, effet inaudible | 40–60 % | lente (80–120 ms) | celle du projet | aucun changement |
+| **Rap** | Couplets parlés-rappés, juste un « lissage » | 20–40 % | lente (100–150 ms) | celle du projet | coupe-bas, léger gain de présence |
+| **Trap** | Effet marqué et mélodique | 100 % | instantanée (0–10 ms) | mineure | présence et « air » renforcés |
+| **Drill** | Voix sombre, correction discrète | 30–50 % | moyenne (40–60 ms) | mineure | bas-médiums accentués, aigus adoucis |
+| **Raï** | Chant ornementé : garder les mélismes | 50–70 % | lente (60–100 ms) pour ne pas écraser les ornements | **mineure harmonique** ou **phrygien dominant** (Hijaz) | médiums chauds, légère brillance |
+| **Robot** | Effet extrême, sauts de notes nets | 100 % | 0 ms | celle du projet | inchangé |
+| **Personnalisé** | Tous les réglages libres | — | — | — | — |
+
+**Réglages du mode avancé / personnalisé**
+
+- [ ] Tonalité, gamme (ajouter **mineure harmonique** et **phrygien dominant** aux gammes majeure et mineure) et **notes autorisées** cochables une par une.
+- [ ] Intensité, vitesse de recalage et **naturel / humanisation** (tolérance en cents avant correction, pour garder les petites variations et le vibrato).
+- [ ] **Spectre de la voix** : égaliseur simple (coupe-bas, corps, présence, air) appliqué à la piste corrigée.
+- [ ] **Formants / timbre** (voix plus grave ou plus claire sans changer la note) **uniquement si le moteur retenu le permet** : le PSOLA actuel ne préserve pas les formants (voir la limite notée en M0) ; sinon documenter la limite et masquer le réglage.
+- [ ] Transposition volontaire (± 12 demi-tons), clairement distinguée de la correction.
+
+**Contraintes**
+
+- [ ] Les préréglages sont des **données** (nom, description, valeurs) dans un seul fichier, testées unitairement (bornes, gammes, valeurs par style).
+- [ ] La prise originale n'est jamais modifiée ; changer de style recalcule la version corrigée.
+- [ ] Le traitement d'une prise longue ne bloque pas l'interface (état « calcul en cours », possibilité d'annuler).
+- [ ] Accessible au clavier : cartes de style = boutons radio, réglages avec labels et valeur lue (« 70 % », « 40 ms »).
+- [ ] Les noms de style décrivent un rendu, pas un artiste : ne pas citer ni imiter la voix d'un artiste existant.
+
+**Critère de validation de l'extension :** sur une même prise, l'utilisateur passe d'un style à l'autre et entend la différence en un clic ; il peut personnaliser un style, l'enregistrer avec le projet et le retrouver à la réouverture.
+
 > [!WARNING]
 > **Auto-Tune** est aussi une marque commerciale. Dans le projet, utiliser « correction de hauteur vocale » ou « effet de type Auto-Tune » tant qu'aucune technologie sous cette marque n'est intégrée. Le rendu et la qualité dépendront du moteur effectivement retenu.
 

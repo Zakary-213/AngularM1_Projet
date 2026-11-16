@@ -89,6 +89,12 @@ describe('correction de hauteur', () => {
     expect(after).toBeLessThan(before / 2);
   });
 
+  it('accepte un extrait d’une minute sans changer sa durée', () => {
+    expect(MAX_CORRECTION_SECONDS).toBe(60);
+    const minute = new Float32Array(MAX_CORRECTION_SECONDS * 8000);
+    expect(correctPitch(minute, 8000, { ...A_MINOR, ...PITCH_PRESETS.hard }).output.length).toBe(minute.length);
+  });
+
   it('refuse un extrait trop long', () => {
     expect(() => correctPitch(new Float32Array((MAX_CORRECTION_SECONDS + 1) * 8000), 8000, { ...A_MINOR, ...PITCH_PRESETS.hard })).toThrow(RangeError);
   });

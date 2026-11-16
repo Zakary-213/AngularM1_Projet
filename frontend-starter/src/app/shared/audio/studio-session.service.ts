@@ -7,6 +7,8 @@ import { MicrophoneRecorder, describeMicrophoneError, takeStartSeconds } from '.
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm } from './music-time';
 import { renderMix } from './offline-render';
 import { PatternTransport, TrackClip } from './pattern-transport';
+import { NOTE_NAMES, SCALE_LABELS } from './pitch/musical-scale';
+import { ProjectKey } from './pitch/vocal-styles';
 import { MixerState, TrackId, TrackMix, clampTrackDb, createDefaultMixer, effectiveTrackGains, updateTrack } from './track-mix';
 import { encodeWav, peakLevel } from './wav-encoder';
 
@@ -29,6 +31,13 @@ export interface VocalTake {
   readonly mimeType: string;
   readonly startSeconds: number;
   readonly latencyMs: number;
+}
+
+/** Version corrigée de la prise, produite par l'onglet Correction vocale (l'original reste intact). */
+export interface CorrectedTake {
+  readonly buffer: AudioBuffer;
+  /** Style appliqué, pour l'affichage (« Trap », « Personnalisé (basé sur Raï) »…). */
+  readonly styleLabel: string;
 }
 
 export interface ExportReport {
@@ -59,6 +68,9 @@ export class StudioSessionService implements OnDestroy {
   /** Pas en surbrillance dans le séquenceur, ou -1 à l'arrêt. */
   readonly currentStep = computed(() => (this.transportState() === 'stopped' ? -1 : this.songStep() % STEPS_PER_BAR));
   readonly metronome = signal(false);
+  /** Tonalité du projet (la mineur par défaut) : reprise par la correction vocale. */
+  readonly projectKey = signal<ProjectKey>({ root: 9, scale: 'minor' });
+  readonly projectKeyLabel = computed(() => `${NOTE_NAMES[this.projectKey().root]} ${SCALE_LABELS[this.projectKey().scale]}`);
   readonly mixer = signal<MixerState>(createDefaultMixer());
   readonly engineError = signal<string | null>(null);
 
@@ -69,6 +81,9 @@ export class StudioSessionService implements OnDestroy {
   readonly micState = signal<MicState>('idle');
   readonly micError = signal<string | null>(null);
   readonly take = signal<VocalTake | null>(null);
+  readonly correctedTake = signal<CorrectedTake | null>(null);
+  /** Lire la version corrigée sur la piste Voix (écoute et export) au lieu de l'originale. */
+  readonly useCorrectedTake = signal(false);
 
   readonly exporting = signal(false);
   readonly exportError = signal<string | null>(null);
@@ -209,6 +224,9 @@ export class StudioSessionService implements OnDestroy {
           ? takeStartSeconds(this.recorderStartedAt, songStart, latencySeconds)
           : 0;
       this.revokeTakeUrl();
+      // Une nouvelle prise rend l'ancienne correction obsolète.
+      this.correctedTake.set(null);
+      this.useCorrectedTake.set(false);
       this.take.set({
         buffer,
         url: URL.createObjectURL(recorded.blob),
@@ -278,7 +296,9 @@ export class StudioSessionService implements OnDestroy {
     }
     const take = this.take();
     if (includeTake && take) {
-      clips.push({ track: 'voice', clip: { buffer: take.buffer, startSeconds: take.startSeconds, gain: TAKE_GAIN } });
+      const corrected = this.useCorrectedTake() ? this.correctedTake() : null;
+      // Même position que l'original : la correction conserve la durée de la prise.
+      clips.push({ track: 'voice', clip: { buffer: corrected?.buffer ?? take.buffer, startSeconds: take.startSeconds, gain: TAKE_GAIN } });
     }
     return clips;
   }

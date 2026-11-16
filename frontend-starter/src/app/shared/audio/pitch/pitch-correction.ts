@@ -1,4 +1,4 @@
-import { ScaleName, frequencyToMidi, nearestScaleMidi } from './musical-scale';
+import { ScaleName, frequencyToMidi, nearestAllowedMidi, scalePitchClasses } from './musical-scale';
 import { detectPitch } from './pitch-detection';
 
 /**
@@ -8,7 +8,8 @@ import { detectPitch } from './pitch-detection';
  * 3. synthèse : TD-PSOLA, qui recopie des grains de deux périodes à un nouvel espacement.
  *    La durée est conservée, contrairement à un simple changement de vitesse.
  * Limites connues : marques de période approximatives (pas de détection des
- * fermetures glottiques), formants non préservés pour les grands écarts.
+ * fermetures glottiques), formants non préservés pour les grands écarts : le
+ * timbre ne peut donc pas être réglé indépendamment de la note avec ce moteur.
  */
 
 export interface PitchCorrectionSettings {
@@ -19,6 +20,25 @@ export interface PitchCorrectionSettings {
   readonly strength: number;
   /** Temps de glissement vers la note cible, en millisecondes (0 = effet robotique). */
   readonly retuneMs: number;
+  /**
+   * Classes de hauteur autorisées (0 = do … 11 = si). Par défaut, les notes de la gamme.
+   * Permet de retirer une note de la gamme pour que la voix ne s'y pose jamais.
+   */
+  readonly allowedPitchClasses?: readonly number[];
+  /** Écart toléré avant correction, en cents (0 = tout est corrigé) : garde le vibrato et les nuances. */
+  readonly toleranceCents?: number;
+  /** Transposition volontaire ajoutée après la correction, en demi-tons. */
+  readonly transposeSemitones?: number;
+}
+
+/** Bornes des réglages, partagées par l'interface, les préréglages et la validation. */
+export const MAX_RETUNE_MS = 300;
+export const MAX_TOLERANCE_CENTS = 50;
+export const MAX_TRANSPOSE_SEMITONES = 12;
+
+/** Notes vers lesquelles la voix est recalée. */
+export function targetPitchClasses(settings: Pick<PitchCorrectionSettings, 'root' | 'scale' | 'allowedPitchClasses'>): readonly number[] {
+  return settings.allowedPitchClasses ?? scalePitchClasses(settings.root, settings.scale);
 }
 
 export type PitchPreset = 'natural' | 'hard';
@@ -28,8 +48,8 @@ export const PITCH_PRESETS: Readonly<Record<PitchPreset, Pick<PitchCorrectionSet
   hard: { strength: 1, retuneMs: 0 },
 };
 
-/** Durée maximale traitée dans le navigateur, en secondes (calcul sur le thread de l'interface). */
-export const MAX_CORRECTION_SECONDS = 30;
+/** Durée maximale traitée dans le navigateur, en secondes (calcul dans un Web Worker). */
+export const MAX_CORRECTION_SECONDS = 60;
 export const ANALYSIS_HOP_SECONDS = 0.005;
 const ANALYSIS_WINDOW_SECONDS = 0.04;
 /** Fréquence d'analyse visée : suffisante jusqu'à 1 kHz, et quatre fois moins de calcul qu'à 44,1 kHz. */
@@ -70,10 +90,23 @@ function rms(samples: Float32Array): number {
   return samples.length ? Math.sqrt(sum / samples.length) : 0;
 }
 
+/** Écart en cents entre une hauteur et la note autorisée la plus proche. */
+export function deviationCents(hz: number, allowedPitchClasses: readonly number[]): number {
+  const midi = frequencyToMidi(hz);
+  return (nearestAllowedMidi(midi, allowedPitchClasses) - midi) * 100;
+}
+
 /** Écart en cents entre une hauteur et la note la plus proche de la gamme. */
 export function scaleDeviationCents(hz: number, root: number, scale: ScaleName): number {
-  const midi = frequencyToMidi(hz);
-  return (nearestScaleMidi(midi, root, scale) - midi) * 100;
+  return deviationCents(hz, scalePitchClasses(root, scale));
+}
+
+/**
+ * Correction visée pour un écart donné : rien sous la tolérance (humanisation),
+ * sinon la part `strength` de l'écart.
+ */
+export function targetCorrectionCents(deviation: number, strength: number, toleranceCents = 0): number {
+  return Math.abs(deviation) <= toleranceCents ? 0 : deviation * strength;
 }
 
 export function analyzePitch(samples: Float32Array, sampleRate: number, settings: PitchCorrectionSettings): PitchFrame[] {
@@ -85,6 +118,8 @@ export function analyzePitch(samples: Float32Array, sampleRate: number, settings
   const frameCount = Math.ceil(samples.length / (ANALYSIS_HOP_SECONDS * sampleRate));
   // Lissage exponentiel du glissement : coefficient par trame selon retuneMs.
   const smoothing = settings.retuneMs <= 0 ? 1 : 1 - Math.exp(-(ANALYSIS_HOP_SECONDS * 1000) / settings.retuneMs);
+  const allowed = targetPitchClasses(settings);
+  const transposeCents = (settings.transposeSemitones ?? 0) * 100;
 
   const frames: PitchFrame[] = [];
   let currentCents = 0;
@@ -93,9 +128,10 @@ export function analyzePitch(samples: Float32Array, sampleRate: number, settings
     const start = Math.max(0, Math.min(signal.length - windowLength, center - Math.floor(windowLength / 2)));
     const window = signal.subarray(Math.max(0, start), Math.max(0, start) + windowLength);
     const detectedHz = window.length === windowLength && rms(window) >= SILENCE_RMS ? detectPitch(window, analysisRate) : null;
-    const targetCents = detectedHz ? scaleDeviationCents(detectedHz, settings.root, settings.scale) * settings.strength : 0;
+    const targetCents = detectedHz ? targetCorrectionCents(deviationCents(detectedHz, allowed), settings.strength, settings.toleranceCents) : 0;
     currentCents += smoothing * (targetCents - currentCents);
-    frames.push({ detectedHz, correctionCents: currentCents });
+    // La transposition s'ajoute sans lissage : elle déplace toute la voix, voisée ou non.
+    frames.push({ detectedHz, correctionCents: currentCents + transposeCents });
   }
   return frames;
 }
@@ -164,12 +200,17 @@ export function correctPitch(samples: Float32Array, sampleRate: number, settings
   return { output: resynthesize(samples, sampleRate, frames), frames };
 }
 
-/** Moyenne de |écart à la gamme| en cents sur les trames voisées, ou `null` sans trame voisée. */
-export function meanScaleDeviation(frames: readonly PitchFrame[], root: number, scale: ScaleName): number | null {
+/** Moyenne de |écart aux notes autorisées| en cents sur les trames voisées, ou `null` sans trame voisée. */
+export function meanDeviation(frames: readonly PitchFrame[], allowedPitchClasses: readonly number[]): number | null {
   const voiced = frames.filter(frame => frame.detectedHz !== null);
   if (voiced.length === 0) {
     return null;
   }
-  const total = voiced.reduce((sum, frame) => sum + Math.abs(scaleDeviationCents(frame.detectedHz!, root, scale)), 0);
+  const total = voiced.reduce((sum, frame) => sum + Math.abs(deviationCents(frame.detectedHz!, allowedPitchClasses)), 0);
   return total / voiced.length;
+}
+
+/** Moyenne de |écart à la gamme| en cents sur les trames voisées, ou `null` sans trame voisée. */
+export function meanScaleDeviation(frames: readonly PitchFrame[], root: number, scale: ScaleName): number | null {
+  return meanDeviation(frames, scalePitchClasses(root, scale));
 }

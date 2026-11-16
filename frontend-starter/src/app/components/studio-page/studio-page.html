@@ -22,7 +22,7 @@
     <label for="studio-bpm"><small>TEMPO</small></label>
     <b><input id="studio-bpm" class="bpm-input" type="number" [min]="minBpm" [max]="maxBpm" step="1" [formControl]="bpmControl" aria-describedby="studio-bpm-help" /> <span>BPM</span></b>
   </div>
-  <div class="transport-setting"><small>TONALITÉ</small><b>La mineur</b></div>
+  <div class="transport-setting"><small>TONALITÉ</small><b>{{ session.projectKeyLabel() }}</b></div>
   <div class="transport-setting"><small>MESURE</small><b>4 / 4</b></div>
   <p class="transport-status" role="status">
     @switch (session.micState()) {
@@ -104,7 +104,7 @@
     @case ('Correction vocale') {
       <!-- Module lourd (YIN + PSOLA) chargé seulement à l'ouverture de l'onglet. -->
       @defer (on immediate) {
-        <div class="editor-body"><app-pitch-correction-panel [take]="session.take()?.buffer ?? null" /></div>
+        <div class="editor-body"><app-pitch-correction-panel /></div>
       } @loading {
         <p class="editor-body muted">Chargement de la correction vocale…</p>
       }

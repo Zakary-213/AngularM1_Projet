@@ -1,78 +1,221 @@
-<h2 id="pitch-title">Correction de hauteur <small class="muted">— prototype, appliquée après la prise</small></h2>
-<p class="muted">Détection de la note chantée (YIN) puis recalage sur la gamme choisie (TD-PSOLA) : la durée est conservée. L'original n'est jamais modifié.</p>
+<h2 id="pitch-title">Correction vocale <small class="muted">— appliquée après la prise, l'original n'est jamais modifié</small></h2>
 
-<fieldset class="sources">
-  <legend>Voix à corriger ({{ maxSeconds }} s maximum)</legend>
+<fieldset class="box">
+  <legend>1. Voix à corriger ({{ maxSeconds }} s maximum)</legend>
   <div class="row">
+    <button type="button" class="button" (click)="useStudioTake()" [disabled]="!session.take()">Dernière prise du studio</button>
     <button type="button" class="button" (click)="useTestVoice()">Voix de test</button>
-    <button type="button" class="button" (click)="useTake()" [disabled]="!take()">Dernière prise du studio</button>
     <div class="field">
       <label for="pitch-file">Ou un fichier vocal MP3 / WAV</label>
       <input id="pitch-file" type="file" [accept]="audioAccept" (change)="onFileSelected($event)" />
     </div>
   </div>
   <p role="status" class="small">
-    @if (source(); as loaded) { Source : {{ loaded.label }} } @else { Aucune voix choisie. }
+    @if (source(); as loaded) { Source : {{ loaded.label }} } @else { Aucune voix choisie : enregistrez une prise (●) ou essayez la voix de test. }
   </p>
   @if (sourceError(); as message) { <p class="error" role="alert">{{ message }}</p> }
 </fieldset>
 
-<form [formGroup]="form" (ngSubmit)="correct()">
+<fieldset class="box">
+  <legend>2. Style</legend>
+  <div class="style-grid" role="radiogroup" aria-label="Style de correction">
+    @for (style of styles; track style.id) {
+      <label class="style-card" [class.selected]="styleId() === style.id && !userStyleName()">
+        <input type="radio" name="vocal-style" [value]="style.id" [checked]="styleId() === style.id && !userStyleName()" (change)="selectStyle(style.id)" [attr.aria-label]="style.name + ' : ' + style.description" />
+        <b>{{ style.name }}</b>
+        <span>{{ style.description }}</span>
+      </label>
+    }
+    @for (style of userStyles(); track style.name) {
+      <label class="style-card user" [class.selected]="userStyleName() === style.name">
+        <input type="radio" name="vocal-style" [value]="'user:' + style.name" [checked]="userStyleName() === style.name" (change)="selectUserStyle(style)" [attr.aria-label]="style.name + ' : mon style, basé sur ' + baseName(style.basedOn)" />
+        <b>{{ style.name }}</b>
+        <span>Mon style · basé sur {{ baseName(style.basedOn) }}</span>
+      </label>
+    }
+  </div>
+
+  <div class="row dose-row">
+    @if (custom()) {
+      <p class="custom-note" role="status"><b>{{ styleLabel() }}</b> · réglages modifiés dans le panneau avancé.</p>
+      <button type="button" class="button secondary" (click)="resetStyle()">Réinitialiser le style</button>
+    } @else {
+      <div class="field slider">
+        <label for="pitch-dose">Dose d'effet : <b>{{ (dose() * 100).toFixed(0) }} %</b></label>
+        <input id="pitch-dose" type="range" min="0" max="100" step="5" [value]="dose() * 100" (input)="onDose($event)" [attr.aria-valuetext]="(dose() * 100).toFixed(0) + ' %'" aria-describedby="pitch-dose-help" />
+        <small id="pitch-dose-help" class="muted">Baisse l'intensité et adoucit le recalage ensemble, dans l'esprit du style.</small>
+      </div>
+    }
+    <p class="small key-note">Tonalité : <b>{{ noteNames[settings().root] }} {{ scaleLabels[settings().scale] }}</b>{{ custom() ? '' : ' (projet' + (settings().scale !== session.projectKey().scale ? ', gamme du style)' : ')') }}</p>
+  </div>
+</fieldset>
+
+<fieldset class="box">
+  <legend>3. Écouter et utiliser</legend>
+  <div class="row" role="status">
+    @if (processing()) {
+      <span class="busy"><span class="spinner" aria-hidden="true"></span> Calcul en cours…</span>
+      <button type="button" class="button secondary" (click)="cancel()">Annuler</button>
+    } @else if (result(); as done) {
+      <span class="small">Version prête : <b>{{ done.styleLabel }}</b> · calculée en {{ done.processingMs }} ms</span>
+    } @else if (source()) {
+      <button type="button" class="button secondary" (click)="retry()">Calculer la correction</button>
+    }
+  </div>
+  @if (processError(); as message) {
+    <p class="error" role="alert">{{ message }} <button type="button" class="link" (click)="retry()">Réessayer</button></p>
+  }
+
   <div class="row">
-    <div class="field">
-      <label for="pitch-root">Tonalité</label>
-      <select id="pitch-root" formControlName="root">
-        @for (name of noteNames; track $index) { <option [ngValue]="$index">{{ name }}</option> }
-      </select>
+    <button type="button" class="button" (click)="listen('before')" [disabled]="!source()" [attr.aria-pressed]="listening() === 'before'">{{ listening() === 'before' ? '■ Arrêter' : '▶ Avant' }}</button>
+    <button type="button" class="button primary" (click)="listen('after')" [disabled]="!result() || processing()" [attr.aria-pressed]="listening() === 'after'">{{ listening() === 'after' ? '■ Arrêter' : '▶ Après' }}</button>
+    <button type="button" class="button secondary" (click)="download()" [disabled]="!result() || processing()">⬇ WAV corrigé</button>
+  </div>
+
+  @if (source()?.fromStudioTake) {
+    <div class="row track-row">
+      @if (correctedOnTrack()) {
+        <p class="small" role="status">Piste Voix : <b>version corrigée ({{ session.correctedTake()?.styleLabel }})</b>, à l'écoute et à l'export.</p>
+        <button type="button" class="button secondary" (click)="applyToVoiceTrack()" [disabled]="!result() || processing()">Mettre à jour avec ce réglage</button>
+        <button type="button" class="button secondary" (click)="useOriginalOnTrack()">Revenir à l'originale</button>
+      } @else {
+        <p class="small" role="status">Piste Voix : prise originale.</p>
+        <button type="button" class="button" (click)="applyToVoiceTrack()" [disabled]="!result() || processing()">Utiliser la version corrigée sur la piste Voix</button>
+      }
     </div>
-    <div class="field">
-      <label for="pitch-scale">Gamme</label>
-      <select id="pitch-scale" formControlName="scale">
-        @for (scale of scales; track scale) { <option [ngValue]="scale">{{ scaleLabels[scale] }}</option> }
-      </select>
-    </div>
-    <div class="field">
-      <span class="label" id="preset-label">Préréglage</span>
-      <div class="row tight" role="group" aria-labelledby="preset-label">
-        <button type="button" class="button" (click)="applyPreset('natural')">Naturel</button>
-        <button type="button" class="button" (click)="applyPreset('hard')">Effet marqué</button>
+  }
+
+  @if (result(); as done) {
+    <dl class="facts">
+      <div><dt>Écart moyen aux notes, avant</dt><dd>{{ formatCents(done.beforeCents) }}</dd></div>
+      <div><dt>Après</dt><dd>{{ formatCents(done.afterCents) }}</dd></div>
+      <div><dt>Voix détectée</dt><dd>{{ done.voicedPercent }} % du temps</dd></div>
+    </dl>
+    @if (curve(); as paths) {
+      <figure class="curve">
+        <svg [attr.viewBox]="'0 0 ' + curveWidth + ' ' + curveHeight" preserveAspectRatio="none" role="img" aria-labelledby="curve-caption">
+          <path class="detected" [attr.d]="paths.detected" />
+          <path class="corrected" [attr.d]="paths.corrected" />
+        </svg>
+        <figcaption id="curve-caption" class="small">
+          Hauteur sur la durée de la prise : <span class="legend detected">— chantée</span> <span class="legend corrected">— corrigée</span>
+        </figcaption>
+      </figure>
+    }
+  }
+</fieldset>
+
+<details class="box advanced">
+  <summary>Réglages avancés <span class="muted">— toute modification passe en « Personnalisé »</span></summary>
+  <form [formGroup]="advanced">
+    <div class="row">
+      <div class="field">
+        <label for="adv-root">Tonalité</label>
+        <select id="adv-root" formControlName="root">
+          @for (name of noteNames; track $index) { <option [ngValue]="$index">{{ name }}</option> }
+        </select>
+      </div>
+      <div class="field">
+        <label for="adv-scale">Gamme</label>
+        <select id="adv-scale" formControlName="scale" class="wide">
+          @for (scale of scaleNames; track scale) { <option [ngValue]="scale">{{ scaleLabels[scale] }}</option> }
+        </select>
       </div>
     </div>
-  </div>
-  <div class="row">
-    <div class="field slider">
-      <label for="pitch-strength">Intensité : {{ form.controls.strengthPercent.value }} %</label>
-      <input id="pitch-strength" type="range" min="0" max="100" step="5" formControlName="strengthPercent" />
-    </div>
-    <div class="field slider">
-      <label for="pitch-retune">Vitesse de recalage : {{ form.controls.retuneMs.value }} ms</label>
-      <input id="pitch-retune" type="range" min="0" max="300" step="10" formControlName="retuneMs" aria-describedby="pitch-retune-help" />
-      <small id="pitch-retune-help" class="muted">0 ms = saut immédiat sur la note (effet robotique).</small>
-    </div>
-  </div>
-  <button type="submit" class="button primary" [disabled]="!source() || processing()">
-    {{ processing() ? 'Calcul en cours…' : 'Appliquer la correction' }}
-  </button>
-</form>
-@if (processError(); as message) { <p class="error" role="alert">{{ message }}</p> }
 
-<div role="status">
-  @if (report(); as result) {
-    <dl class="facts">
-      <div><dt>Écart moyen à la gamme avant</dt><dd>{{ formatCents(result.beforeCents) }}</dd></div>
-      <div><dt>Écart moyen après</dt><dd>{{ formatCents(result.afterCents) }}</dd></div>
-      <div><dt>Trames voisées</dt><dd>{{ result.voicedPercent }} %</dd></div>
-      <div><dt>Temps de calcul</dt><dd>{{ result.processingMs }} ms</dd></div>
-    </dl>
+    <fieldset class="notes" formArrayName="notes">
+      <legend>Notes autorisées <span class="muted">(décochez une note pour que la voix ne s'y pose jamais)</span></legend>
+      @for (name of noteNames; track $index) {
+        <label class="note"><input type="checkbox" [formControlName]="$index" /> {{ name }}</label>
+      }
+    </fieldset>
+
+    <h3>Justesse</h3>
+    <div class="row">
+      <div class="field slider">
+        <label for="adv-strength">Intensité : <b>{{ advanced.controls.strengthPercent.value }} %</b></label>
+        <input id="adv-strength" type="range" min="0" max="100" step="5" formControlName="strengthPercent" />
+      </div>
+      <div class="field slider">
+        <label for="adv-retune">Vitesse de recalage : <b>{{ advanced.controls.retuneMs.value }} ms</b></label>
+        <input id="adv-retune" type="range" min="0" [max]="limits.retune" step="5" formControlName="retuneMs" aria-describedby="adv-retune-help" />
+        <small id="adv-retune-help" class="muted">0 ms = saut immédiat sur la note (effet robotique).</small>
+      </div>
+      <div class="field slider">
+        <label for="adv-tolerance">Naturel : <b>{{ advanced.controls.toleranceCents.value }} cents tolérés</b></label>
+        <input id="adv-tolerance" type="range" min="0" [max]="limits.tolerance" step="5" formControlName="toleranceCents" aria-describedby="adv-tolerance-help" />
+        <small id="adv-tolerance-help" class="muted">Les petits écarts (vibrato, nuances) sous ce seuil ne sont pas corrigés.</small>
+      </div>
+      <div class="field slider">
+        <label for="adv-transpose">Transposition : <b>{{ formatSigned(advanced.controls.transposeSemitones.value, 'demi-tons') }}</b></label>
+        <input id="adv-transpose" type="range" [min]="-limits.transpose" [max]="limits.transpose" step="1" formControlName="transposeSemitones" aria-describedby="adv-transpose-help" />
+        <small id="adv-transpose-help" class="muted">Déplace volontairement toute la voix ; ce n'est pas une correction de justesse.</small>
+      </div>
+    </div>
+
+    <h3>Spectre de la voix</h3>
+    <div class="row">
+      <div class="field slider">
+        <label for="adv-lowcut">Coupe-bas : <b>{{ advanced.controls.lowCutHz.value > 0 ? advanced.controls.lowCutHz.value + ' Hz' : 'désactivé' }}</b></label>
+        <input id="adv-lowcut" type="range" min="0" [max]="limits.lowCut" step="10" formControlName="lowCutHz" />
+      </div>
+      <div class="field slider">
+        <label for="adv-body">Corps (250 Hz) : <b>{{ formatSigned(advanced.controls.bodyDb.value, 'dB') }}</b></label>
+        <input id="adv-body" type="range" [min]="-limits.eq" [max]="limits.eq" step="1" formControlName="bodyDb" />
+      </div>
+      <div class="field slider">
+        <label for="adv-presence">Présence (3,5 kHz) : <b>{{ formatSigned(advanced.controls.presenceDb.value, 'dB') }}</b></label>
+        <input id="adv-presence" type="range" [min]="-limits.eq" [max]="limits.eq" step="1" formControlName="presenceDb" />
+      </div>
+      <div class="field slider">
+        <label for="adv-air">Air (10 kHz) : <b>{{ formatSigned(advanced.controls.airDb.value, 'dB') }}</b></label>
+        <input id="adv-air" type="range" [min]="-limits.eq" [max]="limits.eq" step="1" formControlName="airDb" />
+      </div>
+    </div>
+    <h3>Espace</h3>
+    <div class="row">
+      <div class="field slider">
+        <label for="adv-reverb">Réverbération : <b>{{ advanced.controls.reverbPercent.value }} %</b></label>
+        <input id="adv-reverb" type="range" min="0" max="100" step="5" formControlName="reverbPercent" />
+      </div>
+      <div class="field slider">
+        <label for="adv-reverb-time">Taille de la salle : <b>{{ advanced.controls.reverbSeconds.value.toFixed(1).replace('.', ',') }} s</b></label>
+        <input id="adv-reverb-time" type="range" [min]="limits.minReverbSeconds" [max]="limits.maxReverbSeconds" step="0.1" formControlName="reverbSeconds" />
+      </div>
+      <div class="field slider">
+        <label for="adv-delay">Écho : <b>{{ advanced.controls.delayPercent.value }} %</b></label>
+        <input id="adv-delay" type="range" min="0" max="100" step="5" formControlName="delayPercent" />
+      </div>
+      <div class="field slider">
+        <label for="adv-delay-time">Temps d'écho : <b>{{ advanced.controls.delayMs.value }} ms</b></label>
+        <input id="adv-delay-time" type="range" [min]="limits.minDelayMs" [max]="limits.maxDelayMs" step="10" formControlName="delayMs" />
+        <button type="button" class="link" (click)="syncDelayToTempo()">Caler sur le tempo ({{ session.bpm() }} BPM, croche)</button>
+      </div>
+      <div class="field slider">
+        <label for="adv-feedback">Répétitions de l'écho : <b>{{ advanced.controls.feedbackPercent.value }} %</b></label>
+        <input id="adv-feedback" type="range" min="0" [max]="limits.maxFeedback * 100" step="5" formControlName="feedbackPercent" />
+      </div>
+    </div>
+
+    <p class="small muted">Timbre / formants (voix plus grave ou plus claire sans changer la note) : non disponible avec le moteur actuel (PSOLA), qui ne sépare pas le timbre de la hauteur.</p>
+  </form>
+
+  <div class="row save-row">
+    <div class="field">
+      <label for="style-name">Enregistrer ces réglages comme mon style</label>
+      <input id="style-name" type="text" [formControl]="styleName" [maxlength]="30" placeholder="Ex. Refrain trap doux" aria-describedby="style-name-help" />
+      <small id="style-name-help" class="muted" [class.error]="styleName.touched && styleName.invalid">
+        @if (styleName.touched && styleName.invalid) { Donnez un nom (30 caractères maximum). } @else { Gardé dans ce navigateur, avec les styles de base. }
+      </small>
+    </div>
+    <button type="button" class="button" (click)="saveUserStyle()">Enregistrer</button>
+  </div>
+  @if (saveMessage(); as message) { <p class="small" role="status">{{ message }}</p> }
+  @if (userStyles().length > 0) {
+    <ul class="user-styles">
+      @for (style of userStyles(); track style.name) {
+        <li>{{ style.name }} <button type="button" class="link" (click)="deleteUserStyle(style)" [attr.aria-label]="'Supprimer le style ' + style.name">Supprimer</button></li>
+      }
+    </ul>
   }
-</div>
-
-<div class="row">
-  <button type="button" class="button" (click)="listen('original')" [disabled]="!source()" [attr.aria-pressed]="listening() === 'original'">
-    {{ listening() === 'original' ? '■ Arrêter' : '▶ Original' }}
-  </button>
-  <button type="button" class="button" (click)="listen('corrected')" [disabled]="!report()" [attr.aria-pressed]="listening() === 'corrected'">
-    {{ listening() === 'corrected' ? '■ Arrêter' : '▶ Corrigé' }}
-  </button>
-  <button type="button" class="button secondary" (click)="download()" [disabled]="!report()">⬇ WAV corrigé</button>
-</div>
+</details>

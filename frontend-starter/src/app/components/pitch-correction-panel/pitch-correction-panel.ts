@@ -1,18 +1,31 @@
-import { Component, OnDestroy, inject, input, signal } from '@angular/core';
-import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { Component, DestroyRef, OnDestroy, computed, effect, inject, signal, untracked } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormArray, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AudioEngineService } from '../../shared/audio/audio-engine.service';
 import { AUDIO_FILE_ACCEPT, validateAudioFile } from '../../shared/audio/audio-file';
-import { NOTE_NAMES, SCALE_LABELS, ScaleName } from '../../shared/audio/pitch/musical-scale';
-import {
-  MAX_CORRECTION_SECONDS,
-  PITCH_PRESETS,
-  PitchCorrectionSettings,
-  PitchPreset,
-  analyzePitch,
-  correctPitch,
-  meanScaleDeviation,
-} from '../../shared/audio/pitch/pitch-correction';
+import { NOTE_NAMES, SCALE_LABELS, SCALE_NAMES, ScaleName, scalePitchClasses } from '../../shared/audio/pitch/musical-scale';
+import { MAX_CORRECTION_SECONDS, MAX_RETUNE_MS, MAX_TOLERANCE_CENTS, MAX_TRANSPOSE_SEMITONES, PitchFrame, meanDeviation } from '../../shared/audio/pitch/pitch-correction';
+import { pitchCurvePaths } from '../../shared/audio/pitch/pitch-curve';
+import { PitchJobCancelled, PitchJobRunner } from '../../shared/audio/pitch/pitch-job';
 import { createTestVoice } from '../../shared/audio/pitch/test-voice';
+import {
+  DEFAULT_DOSE,
+  DEFAULT_STYLE_ID,
+  MAX_STYLE_NAME_LENGTH,
+  MAX_USER_STYLES,
+  UserVocalStyle,
+  VOCAL_STYLES,
+  VocalStyleId,
+  VoiceSettings,
+  findStyle,
+  parseUserStyles,
+  sameSettings,
+  sanitizeVoiceSettings,
+  styleSettings,
+} from '../../shared/audio/pitch/vocal-styles';
+import { MAX_EQ_DB, MAX_LOW_CUT_HZ } from '../../shared/audio/pitch/voice-eq';
+import { FX_LIMITS, applyVoiceChain, tempoDelayMs } from '../../shared/audio/pitch/voice-fx';
+import { StudioSessionService, downloadBlob } from '../../shared/audio/studio-session.service';
 import { encodeWav } from '../../shared/audio/wav-encoder';
 
 interface VocalSource {
@@ -20,17 +33,27 @@ interface VocalSource {
   /** Mono : la correction travaille sur une seule voix. */
   readonly samples: Float32Array<ArrayBuffer>;
   readonly sampleRate: number;
+  /** La source est la prise du studio : la version corrigée peut remplacer la piste Voix. */
+  readonly fromStudioTake: boolean;
 }
 
-interface CorrectionReport {
+interface CorrectionResult {
   readonly buffer: AudioBuffer;
+  readonly frames: PitchFrame[];
   readonly beforeCents: number | null;
   readonly afterCents: number | null;
   readonly voicedPercent: number;
   readonly processingMs: number;
+  readonly styleLabel: string;
 }
 
-type Listening = 'original' | 'corrected' | null;
+type Listening = 'before' | 'after' | null;
+
+/** Délai avant de recalculer après un changement de réglage (évite un calcul par cran de curseur). */
+const RECOMPUTE_DELAY_MS = 250;
+const USER_STYLES_STORAGE_KEY = 'zakat.vocalStyles.v1';
+export const CURVE_WIDTH = 600;
+export const CURVE_HEIGHT = 120;
 
 function toMono(buffer: AudioBuffer): Float32Array<ArrayBuffer> {
   if (buffer.numberOfChannels === 1) {
@@ -44,8 +67,10 @@ function toMono(buffer: AudioBuffer): Float32Array<ArrayBuffer> {
 }
 
 /**
- * Prototype de correction de hauteur (#6) : la prise originale n'est jamais
- * modifiée ; la version corrigée est un nouveau buffer, comparable à l'oreille.
+ * Correction vocale du studio (M9) : on choisit un style en un clic et on règle
+ * une seule « dose d'effet » ; le panneau avancé expose tous les réglages et
+ * bascule en « Personnalisé ». L'original n'est jamais modifié : chaque réglage
+ * produit une nouvelle version, calculée dans un Web Worker et annulable.
  */
 @Component({
   selector: 'app-pitch-correction-panel',
@@ -55,51 +80,135 @@ function toMono(buffer: AudioBuffer): Float32Array<ArrayBuffer> {
 })
 export class PitchCorrectionPanelComponent implements OnDestroy {
   private readonly engine = inject(AudioEngineService);
+  readonly session = inject(StudioSessionService);
+  private readonly runner = new PitchJobRunner();
   private playingSource: AudioBufferSourceNode | null = null;
+  /** Incrémenté à chaque calcul : un résultat arrivé en retard n'écrase pas un plus récent. */
+  private generation = 0;
 
-  /** Dernière prise du studio, proposée comme source. */
-  readonly take = input<AudioBuffer | null>(null);
-
+  readonly styles = VOCAL_STYLES;
   readonly noteNames = NOTE_NAMES;
+  readonly scaleNames = SCALE_NAMES;
   readonly scaleLabels = SCALE_LABELS;
-  readonly scales: readonly ScaleName[] = ['minor', 'major'];
   readonly maxSeconds = MAX_CORRECTION_SECONDS;
   readonly audioAccept = AUDIO_FILE_ACCEPT;
-
-  readonly form = new FormGroup({
-    root: new FormControl(9, { nonNullable: true }),
-    scale: new FormControl<ScaleName>('minor', { nonNullable: true }),
-    strengthPercent: new FormControl(PITCH_PRESETS.natural.strength * 100, { nonNullable: true }),
-    retuneMs: new FormControl(PITCH_PRESETS.natural.retuneMs, { nonNullable: true }),
-  });
+  readonly limits = { retune: MAX_RETUNE_MS, tolerance: MAX_TOLERANCE_CENTS, transpose: MAX_TRANSPOSE_SEMITONES, lowCut: MAX_LOW_CUT_HZ, eq: MAX_EQ_DB, ...FX_LIMITS };
+  readonly curveWidth = CURVE_WIDTH;
+  readonly curveHeight = CURVE_HEIGHT;
 
   readonly source = signal<VocalSource | null>(null);
   readonly sourceError = signal<string | null>(null);
+
+  readonly styleId = signal<VocalStyleId>(DEFAULT_STYLE_ID);
+  /** Nom du style personnel choisi, s'il y en a un. */
+  readonly userStyleName = signal<string | null>(null);
+  readonly dose = signal(DEFAULT_DOSE);
+  /** Réglages modifiés à la main ; `null` tant qu'on suit le style choisi. */
+  readonly custom = signal<VoiceSettings | null>(null);
+  readonly userStyles = signal<UserVocalStyle[]>(this.loadUserStyles());
+
+  readonly settings = computed<VoiceSettings>(
+    () => this.custom() ?? styleSettings(findStyle(this.styleId()), this.dose(), this.session.projectKey(), this.session.bpm()),
+  );
+  readonly styleLabel = computed(() => {
+    const base = this.userStyleName() ?? findStyle(this.styleId()).name;
+    return this.custom() ? `Personnalisé (basé sur ${base})` : base;
+  });
+
   readonly processing = signal(false);
-  readonly report = signal<CorrectionReport | null>(null);
+  readonly result = signal<CorrectionResult | null>(null);
   readonly processError = signal<string | null>(null);
   readonly listening = signal<Listening>(null);
+  readonly saveMessage = signal<string | null>(null);
+
+  readonly curve = computed(() => {
+    const result = this.result();
+    return result ? pitchCurvePaths(result.frames, CURVE_WIDTH, CURVE_HEIGHT) : null;
+  });
+  readonly correctedOnTrack = computed(() => this.session.useCorrectedTake() && this.session.correctedTake() !== null);
+
+  readonly advanced = new FormGroup({
+    root: new FormControl(9, { nonNullable: true }),
+    scale: new FormControl<ScaleName>('minor', { nonNullable: true }),
+    notes: new FormArray(NOTE_NAMES.map(() => new FormControl(false, { nonNullable: true }))),
+    strengthPercent: new FormControl(50, { nonNullable: true }),
+    retuneMs: new FormControl(100, { nonNullable: true }),
+    toleranceCents: new FormControl(0, { nonNullable: true }),
+    transposeSemitones: new FormControl(0, { nonNullable: true }),
+    lowCutHz: new FormControl(0, { nonNullable: true }),
+    bodyDb: new FormControl(0, { nonNullable: true }),
+    presenceDb: new FormControl(0, { nonNullable: true }),
+    airDb: new FormControl(0, { nonNullable: true }),
+    reverbPercent: new FormControl(0, { nonNullable: true }),
+    reverbSeconds: new FormControl(1.5, { nonNullable: true }),
+    delayPercent: new FormControl(0, { nonNullable: true }),
+    delayMs: new FormControl(330, { nonNullable: true }),
+    feedbackPercent: new FormControl(30, { nonNullable: true }),
+  });
+  readonly styleName = new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(MAX_STYLE_NAME_LENGTH)] });
+
+  constructor() {
+    // Le formulaire avancé reflète toujours les réglages effectifs (sans redéclencher ses abonnements).
+    effect(() => this.patchAdvanced(this.settings()));
+    this.advanced.valueChanges.pipe(takeUntilDestroyed()).subscribe(() => this.onAdvancedEdited());
+
+    // Recalcul automatique : changer de style ou de dose suffit pour entendre la différence.
+    effect(onCleanup => {
+      const source = this.source();
+      const settings = this.settings();
+      const label = this.styleLabel();
+      if (!source) {
+        return;
+      }
+      const timer = setTimeout(() => untracked(() => void this.compute(source, settings, label)), RECOMPUTE_DELAY_MS);
+      onCleanup(() => clearTimeout(timer));
+    });
+
+    // Propose d'emblée la prise du studio si elle existe.
+    const destroyRef = inject(DestroyRef);
+    destroyRef.onDestroy(() => this.runner.cancel());
+    if (this.session.take()) {
+      this.useStudioTake();
+    }
+  }
 
   ngOnDestroy(): void {
     this.stopListening();
   }
 
-  applyPreset(preset: PitchPreset): void {
-    const { strength, retuneMs } = PITCH_PRESETS[preset];
-    this.form.patchValue({ strengthPercent: strength * 100, retuneMs });
+  selectStyle(id: VocalStyleId): void {
+    this.userStyleName.set(null);
+    this.styleId.set(id);
+    this.custom.set(null);
   }
 
-  useTake(): void {
-    const take = this.take();
+  selectUserStyle(style: UserVocalStyle): void {
+    this.styleId.set(style.basedOn);
+    this.userStyleName.set(style.name);
+    // Un style personnel garde sa propre tonalité : il a été réglé pour elle.
+    this.custom.set(style.settings);
+  }
+
+  onDose(event: Event): void {
+    this.dose.set(Number((event.target as HTMLInputElement).value) / 100);
+  }
+
+  resetStyle(): void {
+    this.custom.set(null);
+    this.userStyleName.set(null);
+    this.dose.set(DEFAULT_DOSE);
+  }
+
+  useStudioTake(): void {
+    const take = this.session.take();
     if (take) {
-      this.setSource({ label: 'Dernière prise du studio', samples: toMono(take), sampleRate: take.sampleRate });
+      this.setSource({ label: 'Dernière prise du studio', samples: toMono(take.buffer), sampleRate: take.buffer.sampleRate, fromStudioTake: true });
     }
   }
 
   async useTestVoice(): Promise<void> {
     const { context } = await this.engine.start();
-    this.setSource({ label: 'Voix de test synthétique (mélodie fausse en la mineur)', samples: createTestVoice(context.sampleRate), sampleRate: context.sampleRate });
-    this.form.patchValue({ root: 9, scale: 'minor' });
+    this.setSource({ label: 'Voix de test (mélodie fausse en la mineur)', samples: createTestVoice(context.sampleRate), sampleRate: context.sampleRate, fromStudioTake: false });
   }
 
   async onFileSelected(event: Event): Promise<void> {
@@ -116,46 +225,23 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
     }
     try {
       const buffer = await this.engine.decode(await file.arrayBuffer());
-      this.setSource({ label: file.name, samples: toMono(buffer), sampleRate: buffer.sampleRate });
+      this.setSource({ label: file.name, samples: toMono(buffer), sampleRate: buffer.sampleRate, fromStudioTake: false });
     } catch (decodeError) {
       console.error('[pitch-correction] décodage impossible', decodeError);
       this.sourceError.set('Fichier illisible ou corrompu.');
     }
   }
 
-  async correct(): Promise<void> {
+  cancel(): void {
+    this.generation++;
+    this.runner.cancel();
+    this.processing.set(false);
+  }
+
+  retry(): void {
     const source = this.source();
-    if (!source || this.processing()) {
-      return;
-    }
-    this.stopListening();
-    this.processing.set(true);
-    this.processError.set(null);
-    // Laisse l'interface afficher « Calcul en cours » avant le calcul synchrone.
-    await new Promise(resolve => setTimeout(resolve));
-    try {
-      const settings = this.settings();
-      const started = performance.now();
-      const { output, frames } = correctPitch(source.samples, source.sampleRate, settings);
-      const processingMs = performance.now() - started;
-      // Ré-analyse de la sortie, sans correction, pour mesurer l'écart restant.
-      const afterFrames = analyzePitch(output, source.sampleRate, { ...settings, strength: 0 });
-      const { context } = await this.engine.start();
-      const buffer = context.createBuffer(1, output.length, source.sampleRate);
-      buffer.copyToChannel(output, 0);
-      this.report.set({
-        buffer,
-        beforeCents: meanScaleDeviation(frames, settings.root, settings.scale),
-        afterCents: meanScaleDeviation(afterFrames, settings.root, settings.scale),
-        voicedPercent: Math.round((100 * frames.filter(frame => frame.detectedHz !== null).length) / Math.max(1, frames.length)),
-        processingMs: Math.round(processingMs),
-      });
-      console.log('[pitch-correction] correction appliquée', { processingMs: Math.round(processingMs), seconds: output.length / source.sampleRate });
-    } catch (error) {
-      console.error('[pitch-correction] correction impossible', error);
-      this.processError.set(error instanceof RangeError ? error.message : 'La correction a échoué.');
-    } finally {
-      this.processing.set(false);
+    if (source) {
+      void this.compute(source, this.settings(), this.styleLabel());
     }
   }
 
@@ -166,11 +252,10 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
       return;
     }
     const source = this.source();
-    const report = this.report();
     const { context, master } = await this.engine.start();
     let buffer: AudioBuffer | null = null;
-    if (which === 'corrected') {
-      buffer = report?.buffer ?? null;
+    if (which === 'after') {
+      buffer = this.result()?.buffer ?? null;
     } else if (source) {
       buffer = context.createBuffer(1, source.samples.length, source.sampleRate);
       buffer.copyToChannel(source.samples, 0);
@@ -192,38 +277,191 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
     this.listening.set(which);
   }
 
+  /** Remplace la prise de la piste Voix par la version corrigée (l'originale reste conservée). */
+  applyToVoiceTrack(): void {
+    const result = this.result();
+    if (result && this.source()?.fromStudioTake) {
+      this.session.correctedTake.set({ buffer: result.buffer, styleLabel: result.styleLabel });
+      this.session.useCorrectedTake.set(true);
+    }
+  }
+
+  useOriginalOnTrack(): void {
+    this.session.useCorrectedTake.set(false);
+  }
+
   download(): void {
-    const report = this.report();
-    if (!report) {
+    const result = this.result();
+    if (result) {
+      downloadBlob(new Blob([encodeWav([result.buffer.getChannelData(0)], result.buffer.sampleRate)], { type: 'audio/wav' }), 'zakat-record-voix-corrigee.wav');
+    }
+  }
+
+  saveUserStyle(): void {
+    if (this.styleName.invalid) {
+      this.styleName.markAsTouched();
       return;
     }
-    const url = URL.createObjectURL(new Blob([encodeWav([report.buffer.getChannelData(0)], report.buffer.sampleRate)], { type: 'audio/wav' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'zakat-record-voix-corrigee.wav';
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url));
+    const name = this.styleName.value.trim();
+    const others = this.userStyles().filter(style => style.name !== name);
+    if (others.length >= MAX_USER_STYLES) {
+      this.saveMessage.set(`${MAX_USER_STYLES} styles personnels maximum : supprimez-en un.`);
+      return;
+    }
+    const style: UserVocalStyle = { name, basedOn: this.styleId(), settings: this.settings() };
+    this.persistUserStyles([...others, style], `Style « ${name} » enregistré dans ce navigateur.`);
+    this.userStyleName.set(name);
+    this.custom.set(style.settings);
+    this.styleName.reset();
+  }
+
+  deleteUserStyle(style: UserVocalStyle): void {
+    this.persistUserStyles(this.userStyles().filter(other => other.name !== style.name), `Style « ${style.name} » supprimé.`);
+    if (this.userStyleName() === style.name) {
+      this.userStyleName.set(null);
+    }
+  }
+
+  /** Cale l'écho sur la croche du tempo du projet. */
+  syncDelayToTempo(): void {
+    this.advanced.controls.delayMs.setValue(tempoDelayMs(this.session.bpm(), 0.5));
+  }
+
+  baseName(id: VocalStyleId): string {
+    return findStyle(id).name;
   }
 
   formatCents(cents: number | null): string {
     return cents === null ? '—' : `${Math.round(cents)} cents`;
   }
 
-  private settings(): PitchCorrectionSettings {
-    const { root, scale, strengthPercent, retuneMs } = this.form.getRawValue();
-    return { root: Number(root), scale, strength: Number(strengthPercent) / 100, retuneMs: Number(retuneMs) };
+  formatSigned(value: number, unit: string): string {
+    return `${value > 0 ? '+' : ''}${value} ${unit}`;
+  }
+
+  private async compute(source: VocalSource, settings: VoiceSettings, styleLabel: string): Promise<void> {
+    const generation = ++this.generation;
+    this.stopListening();
+    this.processing.set(true);
+    this.processError.set(null);
+    try {
+      const job = await this.runner.run(source.samples, source.sampleRate, settings);
+      const equalized = await applyVoiceChain(job.output, source.sampleRate, settings.eq, settings.fx);
+      if (generation !== this.generation) {
+        return;
+      }
+      const { context } = await this.engine.start();
+      const buffer = context.createBuffer(1, equalized.length, source.sampleRate);
+      buffer.copyToChannel(equalized, 0);
+      const allowed = settings.allowedPitchClasses;
+      this.result.set({
+        buffer,
+        frames: job.frames,
+        beforeCents: meanDeviation(job.frames, allowed),
+        afterCents: meanDeviation(job.afterFrames, allowed),
+        voicedPercent: Math.round((100 * job.frames.filter(frame => frame.detectedHz !== null).length) / Math.max(1, job.frames.length)),
+        processingMs: Math.round(job.processingMs),
+        styleLabel,
+      });
+      console.log('[pitch-correction] correction appliquée', { style: styleLabel, processingMs: Math.round(job.processingMs) });
+    } catch (error) {
+      if (error instanceof PitchJobCancelled || generation !== this.generation) {
+        return;
+      }
+      console.error('[pitch-correction] correction impossible', error);
+      this.processError.set(error instanceof Error ? error.message : 'La correction a échoué.');
+    } finally {
+      if (generation === this.generation) {
+        this.processing.set(false);
+      }
+    }
   }
 
   private setSource(source: VocalSource): void {
     this.stopListening();
     this.sourceError.set(null);
-    this.report.set(null);
+    this.result.set(null);
     if (source.samples.length > MAX_CORRECTION_SECONDS * source.sampleRate) {
       this.source.set(null);
-      this.sourceError.set(`Extrait trop long : ${MAX_CORRECTION_SECONDS} s maximum pour ce prototype.`);
+      this.sourceError.set(`Extrait trop long : ${MAX_CORRECTION_SECONDS} s maximum.`);
       return;
     }
     this.source.set(source);
+  }
+
+  private patchAdvanced(settings: VoiceSettings): void {
+    this.advanced.setValue(
+      {
+        root: settings.root,
+        scale: settings.scale,
+        notes: NOTE_NAMES.map((_, pc) => settings.allowedPitchClasses.includes(pc)),
+        strengthPercent: Math.round(settings.strength * 100),
+        retuneMs: settings.retuneMs,
+        toleranceCents: settings.toleranceCents,
+        transposeSemitones: settings.transposeSemitones,
+        lowCutHz: settings.eq.lowCutHz,
+        bodyDb: settings.eq.bodyDb,
+        presenceDb: settings.eq.presenceDb,
+        airDb: settings.eq.airDb,
+        reverbPercent: Math.round(settings.fx.reverbMix * 100),
+        reverbSeconds: settings.fx.reverbSeconds,
+        delayPercent: Math.round(settings.fx.delayMix * 100),
+        delayMs: settings.fx.delayMs,
+        feedbackPercent: Math.round(settings.fx.feedback * 100),
+      },
+      { emitEvent: false },
+    );
+  }
+
+  /** Une modification du panneau avancé fait passer en « Personnalisé ». */
+  private onAdvancedEdited(): void {
+    const value = this.advanced.getRawValue();
+    const previous = this.settings();
+    const root = Number(value.root);
+    // Changer de tonalité ou de gamme recoche les notes de la nouvelle gamme.
+    const keyChanged = root !== previous.root || value.scale !== previous.scale;
+    const allowed = keyChanged ? scalePitchClasses(root, value.scale) : value.notes.flatMap((on, pc) => (on ? [pc] : []));
+    const next = sanitizeVoiceSettings({
+      root,
+      scale: value.scale,
+      allowedPitchClasses: allowed,
+      strength: Number(value.strengthPercent) / 100,
+      retuneMs: Number(value.retuneMs),
+      toleranceCents: Number(value.toleranceCents),
+      transposeSemitones: Number(value.transposeSemitones),
+      eq: { lowCutHz: Number(value.lowCutHz), bodyDb: Number(value.bodyDb), presenceDb: Number(value.presenceDb), airDb: Number(value.airDb) },
+      fx: {
+        reverbMix: Number(value.reverbPercent) / 100,
+        reverbSeconds: Number(value.reverbSeconds),
+        delayMix: Number(value.delayPercent) / 100,
+        delayMs: Number(value.delayMs),
+        feedback: Number(value.feedbackPercent) / 100,
+      },
+    });
+    if (next && !sameSettings(next, previous)) {
+      this.custom.set(next);
+    }
+  }
+
+  private loadUserStyles(): UserVocalStyle[] {
+    try {
+      return parseUserStyles(localStorage.getItem(USER_STYLES_STORAGE_KEY));
+    } catch (error) {
+      // Stockage indisponible (navigation privée, données bloquées) : pas de styles personnels.
+      console.warn('[pitch-correction] styles personnels illisibles', error);
+      return [];
+    }
+  }
+
+  private persistUserStyles(styles: UserVocalStyle[], successMessage: string): void {
+    this.userStyles.set(styles);
+    try {
+      localStorage.setItem(USER_STYLES_STORAGE_KEY, JSON.stringify(styles));
+      this.saveMessage.set(successMessage);
+    } catch (error) {
+      console.warn('[pitch-correction] enregistrement du style impossible', error);
+      this.saveMessage.set("Le navigateur refuse l'enregistrement : le style est gardé jusqu'à la fermeture du studio.");
+    }
   }
 
   private stopListening(): void {

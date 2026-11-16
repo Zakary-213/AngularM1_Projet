@@ -69,32 +69,3 @@ export function eqFilterSpecs(eq: VoiceEq): BiquadSpec[] {
   }
   return specs;
 }
-
-/**
- * Applique l'égaliseur hors temps réel (OfflineAudioContext) à une voix mono.
- * Renvoie l'entrée telle quelle si le réglage est neutre.
- */
-export async function applyVoiceEq(samples: Float32Array<ArrayBuffer>, sampleRate: number, eq: VoiceEq): Promise<Float32Array<ArrayBuffer>> {
-  const specs = eqFilterSpecs(eq);
-  if (specs.length === 0 || samples.length === 0) {
-    return samples;
-  }
-  const context = new OfflineAudioContext(1, samples.length, sampleRate);
-  const buffer = context.createBuffer(1, samples.length, sampleRate);
-  buffer.copyToChannel(samples, 0);
-  const source = context.createBufferSource();
-  source.buffer = buffer;
-  let node: AudioNode = source;
-  for (const spec of specs) {
-    const filter = context.createBiquadFilter();
-    filter.type = spec.type;
-    filter.frequency.value = Math.min(spec.frequency, sampleRate / 2 - 1);
-    filter.gain.value = spec.gain;
-    filter.Q.value = spec.Q;
-    node = node.connect(filter);
-  }
-  node.connect(context.destination);
-  source.start();
-  const rendered = await context.startRendering();
-  return rendered.getChannelData(0).slice();
-}

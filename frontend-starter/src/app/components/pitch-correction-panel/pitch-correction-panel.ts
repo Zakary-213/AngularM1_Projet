@@ -23,7 +23,8 @@ import {
   sanitizeVoiceSettings,
   styleSettings,
 } from '../../shared/audio/pitch/vocal-styles';
-import { MAX_EQ_DB, MAX_LOW_CUT_HZ, applyVoiceEq } from '../../shared/audio/pitch/voice-eq';
+import { MAX_EQ_DB, MAX_LOW_CUT_HZ } from '../../shared/audio/pitch/voice-eq';
+import { FX_LIMITS, applyVoiceChain, tempoDelayMs } from '../../shared/audio/pitch/voice-fx';
 import { StudioSessionService, downloadBlob } from '../../shared/audio/studio-session.service';
 import { encodeWav } from '../../shared/audio/wav-encoder';
 
@@ -91,7 +92,7 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   readonly scaleLabels = SCALE_LABELS;
   readonly maxSeconds = MAX_CORRECTION_SECONDS;
   readonly audioAccept = AUDIO_FILE_ACCEPT;
-  readonly limits = { retune: MAX_RETUNE_MS, tolerance: MAX_TOLERANCE_CENTS, transpose: MAX_TRANSPOSE_SEMITONES, lowCut: MAX_LOW_CUT_HZ, eq: MAX_EQ_DB };
+  readonly limits = { retune: MAX_RETUNE_MS, tolerance: MAX_TOLERANCE_CENTS, transpose: MAX_TRANSPOSE_SEMITONES, lowCut: MAX_LOW_CUT_HZ, eq: MAX_EQ_DB, ...FX_LIMITS };
   readonly curveWidth = CURVE_WIDTH;
   readonly curveHeight = CURVE_HEIGHT;
 
@@ -106,7 +107,9 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   readonly custom = signal<VoiceSettings | null>(null);
   readonly userStyles = signal<UserVocalStyle[]>(this.loadUserStyles());
 
-  readonly settings = computed<VoiceSettings>(() => this.custom() ?? styleSettings(findStyle(this.styleId()), this.dose(), this.session.projectKey()));
+  readonly settings = computed<VoiceSettings>(
+    () => this.custom() ?? styleSettings(findStyle(this.styleId()), this.dose(), this.session.projectKey(), this.session.bpm()),
+  );
   readonly styleLabel = computed(() => {
     const base = this.userStyleName() ?? findStyle(this.styleId()).name;
     return this.custom() ? `Personnalisé (basé sur ${base})` : base;
@@ -136,6 +139,11 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
     bodyDb: new FormControl(0, { nonNullable: true }),
     presenceDb: new FormControl(0, { nonNullable: true }),
     airDb: new FormControl(0, { nonNullable: true }),
+    reverbPercent: new FormControl(0, { nonNullable: true }),
+    reverbSeconds: new FormControl(1.5, { nonNullable: true }),
+    delayPercent: new FormControl(0, { nonNullable: true }),
+    delayMs: new FormControl(330, { nonNullable: true }),
+    feedbackPercent: new FormControl(30, { nonNullable: true }),
   });
   readonly styleName = new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(MAX_STYLE_NAME_LENGTH)] });
 
@@ -314,6 +322,11 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
     }
   }
 
+  /** Cale l'écho sur la croche du tempo du projet. */
+  syncDelayToTempo(): void {
+    this.advanced.controls.delayMs.setValue(tempoDelayMs(this.session.bpm(), 0.5));
+  }
+
   baseName(id: VocalStyleId): string {
     return findStyle(id).name;
   }
@@ -333,7 +346,7 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
     this.processError.set(null);
     try {
       const job = await this.runner.run(source.samples, source.sampleRate, settings);
-      const equalized = await applyVoiceEq(job.output, source.sampleRate, settings.eq);
+      const equalized = await applyVoiceChain(job.output, source.sampleRate, settings.eq, settings.fx);
       if (generation !== this.generation) {
         return;
       }
@@ -390,6 +403,11 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
         bodyDb: settings.eq.bodyDb,
         presenceDb: settings.eq.presenceDb,
         airDb: settings.eq.airDb,
+        reverbPercent: Math.round(settings.fx.reverbMix * 100),
+        reverbSeconds: settings.fx.reverbSeconds,
+        delayPercent: Math.round(settings.fx.delayMix * 100),
+        delayMs: settings.fx.delayMs,
+        feedbackPercent: Math.round(settings.fx.feedback * 100),
       },
       { emitEvent: false },
     );
@@ -412,6 +430,13 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
       toleranceCents: Number(value.toleranceCents),
       transposeSemitones: Number(value.transposeSemitones),
       eq: { lowCutHz: Number(value.lowCutHz), bodyDb: Number(value.bodyDb), presenceDb: Number(value.presenceDb), airDb: Number(value.airDb) },
+      fx: {
+        reverbMix: Number(value.reverbPercent) / 100,
+        reverbSeconds: Number(value.reverbSeconds),
+        delayMix: Number(value.delayPercent) / 100,
+        delayMs: Number(value.delayMs),
+        feedback: Number(value.feedbackPercent) / 100,
+      },
     });
     if (next && !sameSettings(next, previous)) {
       this.custom.set(next);

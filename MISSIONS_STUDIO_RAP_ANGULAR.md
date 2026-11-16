@@ -342,7 +342,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 | **Rap** | Couplets parlés-rappés, juste un « lissage » | 20–40 % | lente (100–150 ms) | celle du projet | coupe-bas, léger gain de présence |
 | **Trap** | Effet marqué et mélodique | 100 % | instantanée (0–10 ms) | mineure | présence et « air » renforcés |
 | **Drill** | Voix sombre, correction discrète | 30–50 % | moyenne (40–60 ms) | mineure | bas-médiums accentués, aigus adoucis |
-| **Raï** | Chant ornementé : garder les mélismes | 50–70 % | lente (60–100 ms) pour ne pas écraser les ornements | **mineure harmonique** ou **phrygien dominant** (Hijaz) | médiums chauds, légère brillance |
+| **Raï** | Voix de chanteur de raï : correction très présente qui « glisse » vers la note, timbre aigu et brillant, grande réverbération et écho répété | 90–100 % | rapide mais pas instantanée (15–30 ms) | **mineure harmonique** ou **phrygien dominant** (Hijaz) | bas-médiums réduits, présence et air forts ; réverbération longue (≈ 3 s) et écho à la croche avec plusieurs répétitions |
 | **Robot** | Effet extrême, sauts de notes nets | 100 % | 0 ms | celle du projet | inchangé |
 | **Personnalisé** | Tous les réglages libres | — | — | — | — |
 
@@ -351,6 +351,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [x] Tonalité, gamme (ajouter **mineure harmonique** et **phrygien dominant** aux gammes majeure et mineure) et **notes autorisées** cochables une par une.
 - [x] Intensité, vitesse de recalage et **naturel / humanisation** (tolérance en cents avant correction, pour garder les petites variations et le vibrato).
 - [x] **Spectre de la voix** : égaliseur simple (coupe-bas, corps, présence, air) appliqué à la piste corrigée.
+- [x] **Espace** : réverbération (niveau, taille de salle) et écho (niveau, temps calable sur le tempo, répétitions), dosés par le style et la dose d'effet.
 - [x] **Formants / timbre** (voix plus grave ou plus claire sans changer la note) **uniquement si le moteur retenu le permet** : le PSOLA actuel ne préserve pas les formants (voir la limite notée en M0) ; sinon documenter la limite et masquer le réglage.
 - [x] Transposition volontaire (± 12 demi-tons), clairement distinguée de la correction.
 

@@ -4,6 +4,7 @@ import { correctPitch, targetCorrectionCents } from './pitch-correction';
 import { pitchCurvePaths } from './pitch-curve';
 import { MAX_USER_STYLES, VOCAL_STYLES, findStyle, parseUserStyles, sameSettings, sanitizeVoiceSettings, styleSettings } from './vocal-styles';
 import { FLAT_EQ, eqFilterSpecs, isFlatEq, sanitizeEq } from './voice-eq';
+import { DRY_FX, FX_LIMITS, createReverbImpulse, isDryFx, limitPeak, sanitizeFx, tempoDelayMs } from './voice-fx';
 import { detectPitch } from './pitch-detection';
 
 const RATE = 44100;
@@ -164,5 +165,68 @@ describe('courbe de hauteur', () => {
 
   it('ne trace rien sans voix détectée', () => {
     expect(pitchCurvePaths([{ detectedHz: null, correctionCents: 0 }], 100, 50)).toBeNull();
+  });
+});
+
+describe('style Raï et espace de la voix', () => {
+  it('le Raï corrige fort, éclaircit la voix et ajoute réverbération et écho', () => {
+    const rai = findStyle('rai');
+    expect(rai.strength).toBeGreaterThanOrEqual(0.9);
+    expect(rai.retuneMs).toBeLessThanOrEqual(30);
+    expect(rai.eq.presenceDb).toBeGreaterThan(0);
+    expect(rai.eq.airDb).toBeGreaterThan(0);
+    expect(rai.eq.bodyDb).toBeLessThan(0);
+    expect(rai.fx.reverbMix).toBeGreaterThan(findStyle('trap').fx.reverbMix);
+    expect(rai.fx.delayMix).toBeGreaterThan(0.3);
+    expect(rai.fx.feedback).toBeGreaterThanOrEqual(0.4);
+  });
+
+  it('les styles sans effet restent secs', () => {
+    expect(isDryFx(findStyle('natural').fx)).toBe(true);
+    expect(isDryFx(findStyle('robot').fx)).toBe(true);
+  });
+
+  it('la dose réduit aussi réverbération et écho', () => {
+    const half = styleSettings(findStyle('rai'), 0.5, A_MINOR);
+    expect(half.fx.reverbMix).toBeCloseTo(findStyle('rai').fx.reverbMix / 2);
+    expect(half.fx.delayMix).toBeCloseTo(findStyle('rai').fx.delayMix / 2);
+  });
+
+  it('cale l’écho sur la croche du tempo du projet', () => {
+    expect(tempoDelayMs(90)).toBe(333);
+    expect(tempoDelayMs(120)).toBe(250);
+    expect(styleSettings(findStyle('rai'), 1, A_MINOR, 120).fx.delayMs).toBe(250);
+    // Tempo très lent : l'écho reste dans les bornes.
+    expect(styleSettings(findStyle('rai'), 1, A_MINOR, 20).fx.delayMs).toBe(FX_LIMITS.maxDelayMs);
+  });
+
+  it('borne les réglages d’espace', () => {
+    expect(sanitizeFx({ reverbMix: 3, reverbSeconds: 99, delayMix: -1, delayMs: 5, feedback: 2 })).toEqual({
+      reverbMix: 1,
+      reverbSeconds: FX_LIMITS.maxReverbSeconds,
+      delayMix: 0,
+      delayMs: FX_LIMITS.minDelayMs,
+      feedback: FX_LIMITS.maxFeedback,
+    });
+  });
+
+  it('relit un style personnel enregistré avant l’ajout de l’espace sans effet', () => {
+    const { fx: _ignored, ...withoutFx } = styleSettings(findStyle('trap'), 1, A_MINOR);
+    expect(sanitizeVoiceSettings(withoutFx)!.fx).toEqual(DRY_FX);
+  });
+
+  it('la réverbération décroît et garde la même énergie quelle que soit sa durée', () => {
+    const impulse = createReverbImpulse(8000, 2);
+    const energy = (from: number, to: number) => impulse.subarray(from, to).reduce((sum, x) => sum + x * x, 0);
+    expect(energy(0, 4000)).toBeGreaterThan(100 * energy(12000, 16000));
+    expect(energy(0, impulse.length)).toBeCloseTo(1, 5);
+    expect(createReverbImpulse(8000, 0.5).reduce((sum, x) => sum + x * x, 0)).toBeCloseTo(1, 5);
+  });
+
+  it('baisse un rendu qui sature, sans toucher un rendu correct', () => {
+    const loud = Float32Array.from([0.5, -1.96, 1.2]);
+    expect(limitPeak(loud)).toBeCloseTo(0.5);
+    expect(Math.max(...loud.map(Math.abs))).toBeCloseTo(0.98);
+    expect(limitPeak(Float32Array.from([0.2, -0.5]))).toBe(1);
   });
 });

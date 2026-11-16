@@ -1,6 +1,7 @@
 import { SCALE_NAMES, SEMITONES_PER_OCTAVE, ScaleName, scalePitchClasses } from './musical-scale';
 import { MAX_RETUNE_MS, MAX_TOLERANCE_CENTS, MAX_TRANSPOSE_SEMITONES, PitchCorrectionSettings } from './pitch-correction';
 import { FLAT_EQ, VoiceEq, sanitizeEq } from './voice-eq';
+import { DRY_FX, VoiceFx, sanitizeFx, tempoDelayMs } from './voice-fx';
 
 /**
  * Préréglages de correction vocale par style. Ce sont des données : nom, phrase
@@ -22,15 +23,30 @@ export interface VocalStyle {
   /** Gamme imposée par le style, ou `null` pour garder celle du projet. */
   readonly scale: ScaleName | null;
   readonly eq: VoiceEq;
+  /** Réverbération et écho à 100 % de dose. */
+  readonly fx: VoiceFx;
 }
 
 export const VOCAL_STYLES: readonly VocalStyle[] = [
-  { id: 'natural', name: 'Naturel', description: 'Voix juste, effet inaudible.', strength: 0.5, retuneMs: 100, toleranceCents: 10, scale: null, eq: FLAT_EQ },
-  { id: 'rap', name: 'Rap', description: 'Couplets rappés : un simple lissage, la voix reste parlée.', strength: 0.3, retuneMs: 130, toleranceCents: 15, scale: null, eq: { lowCutHz: 100, bodyDb: 0, presenceDb: 2, airDb: 0 } },
-  { id: 'trap', name: 'Trap', description: 'Effet marqué et mélodique, notes nettes.', strength: 1, retuneMs: 5, toleranceCents: 0, scale: 'minor', eq: { lowCutHz: 100, bodyDb: 0, presenceDb: 3, airDb: 4 } },
-  { id: 'drill', name: 'Drill', description: 'Voix sombre, correction discrète.', strength: 0.4, retuneMs: 50, toleranceCents: 10, scale: 'minor', eq: { lowCutHz: 80, bodyDb: 3, presenceDb: 0, airDb: -3 } },
-  { id: 'rai', name: 'Raï', description: 'Chant ornementé : les mélismes sont gardés, gamme orientale.', strength: 0.6, retuneMs: 80, toleranceCents: 15, scale: 'harmonicMinor', eq: { lowCutHz: 90, bodyDb: 2, presenceDb: 1, airDb: 2 } },
-  { id: 'robot', name: 'Robot', description: 'Effet extrême : sauts de note instantanés.', strength: 1, retuneMs: 0, toleranceCents: 0, scale: null, eq: FLAT_EQ },
+  { id: 'natural', name: 'Naturel', description: 'Voix juste, effet inaudible.', strength: 0.5, retuneMs: 100, toleranceCents: 10, scale: null, eq: FLAT_EQ, fx: DRY_FX },
+  { id: 'rap', name: 'Rap', description: 'Couplets rappés : un simple lissage, la voix reste parlée.', strength: 0.3, retuneMs: 130, toleranceCents: 15, scale: null, eq: { lowCutHz: 100, bodyDb: 0, presenceDb: 2, airDb: 0 }, fx: { reverbMix: 0.08, reverbSeconds: 0.8, delayMix: 0, delayMs: 330, feedback: 0.2 } },
+  { id: 'trap', name: 'Trap', description: 'Effet marqué et mélodique, notes nettes.', strength: 1, retuneMs: 5, toleranceCents: 0, scale: 'minor', eq: { lowCutHz: 100, bodyDb: 0, presenceDb: 3, airDb: 4 }, fx: { reverbMix: 0.15, reverbSeconds: 1.6, delayMix: 0.12, delayMs: 330, feedback: 0.25 } },
+  { id: 'drill', name: 'Drill', description: 'Voix sombre, correction discrète.', strength: 0.4, retuneMs: 50, toleranceCents: 10, scale: 'minor', eq: { lowCutHz: 80, bodyDb: 3, presenceDb: 0, airDb: -3 }, fx: { reverbMix: 0.1, reverbSeconds: 1.2, delayMix: 0, delayMs: 330, feedback: 0.2 } },
+  {
+    id: 'rai',
+    name: 'Raï',
+    description: 'Voix de chanteur de raï : correction très présente, timbre aigu et brillant, grande réverbération et écho qui se répète.',
+    // Correction appuyée mais pas instantanée : la voix « glisse » vers la note, les mélismes restent audibles.
+    strength: 0.95,
+    retuneMs: 20,
+    toleranceCents: 0,
+    scale: 'harmonicMinor',
+    // Voix éclaircie et nasale : moins de bas-médiums, beaucoup de présence et d'air.
+    eq: { lowCutHz: 150, bodyDb: -3, presenceDb: 6, airDb: 7 },
+    // Salle large et écho à la croche (≈ 330 ms à 90 BPM) avec plusieurs répétitions.
+    fx: { reverbMix: 0.45, reverbSeconds: 3.2, delayMix: 0.38, delayMs: 330, feedback: 0.5 },
+  },
+  { id: 'robot', name: 'Robot', description: 'Effet extrême : sauts de note instantanés.', strength: 1, retuneMs: 0, toleranceCents: 0, scale: null, eq: FLAT_EQ, fx: DRY_FX },
 ];
 
 export const DEFAULT_STYLE_ID: VocalStyleId = 'natural';
@@ -41,6 +57,7 @@ const DOSE_RETUNE_SPAN_MS = 150;
 /** Tous les réglages appliqués à une prise (style choisi ou personnalisé). */
 export interface VoiceSettings extends Required<PitchCorrectionSettings> {
   readonly eq: VoiceEq;
+  readonly fx: VoiceFx;
 }
 
 export interface ProjectKey {
@@ -57,10 +74,10 @@ function clamp(value: number, min: number, max: number, fallback: number): numbe
 }
 
 /**
- * Réglages complets d'un style pour une dose (0 à 1) : la dose baisse l'intensité
- * et ralentit le recalage ensemble, dans les proportions du style.
+ * Réglages complets d'un style pour une dose (0 à 1) : la dose baisse l'intensité,
+ * ralentit le recalage et réduit réverbération et écho, dans les proportions du style.
  */
-export function styleSettings(style: VocalStyle, dose: number, key: ProjectKey): VoiceSettings {
+export function styleSettings(style: VocalStyle, dose: number, key: ProjectKey, bpm?: number): VoiceSettings {
   const safeDose = clamp(dose, 0, 1, DEFAULT_DOSE);
   const scale = style.scale ?? key.scale;
   return {
@@ -72,6 +89,13 @@ export function styleSettings(style: VocalStyle, dose: number, key: ProjectKey):
     toleranceCents: style.toleranceCents,
     transposeSemitones: 0,
     eq: style.eq,
+    fx: {
+      ...style.fx,
+      reverbMix: style.fx.reverbMix * safeDose,
+      delayMix: style.fx.delayMix * safeDose,
+      // Avec le tempo du projet, l'écho tombe sur la croche, quel que soit le BPM.
+      delayMs: bpm ? sanitizeFx({ ...style.fx, delayMs: tempoDelayMs(bpm, 0.5) }).delayMs : style.fx.delayMs,
+    },
   };
 }
 
@@ -94,6 +118,8 @@ export function sanitizeVoiceSettings(value: unknown): VoiceSettings | null {
     ? [...new Set(allowedRaw.map(Number).filter(pc => Number.isInteger(pc) && pc >= 0 && pc < SEMITONES_PER_OCTAVE))].sort((a, b) => a - b)
     : scalePitchClasses(root, scale);
   const eq = typeof raw['eq'] === 'object' && raw['eq'] !== null ? sanitizeEq(raw['eq'] as Partial<VoiceEq>) : FLAT_EQ;
+  // Styles enregistrés avant l'ajout de l'espace : sans réverbération ni écho.
+  const fx = typeof raw['fx'] === 'object' && raw['fx'] !== null ? sanitizeFx(raw['fx'] as Partial<VoiceFx>) : DRY_FX;
   return {
     root,
     scale,
@@ -103,6 +129,7 @@ export function sanitizeVoiceSettings(value: unknown): VoiceSettings | null {
     toleranceCents: clamp(Number(raw['toleranceCents']), 0, MAX_TOLERANCE_CENTS, 0),
     transposeSemitones: Math.round(clamp(Number(raw['transposeSemitones']), -MAX_TRANSPOSE_SEMITONES, MAX_TRANSPOSE_SEMITONES, 0)),
     eq,
+    fx,
   };
 }
 

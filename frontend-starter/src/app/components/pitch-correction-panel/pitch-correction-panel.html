@@ -172,6 +172,31 @@
         <input id="adv-air" type="range" [min]="-limits.eq" [max]="limits.eq" step="1" formControlName="airDb" />
       </div>
     </div>
+    <h3>Espace</h3>
+    <div class="row">
+      <div class="field slider">
+        <label for="adv-reverb">Réverbération : <b>{{ advanced.controls.reverbPercent.value }} %</b></label>
+        <input id="adv-reverb" type="range" min="0" max="100" step="5" formControlName="reverbPercent" />
+      </div>
+      <div class="field slider">
+        <label for="adv-reverb-time">Taille de la salle : <b>{{ advanced.controls.reverbSeconds.value.toFixed(1).replace('.', ',') }} s</b></label>
+        <input id="adv-reverb-time" type="range" [min]="limits.minReverbSeconds" [max]="limits.maxReverbSeconds" step="0.1" formControlName="reverbSeconds" />
+      </div>
+      <div class="field slider">
+        <label for="adv-delay">Écho : <b>{{ advanced.controls.delayPercent.value }} %</b></label>
+        <input id="adv-delay" type="range" min="0" max="100" step="5" formControlName="delayPercent" />
+      </div>
+      <div class="field slider">
+        <label for="adv-delay-time">Temps d'écho : <b>{{ advanced.controls.delayMs.value }} ms</b></label>
+        <input id="adv-delay-time" type="range" [min]="limits.minDelayMs" [max]="limits.maxDelayMs" step="10" formControlName="delayMs" />
+        <button type="button" class="link" (click)="syncDelayToTempo()">Caler sur le tempo ({{ session.bpm() }} BPM, croche)</button>
+      </div>
+      <div class="field slider">
+        <label for="adv-feedback">Répétitions de l'écho : <b>{{ advanced.controls.feedbackPercent.value }} %</b></label>
+        <input id="adv-feedback" type="range" min="0" [max]="limits.maxFeedback * 100" step="5" formControlName="feedbackPercent" />
+      </div>
+    </div>
+
     <p class="small muted">Timbre / formants (voix plus grave ou plus claire sans changer la note) : non disponible avec le moteur actuel (PSOLA), qui ne sépare pas le timbre de la hauteur.</p>
   </form>
 

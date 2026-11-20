@@ -10,7 +10,20 @@ import { PatternTransport, TrackClip } from './pattern-transport';
 import { NOTE_NAMES, SCALE_LABELS } from './pitch/musical-scale';
 import { ProjectKey } from './pitch/vocal-styles';
 import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
-import { DEFAULT_LOOP_BARS, LoopBars, clampSongStep, loopStepRange, validateLoopBars } from './timeline-position';
+import { DEFAULT_LOOP_BARS, LoopBars, MAX_SONG_BARS, clampSongStep, loopStepRange, validateLoopBars } from './timeline-position';
+import {
+  DEFAULT_DRUM_CLIPS,
+  DrumClip,
+  UndoHistory,
+  addDrumClip,
+  createDrumClipId,
+  drumClipsEndBar,
+  duplicateDrumClip,
+  isDrumBarActive,
+  moveDrumClip,
+  removeDrumClip,
+  resizeDrumClip,
+} from './arrangement';
 import { LoopRange } from './step-scheduler';
 import { MixerState, TrackId, TrackMix, clampTrackDb, createDefaultMixer, effectiveTrackGains, updateTrack } from './track-mix';
 import { encodeWav, peakLevel, rmsLevel } from './wav-encoder';
@@ -76,6 +89,14 @@ export interface InputLevel {
 
 const SILENT_LEVEL: InputLevel = { rms: 0, peak: 0, clipping: false };
 
+/** État de l'arrangement mémorisé par Annuler / Rétablir (positions et clips, jamais l'audio). */
+export interface ArrangementSnapshot {
+  readonly drumClips: readonly DrumClip[];
+  readonly instrumentalStartBeat: number;
+  /** Position de chaque prise (secondes), par identifiant. */
+  readonly takeStarts: Readonly<Record<string, number>>;
+}
+
 export interface ExportReport {
   readonly seconds: number;
   readonly peakDb: number;
@@ -114,13 +135,26 @@ export class StudioSessionService implements OnDestroy {
   readonly loopRange = computed<LoopRange | null>(() =>
     this.loopEnabled() && validateLoopBars(this.loopBars()) === null ? loopStepRange(this.loopBars()) : null,
   );
-  /** Fin du contenu du morceau (pas absolu) : instrumentale, prises, et au moins 4 mesures. */
+  /** Clips de la piste Batterie (le pattern joue en boucle dans chacun). */
+  readonly drumClips = signal<readonly DrumClip[]>(DEFAULT_DRUM_CLIPS);
+  /** Début de l'instrumentale dans le morceau, en temps (beats) : suit les changements de BPM. */
+  readonly instrumentalStartBeat = signal(0);
+  private readonly history = new UndoHistory<ArrangementSnapshot>();
+  /** Incrémenté à chaque modification de l'historique, pour rafraîchir les boutons. */
+  private readonly historyVersion = signal(0);
+  readonly canUndo = computed(() => (this.historyVersion(), this.history.canUndo));
+  readonly canRedo = computed(() => (this.historyVersion(), this.history.canRedo));
+
+  readonly instrumentalStartSeconds = computed(() => (this.instrumentalStartBeat() * 60) / this.bpm());
+  /** Fin du contenu du morceau (pas absolu) : batterie, instrumentale, prises, et au moins 4 mesures. */
   readonly songEndStep = computed(() => {
     const stepSeconds = stepDurationSeconds(this.bpm());
-    const instrumental = this.instrumental()?.buffer.duration ?? 0;
+    const loaded = this.instrumental();
+    const instrumental = loaded ? this.instrumentalStartSeconds() + loaded.buffer.duration : 0;
     const takes = this.takes().map(take => take.startSeconds + take.buffer.duration);
     const lastSecond = Math.max(instrumental, ...takes, 0);
-    return clampSongStep(Math.max(4 * STEPS_PER_BAR, Math.ceil(lastSecond / stepSeconds)));
+    const drumsEnd = drumClipsEndBar(this.drumClips()) * STEPS_PER_BAR;
+    return clampSongStep(Math.max(4 * STEPS_PER_BAR, drumsEnd, Math.ceil(lastSecond / stepSeconds)));
   });
   /** Tonalité du projet (la mineur par défaut) : reprise par la correction vocale. */
   readonly projectKey = signal<ProjectKey>({ root: 9, scale: 'minor' });
@@ -241,6 +275,115 @@ export class StudioSessionService implements OnDestroy {
     }
     if (this.playing()) {
       await this.seek(this.songStep());
+    }
+  }
+
+  // ——— Arrangement (M5) : chaque modification est annulable ———
+
+  moveDrumClip(id: string, deltaBars: number): void {
+    this.changeArrangement(() => this.drumClips.update(clips => moveDrumClip(clips, id, deltaBars)));
+  }
+
+  resizeDrumClip(id: string, deltaBars: number): void {
+    this.changeArrangement(() => this.drumClips.update(clips => resizeDrumClip(clips, id, deltaBars)));
+  }
+
+  /** Renvoie l'identifiant de la copie, ou `null` si la limite est atteinte. */
+  duplicateDrumClip(id: string): string | null {
+    const newId = createDrumClipId();
+    const next = duplicateDrumClip(this.drumClips(), id, newId);
+    if (!next) {
+      return null;
+    }
+    this.changeArrangement(() => this.drumClips.set(next));
+    return newId;
+  }
+
+  /** Ajoute un clip de batterie à la mesure de la tête de lecture ; renvoie son identifiant. */
+  addDrumClipAtPlayhead(): string | null {
+    const newId = createDrumClipId();
+    const next = addDrumClip(this.drumClips(), Math.floor(this.songStep() / STEPS_PER_BAR), newId);
+    if (!next) {
+      return null;
+    }
+    this.changeArrangement(() => this.drumClips.set(next));
+    return newId;
+  }
+
+  removeDrumClip(id: string): void {
+    this.changeArrangement(() => this.drumClips.update(clips => removeDrumClip(clips, id)));
+  }
+
+  /** Déplace l'instrumentale par pas d'un temps ; elle ne commence jamais avant le morceau. */
+  moveInstrumental(deltaBeats: number): void {
+    const maxBeat = MAX_SONG_BARS * (STEPS_PER_BAR / STEPS_PER_BEAT);
+    const next = Math.min(maxBeat, Math.max(0, Math.round(this.instrumentalStartBeat() + deltaBeats)));
+    if (next !== this.instrumentalStartBeat()) {
+      this.changeArrangement(() => this.instrumentalStartBeat.set(next));
+    }
+  }
+
+  /** Déplace une prise d'un nombre de temps (au tempo courant). */
+  moveTake(id: string, deltaBeats: number): void {
+    this.changeArrangement(() => this.applyTakeShift(id, (deltaBeats * 60) / this.bpm(), false));
+  }
+
+  undo(): void {
+    const previous = this.history.undo(this.arrangementSnapshot());
+    if (previous) {
+      this.restoreArrangement(previous);
+    }
+  }
+
+  redo(): void {
+    const next = this.history.redo(this.arrangementSnapshot());
+    if (next) {
+      this.restoreArrangement(next);
+    }
+  }
+
+  /** Remplace l'arrangement (ouverture d'un projet) et vide l'historique. */
+  loadArrangement(drumClips: readonly DrumClip[], instrumentalStartBeat: number): void {
+    this.drumClips.set(drumClips);
+    this.instrumentalStartBeat.set(instrumentalStartBeat);
+    this.history.clear();
+    this.historyVersion.update(version => version + 1);
+  }
+
+  private arrangementSnapshot(): ArrangementSnapshot {
+    return {
+      drumClips: this.drumClips(),
+      instrumentalStartBeat: this.instrumentalStartBeat(),
+      takeStarts: Object.fromEntries(this.takes().map(take => [take.id, take.startSeconds])),
+    };
+  }
+
+  /** Mémorise l'état avant `change`, l'applique, puis relance la lecture pour l'entendre aussitôt. */
+  private changeArrangement(change: () => void): void {
+    const before = this.arrangementSnapshot();
+    change();
+    if (JSON.stringify(before) === JSON.stringify(this.arrangementSnapshot())) {
+      return; // rien n'a bougé (borne atteinte) : pas d'entrée d'historique
+    }
+    this.history.record(before);
+    this.historyVersion.update(version => version + 1);
+    this.restartIfPlaying();
+  }
+
+  private restoreArrangement(snapshot: ArrangementSnapshot): void {
+    this.drumClips.set(snapshot.drumClips);
+    this.instrumentalStartBeat.set(snapshot.instrumentalStartBeat);
+    // Une prise supprimée depuis n'est pas recréée : seules les positions sont restaurées.
+    this.takes.update(takes =>
+      takes.map(take => (snapshot.takeStarts[take.id] === undefined ? take : { ...take, startSeconds: snapshot.takeStarts[take.id] })),
+    );
+    this.historyVersion.update(version => version + 1);
+    this.restartIfPlaying();
+  }
+
+  private restartIfPlaying(): void {
+    if (this.playing()) {
+      void this.seek(this.songStep());
     }
   }
 
@@ -423,21 +566,36 @@ export class StudioSessionService implements OnDestroy {
   /**
    * Décale une prise dans le morceau (correction manuelle de latence), dans la limite
    * d'une seconde autour de la position estimée à l'enregistrement. Renvoie la nouvelle position.
+   * Annulable comme les autres modifications de l'arrangement.
    */
   shiftTake(id: string, deltaSeconds: number): number | null {
-    const current = this.takes().find(take => take.id === id);
-    if (!current || !Number.isFinite(deltaSeconds)) {
+    if (!this.takes().some(take => take.id === id) || !Number.isFinite(deltaSeconds)) {
       return null;
     }
-    const origin = current.recordedStartSeconds ?? current.startSeconds;
-    const shifted = Math.round((current.startSeconds + deltaSeconds) * 1000) / 1000;
-    const startSeconds = Math.min(origin + MAX_TAKE_SHIFT_SECONDS, Math.max(origin - MAX_TAKE_SHIFT_SECONDS, shifted));
-    if (this.transportState() !== 'stopped') {
-      this.stopPlayback();
-    }
-    this.takes.update(takes => takes.map(take => (take.id === id ? { ...take, startSeconds, recordedStartSeconds: origin } : take)));
-    return startSeconds;
+    this.changeArrangement(() => this.applyTakeShift(id, deltaSeconds, true));
+    return this.takes().find(take => take.id === id)!.startSeconds;
   }
+
+  /**
+   * Décale une prise de `deltaSeconds`. `bounded` : correction de latence, limitée à
+   * une seconde autour de la position enregistrée ; sinon déplacement dans le morceau.
+   */
+  private applyTakeShift(id: string, deltaSeconds: number, bounded: boolean): void {
+    this.takes.update(takes =>
+      takes.map(take => {
+        if (take.id !== id) {
+          return take;
+        }
+        const origin = take.recordedStartSeconds ?? take.startSeconds;
+        const shifted = Math.round((take.startSeconds + deltaSeconds) * 1000) / 1000;
+        const startSeconds = bounded
+          ? Math.min(origin + MAX_TAKE_SHIFT_SECONDS, Math.max(origin - MAX_TAKE_SHIFT_SECONDS, shifted))
+          : Math.max(-take.buffer.duration + 0.01, shifted);
+        return { ...take, startSeconds, recordedStartSeconds: bounded ? origin : startSeconds };
+      }),
+    );
+  }
+
 
   /** Associe une prise au fichier envoyé dans la bibliothèque. */
   markTakeUploaded(id: string, fileId: string): void {
@@ -549,7 +707,15 @@ export class StudioSessionService implements OnDestroy {
         gain: clip.gain * gains[track],
         ...(track === 'instrumental' ? { eq: this.instrumentalEq() } : {}),
       }));
-      const rendered = await renderMix({ pattern: this.pattern(), bpm: this.bpm(), bars, drumsGain: gains.drums, clips });
+      const drumClips = this.drumClips();
+      const rendered = await renderMix({
+        pattern: this.pattern(),
+        bpm: this.bpm(),
+        bars,
+        drumsGain: gains.drums,
+        drumActive: step => isDrumBarActive(drumClips, Math.floor(step / STEPS_PER_BAR)),
+        clips,
+      });
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
       const wav = new Blob([encodeWav(channels, rendered.sampleRate)], { type: 'audio/wav' });
       downloadBlob(wav, `zakat-record-${this.bpm()}bpm.wav`);
@@ -566,7 +732,14 @@ export class StudioSessionService implements OnDestroy {
   private async startPlayback(includeTake = true): Promise<boolean> {
     try {
       const { context, master } = await this.engine.start();
-      this.transport ??= new PatternTransport(context, master, () => this.pattern(), () => this.bpm(), () => this.metronome());
+      this.transport ??= new PatternTransport(
+        context,
+        master,
+        () => this.pattern(),
+        () => this.bpm(),
+        () => this.metronome(),
+        songStep => isDrumBarActive(this.drumClips(), Math.floor(songStep / STEPS_PER_BAR)),
+      );
       // Pas de boucle pendant une prise : la voix doit suivre le morceau de façon linéaire.
       const loop = includeTake ? this.loopRange() : null;
       let fromSongStep = this.transportState() === 'paused' ? this.songStep() : 0;
@@ -594,7 +767,7 @@ export class StudioSessionService implements OnDestroy {
     const clips: TrackClip[] = [];
     const instrumental = this.instrumental();
     if (instrumental) {
-      clips.push({ track: 'instrumental', clip: { buffer: instrumental.buffer, startSeconds: 0, gain: INSTRUMENTAL_GAIN } });
+      clips.push({ track: 'instrumental', clip: { buffer: instrumental.buffer, startSeconds: this.instrumentalStartSeconds(), gain: INSTRUMENTAL_GAIN } });
     }
     const take = this.take();
     if (includeTake && take) {

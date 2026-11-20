@@ -14,6 +14,8 @@ export interface MixDescription {
   readonly bars: number;
   /** Gain linéaire de la piste batterie (volume, mute et solo déjà appliqués). Défaut : 1. */
   readonly drumsGain?: number;
+  /** La batterie joue-t-elle à ce pas absolu ? (clips de la piste Batterie). Par défaut : toujours. */
+  readonly drumActive?: (songStep: number) => boolean;
   /** Clips audio, avec le gain de leur piste déjà multiplié dans `gain`. */
   readonly clips: readonly AudioClip[];
 }
@@ -36,7 +38,9 @@ export function renderMix(mix: MixDescription, sampleRate = EXPORT_SAMPLE_RATE):
   drums.connect(master);
   const stepSeconds = stepDurationSeconds(mix.bpm);
   for (let step = 0; step < mix.bars * STEPS_PER_BAR; step++) {
-    voicesAtStep(mix.pattern, step).forEach(voice => playDrumHit(context, drums, voice, step * stepSeconds));
+    if (mix.drumActive?.(step) ?? true) {
+      voicesAtStep(mix.pattern, step).forEach(voice => playDrumHit(context, drums, voice, step * stepSeconds));
+    }
   }
   mix.clips.forEach(clip => scheduleClip(context, master, clip, 0));
 

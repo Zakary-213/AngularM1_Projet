@@ -9,10 +9,11 @@ import { PitchCorrectionPanelComponent } from '../pitch-correction-panel/pitch-c
 import { TakesPanelComponent } from '../takes-panel/takes-panel';
 import { WaveformComponent } from '../waveform/waveform';
 import { AUDIO_FILE_ACCEPT } from '../../shared/audio/audio-file';
-import { DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../../shared/audio/music-time';
+import { BEATS_PER_BAR, DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../../shared/audio/music-time';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
 import { STUDIO_TRACKS, StudioTrackInfo } from '../../shared/audio/studio-tracks';
 import { TrackMix } from '../../shared/audio/track-mix';
+import { layoutClip, dragUnits } from '../../shared/audio/timeline-layout';
 import { DEFAULT_LOOP_BARS, MAX_SONG_BARS, describePosition, stepAfterKey, stepFromFraction, validateLoopBars } from '../../shared/audio/timeline-position';
 import { StudioProjectService } from '../../shared/services/studio-project.service';
 import { LeaveConfirmation } from '../../shared/guards/unsaved-changes.guard';
@@ -27,18 +28,37 @@ const TRACK_LABEL_WIDTH_PX = 150;
 
 type EditorTab = 'Batterie' | 'Correction vocale' | 'Mixeur' | 'Export';
 
+type ClipKind = 'drum' | 'instrumental' | 'take';
+
+/** Clip affiché sur la timeline (position en % de la fenêtre visible). */
+interface TimelineClip {
+  readonly kind: ClipKind;
+  readonly id: string;
+  readonly label: string;
+  /** Description pour les lecteurs d'écran : nature, position et commandes. */
+  readonly ariaLabel: string;
+  readonly left: number;
+  readonly width: number;
+  readonly pattern: 'note' | 'wave';
+  /** Fichier à dessiner et fin de la portion visible (secondes), pour un clip audio. */
+  readonly waveform?: { readonly buffer: AudioBuffer; readonly toSeconds: number };
+}
+
 interface TimelineTrack extends StudioTrackInfo {
-  /** `null` : piste vide, rien à afficher dans la ligne. */
-  readonly clip: {
-    readonly label: string;
-    readonly offset: number;
-    readonly width: number;
-    readonly pattern: 'note' | 'wave';
-    /** Fichier à dessiner et fin de la portion visible (secondes), pour l'instrumentale. */
-    readonly waveform?: { readonly buffer: AudioBuffer; readonly toSeconds: number };
-  } | null;
+  readonly clips: readonly TimelineClip[];
   readonly mix: TrackMix;
 }
+
+/** Glissement en cours d'un clip (souris, doigt ou stylet). */
+interface ClipDrag {
+  readonly clip: TimelineClip;
+  readonly pointerId: number;
+  readonly startX: number;
+  readonly laneWidth: number;
+}
+
+/** Seuil en pixels au-delà duquel un appui devient un glissement (sinon c'est un clic). */
+const DRAG_THRESHOLD_PX = 4;
 
 /**
  * Page Studio : assemble le transport, la timeline et les panneaux d'édition.
@@ -113,41 +133,76 @@ export class StudioPageComponent implements LeaveConfirmation {
     return percent <= 100 ? percent : null;
   });
 
+  /** Clip sélectionné pour l'édition (barre d'outils, clavier). */
+  readonly selectedClip = signal<{ readonly kind: ClipKind; readonly id: string } | null>(null);
+  /** Aperçu du glissement en cours : décalage en % appliqué au clip saisi. */
+  readonly dragPreview = signal<{ readonly id: string; readonly offsetPercent: number } | null>(null);
+  private drag: ClipDrag | null = null;
+
   /** Pistes réelles de la session, placées sur la fenêtre visible de la timeline. */
   readonly tracks = computed<TimelineTrack[]>(() => {
-    const visibleSeconds = barsToSeconds(this.visibleBars(), this.session.bpm());
-    const percent = (seconds: number) => Math.min(100, (100 * seconds) / visibleSeconds);
+    const bpm = this.session.bpm();
+    const visibleSeconds = barsToSeconds(this.visibleBars(), bpm);
+    const barSeconds = barsToSeconds(1, bpm);
     const instrumental = this.session.instrumental();
     const take = this.session.take();
     const mixer = this.session.mixer();
     return STUDIO_TRACKS.map(info => {
-      let clip: TimelineTrack['clip'] = null;
+      const clips: TimelineClip[] = [];
       if (info.id === 'drums') {
-        clip = { label: 'Pattern 01 · boucle 1 mesure', offset: 0, width: 100, pattern: 'note' };
+        for (const clip of this.session.drumClips()) {
+          const box = layoutClip(clip.startBar * barSeconds, clip.lengthBars * barSeconds, visibleSeconds);
+          if (box) {
+            const range = clip.lengthBars > 1 ? `mesures ${clip.startBar + 1} à ${clip.startBar + clip.lengthBars}` : `mesure ${clip.startBar + 1}`;
+            clips.push({ kind: 'drum', id: clip.id, label: `Pattern 01 · ${clip.lengthBars} mes.`, ariaLabel: `Clip de batterie, ${range}`, ...box, pattern: 'note' });
+          }
+        }
       } else if (info.id === 'instrumental' && instrumental) {
-        clip = {
-          label: instrumental.name,
-          offset: 0,
-          width: percent(instrumental.buffer.duration),
-          pattern: 'wave',
-          waveform: { buffer: instrumental.buffer, toSeconds: Math.min(instrumental.buffer.duration, visibleSeconds) },
-        };
+        const start = this.session.instrumentalStartSeconds();
+        const box = layoutClip(start, instrumental.buffer.duration, visibleSeconds);
+        if (box) {
+          clips.push({
+            kind: 'instrumental',
+            id: 'instrumental',
+            label: instrumental.name,
+            ariaLabel: `Instrumentale ${instrumental.name}, début ${describePosition(Math.round((start / barSeconds) * STEPS_PER_BAR))}`,
+            ...box,
+            pattern: 'wave',
+            waveform: { buffer: instrumental.buffer, toSeconds: Math.max(0.01, Math.min(instrumental.buffer.duration, visibleSeconds - start)) },
+          });
+        }
       } else if (info.id === 'voice' && take) {
-        const offset = percent(Math.max(0, take.startSeconds));
-        const visibleTakeSeconds = Math.max(0, Math.min(take.buffer.duration, visibleSeconds - Math.max(0, take.startSeconds)));
-        clip =
-          offset < 100
-            ? {
-                label: take.name,
-                offset,
-                width: Math.max(1, Math.min(100 - offset, percent(take.buffer.duration))),
-                pattern: 'wave',
-                waveform: { buffer: take.buffer, toSeconds: Math.max(0.01, visibleTakeSeconds) },
-              }
-            : null;
+        const box = layoutClip(take.startSeconds, take.buffer.duration, visibleSeconds);
+        if (box) {
+          const visibleTakeSeconds = Math.max(0.01, Math.min(take.buffer.duration, visibleSeconds - Math.max(0, take.startSeconds)));
+          clips.push({
+            kind: 'take',
+            id: take.id,
+            label: take.name,
+            ariaLabel: `Prise ${take.name}, début ${take.startSeconds.toFixed(2).replace('.', ',')} s`,
+            ...box,
+            pattern: 'wave',
+            waveform: { buffer: take.buffer, toSeconds: visibleTakeSeconds },
+          });
+        }
       }
-      return { ...info, clip, mix: mixer[info.id] };
+      return { ...info, clips, mix: mixer[info.id] };
     });
+  });
+
+  /** Clip sélectionné tel qu'affiché, ou `null` s'il n'existe plus ou est hors champ. */
+  readonly selection = computed(() => {
+    const selected = this.selectedClip();
+    if (!selected) {
+      return null;
+    }
+    for (const track of this.tracks()) {
+      const clip = track.clips.find(candidate => candidate.kind === selected.kind && candidate.id === selected.id);
+      if (clip) {
+        return clip;
+      }
+    }
+    return null;
   });
 
   constructor() {
@@ -208,6 +263,139 @@ export class StudioPageComponent implements LeaveConfirmation {
     }
   }
 
+  // ——— Édition des clips (M5) ———
+
+  selectClip(clip: TimelineClip, event?: Event): void {
+    event?.stopPropagation(); // un clic sur un clip ne déplace pas la tête de lecture
+    this.selectedClip.set({ kind: clip.kind, id: clip.id });
+  }
+
+  /**
+   * Déplace un clip : batterie par mesure ; instrumentale et prise par temps.
+   * `units` : nombre de mesures (batterie) ou de temps (audio).
+   */
+  moveClip(clip: TimelineClip, units: number): void {
+    if (units === 0) {
+      return;
+    }
+    if (clip.kind === 'drum') {
+      this.session.moveDrumClip(clip.id, units);
+    } else if (clip.kind === 'instrumental') {
+      this.session.moveInstrumental(units);
+    } else {
+      this.session.moveTake(clip.id, units);
+    }
+  }
+
+  duplicateSelected(): void {
+    const clip = this.selection();
+    if (clip?.kind === 'drum') {
+      const copy = this.session.duplicateDrumClip(clip.id);
+      if (copy) {
+        this.selectedClip.set({ kind: 'drum', id: copy });
+      }
+    }
+  }
+
+  resizeSelected(deltaBars: number): void {
+    const clip = this.selection();
+    if (clip?.kind === 'drum') {
+      this.session.resizeDrumClip(clip.id, deltaBars);
+    }
+  }
+
+  deleteSelected(): void {
+    const clip = this.selection();
+    if (clip?.kind === 'drum') {
+      this.session.removeDrumClip(clip.id);
+      this.selectedClip.set(null);
+    }
+  }
+
+  addDrumClip(): void {
+    const id = this.session.addDrumClipAtPlayhead();
+    if (id) {
+      this.selectedClip.set({ kind: 'drum', id });
+    }
+  }
+
+  /**
+   * Alternative clavier au glisser-déposer, quand un clip a le focus :
+   * flèches = déplacer (Maj : d'une mesure pour l'audio), Suppr = supprimer un clip de batterie,
+   * Ctrl/Cmd + D = dupliquer, Échap = désélectionner.
+   */
+  onClipKey(event: KeyboardEvent, clip: TimelineClip): void {
+    const step = clip.kind === 'drum' ? 1 : event.shiftKey ? BEATS_PER_BAR : 1;
+    let handled = true;
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      this.selectClip(clip);
+      this.moveClip(clip, event.key === 'ArrowLeft' ? -step : step);
+    } else if ((event.key === 'Delete' || event.key === 'Backspace') && clip.kind === 'drum') {
+      this.selectClip(clip);
+      this.deleteSelected();
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd' && clip.kind === 'drum') {
+      this.selectClip(clip);
+      this.duplicateSelected();
+    } else if (event.key === 'Escape') {
+      this.selectedClip.set(null);
+    } else {
+      handled = false;
+    }
+    if (handled) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  onClipPointerDown(event: PointerEvent, clip: TimelineClip): void {
+    if (event.button !== 0) {
+      return;
+    }
+    const lane = (event.currentTarget as HTMLElement).closest('.track-lane');
+    if (!lane) {
+      return;
+    }
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    this.drag = { clip, pointerId: event.pointerId, startX: event.clientX, laneWidth: lane.getBoundingClientRect().width };
+  }
+
+  onClipPointerMove(event: PointerEvent): void {
+    const drag = this.drag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    const delta = event.clientX - drag.startX;
+    if (Math.abs(delta) >= DRAG_THRESHOLD_PX) {
+      // Aperçu calé sur la grille : le clip saute de mesure en mesure (ou de temps en temps).
+      const units = dragUnits(delta, drag.laneWidth, this.unitsInWindow(drag.clip));
+      this.dragPreview.set({ id: drag.clip.id, offsetPercent: (100 * units) / this.unitsInWindow(drag.clip) });
+    }
+  }
+
+  onClipPointerUp(event: PointerEvent): void {
+    const drag = this.drag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    this.drag = null;
+    this.dragPreview.set(null);
+    const delta = event.clientX - drag.startX;
+    if (Math.abs(delta) >= DRAG_THRESHOLD_PX) {
+      this.selectedClip.set({ kind: drag.clip.kind, id: drag.clip.id });
+      this.moveClip(drag.clip, dragUnits(delta, drag.laneWidth, this.unitsInWindow(drag.clip)));
+    }
+  }
+
+  onClipPointerCancel(): void {
+    this.drag = null;
+    this.dragPreview.set(null);
+  }
+
+  /** Nombre de mesures (batterie) ou de temps (audio) contenus dans la fenêtre visible. */
+  private unitsInWindow(clip: TimelineClip): number {
+    return clip.kind === 'drum' ? this.visibleBars() : this.visibleBars() * BEATS_PER_BAR;
+  }
+
   /** Utilisé par `unsavedChangesGuard` avant de quitter le studio. */
   canLeave(): boolean {
     if (this.studioProject.uploading()) {
@@ -224,9 +412,25 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   /** Ctrl+S / Cmd+S sauvegarde le projet, y compris depuis un champ (le raccourci n'y écrit rien). */
   onKeydown(event: KeyboardEvent): void {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && this.studioProject.project()) {
+    const modifier = event.ctrlKey || event.metaKey;
+    const key = event.key.toLowerCase();
+    if (modifier && key === 's' && this.studioProject.project()) {
       event.preventDefault();
       this.studioProject.save();
+      return;
+    }
+    // Annuler / Rétablir : laissés au champ de saisie qui a le focus (annulation de texte).
+    const target = event.target as HTMLElement | null;
+    const typing = !!target && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable);
+    if (!modifier || typing) {
+      return;
+    }
+    if (key === 'z' && !event.shiftKey) {
+      event.preventDefault();
+      this.session.undo();
+    } else if ((key === 'z' && event.shiftKey) || key === 'y') {
+      event.preventDefault();
+      this.session.redo();
     }
   }
 

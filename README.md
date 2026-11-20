@@ -83,7 +83,8 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Interface | Pages Bibliothèque, Collaborations, Publications | 🎨 Maquette |
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
-| Composition | Drum Rack, Piano Roll, instruments, timeline | ⏳ À faire (M3 → M5) |
+| Timeline | Se placer (clic, clavier), boucle, clips de batterie (déplacer, dupliquer, raccourcir, supprimer), instrumentale et prises déplaçables, Annuler / Rétablir, positions sauvegardées | ✅ Fonctionnel (M5) |
+| Composition | Drum Rack multi-patterns, Piano Roll, instruments | ⏳ À faire (M3, M4) |
 | Import | Instrumentale MP3 / WAV envoyée dans vos fichiers audio, forme d'onde, égaliseur 3 bandes, retrouvée à la réouverture du projet | ✅ Fonctionnel (M6) |
 | Mix | Volume, mute et solo par piste (écoute et export) faits ; pan, EQ, réverbération, delay | ⏳ À faire (M7) |
 | Voix | Prise micro (bouton ●) et onglet « Correction vocale » : 6 styles (Naturel, Rap, Trap, Drill, Raï, Robot) + dose d'effet, mode personnalisé (gamme, notes, humanisation, transposition, égaliseur), courbe de hauteur, calcul dans un Web Worker, version corrigée utilisable sur la piste Voix | 🚧 Partiel (M9) |
@@ -266,7 +267,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **184 / 184 tests frontend** et **31 / 31 tests backend** réussis, build OK (20 novembre 2026).
+Dernier résultat connu : **202 / 202 tests frontend** et **31 / 31 tests backend** réussis, build OK (20 novembre 2026).
 
 ---
 
@@ -308,7 +309,7 @@ Schéma : `backend/src/models/MusicalProject.js` ; routes : `backend/src/routes/
 
 `ProjectSummary` : `id`, `title`, `origin`, `bpm`, `key`, `trackCount`, `formatVersion`, `createdAt`, `updatedAt`.
 
-`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `activeClipId` facultatif (prise jouée, doit désigner un clip de la piste), `clips[]`), `patterns[]` (64 max. ; `drumRows` de 16 pas, `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `activeClipId` facultatif (prise jouée, doit désigner un clip de la piste), `clips[]`), `patterns[]` (64 max. ; `drumRows` de 16 pas, `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Sur la piste Batterie, chaque clip joue le pattern en boucle de `startBeat` à `startBeat + durationBeats` (M5) ; une piste Batterie sans clip est silencieuse. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
 
 Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`, `tracks`, `patterns` et `master` sont copiés à la sauvegarde (liste blanche : `ownerId`, `origin`, `formatVersion`, `revision` envoyés sont ignorés) ; le document complet est validé avant écriture. Un `audioFileId` doit désigner un fichier `Track` de l'utilisateur authentifié, sinon la sauvegarde est refusée (`400 « Fichier audio inconnu ou non autorisé »`) : un projet ne peut pas servir à lire le fichier d'un autre compte. Erreurs : `400` validation, révision absente, fichier audio d'un autre compte ou JSON invalide ; `401` sans JWT ; `404` projet absent, identifiant mal formé **ou** projet d'un autre utilisateur ; `409 {message, revision}` si la révision envoyée n'est plus la révision actuelle (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `413` corps JSON au-delà de 1 Mo ; `422` si le projet stocké a un `formatVersion` non pris en charge (il n'est pas réécrit).
 
@@ -340,6 +341,17 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 20 novembre 2026 — M5, partie 2 : clips et arrangement (#11)
+
+- **Clips de batterie** : la piste Batterie devient une liste de clips (début et longueur en mesures) dans lesquels le pattern d'une mesure joue en boucle ; hors des clips, la batterie se tait, à l'écoute comme à l'export (vérifié sur le WAV : mesure 1 silencieuse quand le clip commence à la mesure 2). Arrangement par défaut : 8 mesures. Les projets enregistrés avant la M5 (pattern en boucle sans fin) reçoivent cet arrangement par défaut ; une piste vidée reste vide.
+- **Édition** : chaque clip est un bouton. Clic = sélection (sans déplacer la tête de lecture) ; glisser à la souris, au doigt ou au stylet (Pointer Events, aperçu calé sur la grille, seuil de 4 px pour distinguer clic et glissement) ; au clavier : flèches pour déplacer (batterie : une mesure ; instrumentale et prise : un temps, Maj : une mesure), Suppr pour supprimer un clip de batterie, Ctrl/Cmd + D pour le dupliquer, Échap. Barre d'édition équivalente pour le clip sélectionné : plus tôt / plus tard, − / + 1 mesure, dupliquer (copie placée juste après, pour enchaîner intro, couplet, refrain), supprimer, et « ＋ Clip de batterie » à la tête de lecture.
+- **Instrumentale** : position de départ en temps (suit les changements de BPM, reste sur la mesure) ; **prises** : position en secondes, déplaçables par temps en plus du décalage de ±10 ms de M8.
+- **Annuler / Rétablir** : historique des 50 derniers états de l'arrangement (clips, début de l'instrumentale, positions des prises — jamais l'audio), boutons et Ctrl/Cmd + Z, Ctrl/Cmd + Maj + Z ou Ctrl + Y, laissés aux champs de saisie qui ont le focus. Une modification sans effet (borne atteinte) n'entre pas dans l'historique ; l'ouverture d'un projet le vide. Une modification pendant la lecture relance la lecture à la même position pour l'entendre aussitôt.
+- **Sauvegarde** : clips de batterie (`startBeat`, `durationBeats`, `patternId`), début de l'instrumentale et positions des prises dans le format v1 existant, sans changement côté serveur.
+- **Limites** : un seul pattern (plusieurs patterns en M3) ; pas de découpe ni de raccourcissement des clips audio ; une seule prise visible et jouée sur la piste Voix ; l'export garde un nombre de mesures choisi (export du morceau entier en M10).
+
+**Vérifications** : frontend `npm test` 202/202 (clips de batterie : activité par mesure, déplacement, longueur, duplication, ajout, suppression ; historique ; placement à l'écran et glissement ; arrangement dans la session : annuler / rétablir, modifications sans effet, instrumentale en temps, prise déplacée puis annulée, historique vidé à l'ouverture ; conversion du format et projets antérieurs) ; `npm run build` réussi. Navigateur (Chromium, `npm start` + vrai backend Express avec stockage en mémoire) : glisser de 2 mesures, flèche gauche, dupliquer, raccourcir, Suppr, Ctrl+Z, Ctrl+Maj+Z, instrumentale avancée d'une mesure au clavier, lecture, export WAV (batterie absente de la mesure 1 quand le clip commence à la mesure 2), sauvegarde puis rechargement (arrangement retrouvé, historique vide), 360 px sans débordement, console sans erreur. **Non vérifiés** : le glisser au doigt sur un vrai écran tactile et l'écoute au casque.
 
 ### 20 novembre 2026 — M5, partie 1 : se placer dans le morceau et boucle (#46, #11)
 

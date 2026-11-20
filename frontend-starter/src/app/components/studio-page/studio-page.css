@@ -81,3 +81,16 @@ button:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-
 /* Plage de boucle : bande hachurée (pas seulement une couleur), sous les clips. */
 .loop-band { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(135deg, rgb(245 166 35 / 0.14) 0 6px, rgb(245 166 35 / 0.06) 6px 12px); border-left: 2px solid #f5a623; border-right: 2px solid #f5a623; pointer-events: none; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Clips : boutons positionnés sur la piste, déplaçables à la souris et au clavier. */
+.track-lane .timeline-clip { position: absolute; top: 9px; display: block; min-height: 0; height: 64px; padding: 7px; border-radius: 4px; text-align: left; font: inherit; font-weight: 400; cursor: grab; touch-action: none; user-select: none; }
+.track-lane .timeline-clip > span { pointer-events: none; }
+.track-lane .timeline-clip app-waveform { pointer-events: none; }
+.track-lane .timeline-clip.selected { outline: 2px solid #f7f7f7; outline-offset: 1px; z-index: 2; }
+.track-lane .timeline-clip.dragging { cursor: grabbing; opacity: 0.85; z-index: 3; }
+.track-lane .timeline-clip:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 1px; z-index: 2; }
+.note-pattern, .wave-pattern { display: block; }
+.clip-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.clip-toolbar button { min-height: 36px; padding: 4px 10px; font-size: 11px; }
+.clip-toolbar button.danger { background: #b3261e; border-color: #b3261e; color: #ffffff; }
+.clip-selection { margin-left: 8px; }

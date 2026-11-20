@@ -221,14 +221,14 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **But :** passer de petites boucles à un morceau structuré.
 
-- [ ] Afficher les patterns et les fichiers audio sous forme de **clips**.
-- [ ] Placer et déplacer des clips sur la timeline.
-- [ ] Dupliquer, raccourcir et supprimer des clips.
-- [ ] Répéter des patterns pour construire intro, couplet, refrain et outro.
+- [x] Afficher les patterns et les fichiers audio sous forme de **clips**.
+- [x] Placer et déplacer des clips sur la timeline.
+- [x] Dupliquer, raccourcir et supprimer des clips. *(clips de batterie ; l'instrumentale et les prises se retirent depuis leur panneau, sans découpe)*
+- [x] Répéter des patterns pour construire intro, couplet, refrain et outro.
 - [x] Jouer depuis une mesure ou une position sélectionnée.
 - [x] Ajouter une plage de lecture en boucle.
-- [ ] Prévoir **Annuler / Rétablir** pour les modifications essentielles.
-- [ ] Conserver exactement les positions de clips lors de la sauvegarde.
+- [x] Prévoir **Annuler / Rétablir** pour les modifications essentielles.
+- [x] Conserver exactement les positions de clips lors de la sauvegarde.
 
 **Livrable :** éditeur d'arrangement multipiste.
 

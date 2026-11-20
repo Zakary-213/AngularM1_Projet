@@ -77,8 +77,14 @@ export class StudioProjectService {
       // Durée recalculée depuis le fichier quand il est chargé : elle suit le tempo courant.
       instrumental: ref && loaded?.fileId === ref.fileId ? { ...ref, durationBeats: secondsToBeats(loaded.buffer.duration, bpm) } : ref,
       instrumentalEq: this.session.instrumentalEq(),
-      takes: this.takeRefs(),
+      // Position courante de chaque prise chargée (déplacée ou décalée depuis l'envoi).
+      takes: this.takeRefs().map(ref => {
+        const take = this.session.takes().find(candidate => candidate.id === ref.id);
+        return take ? { ...ref, startSeconds: take.startSeconds } : ref;
+      }),
       activeTakeId: this.takeRefs().some(take => take.id === this.session.activeTakeId()) ? this.session.activeTakeId() : null,
+      drumClips: this.session.drumClips(),
+      instrumentalStartBeat: this.session.instrumentalStartBeat(),
     };
   });
 
@@ -401,6 +407,7 @@ export class StudioProjectService {
     this.session.pattern.set(state.pattern);
     this.session.mixer.set(state.mixer);
     this.session.instrumentalEq.set(state.instrumentalEq);
+    this.session.loadArrangement(state.drumClips, state.instrumentalStartBeat);
     this.session.setInstrumental(null);
     this.pendingFile = null;
     this.upload.set({ state: 'idle' });

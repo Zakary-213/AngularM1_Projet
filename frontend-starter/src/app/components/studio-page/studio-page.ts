@@ -13,6 +13,7 @@ import { DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
 import { STUDIO_TRACKS, StudioTrackInfo } from '../../shared/audio/studio-tracks';
 import { TrackMix } from '../../shared/audio/track-mix';
+import { DEFAULT_LOOP_BARS, MAX_SONG_BARS, describePosition, stepAfterKey, stepFromFraction, validateLoopBars } from '../../shared/audio/timeline-position';
 import { StudioProjectService } from '../../shared/services/studio-project.service';
 import { LeaveConfirmation } from '../../shared/guards/unsaved-changes.guard';
 
@@ -21,6 +22,8 @@ const ZOOM_LEVELS = [4, 8, 16, 32] as const;
 const DEFAULT_ZOOM_INDEX = 2;
 /** La règle affiche 8 repères quel que soit le zoom (grille de fond à 12,5 %). */
 const RULER_MARKS = 8;
+/** Largeur de la colonne des noms de pistes (styles.css : .track-label, .timeline-ruler). */
+const TRACK_LABEL_WIDTH_PX = 150;
 
 type EditorTab = 'Batterie' | 'Correction vocale' | 'Mixeur' | 'Export';
 
@@ -66,6 +69,26 @@ export class StudioPageComponent implements LeaveConfirmation {
   readonly minBpm = MIN_BPM;
   readonly maxBpm = MAX_BPM;
   readonly instruments = [{ name: 'Drum machine', type: 'Rythme & percussions', icon: '▦' }, { name: '808 Bass', type: 'Basse & sub', icon: '≋' }, { name: 'Soft keys', type: 'Piano & claviers', icon: '♬' }, { name: 'Microphone', type: 'Voix & prises', icon: '♩' }];
+
+  readonly maxSongBars = MAX_SONG_BARS;
+  readonly loopFrom = new FormControl(DEFAULT_LOOP_BARS.fromBar, { nonNullable: true });
+  readonly loopTo = new FormControl(DEFAULT_LOOP_BARS.toBar, { nonNullable: true });
+  readonly loopError = signal<string | null>(null);
+  /** Position de la tête de lecture, lisible par un lecteur d'écran. */
+  readonly positionText = computed(() => describePosition(this.session.songStep()));
+  /** Plage de boucle en % de la fenêtre visible, ou `null` si la boucle est coupée ou hors champ. */
+  readonly loopBand = computed(() => {
+    const range = this.session.loopRange();
+    if (!range) {
+      return null;
+    }
+    const visibleSteps = this.visibleBars() * STEPS_PER_BAR;
+    const left = (100 * range.startStep) / visibleSteps;
+    if (left >= 100) {
+      return null;
+    }
+    return { left, width: Math.min(100 - left, (100 * (range.endStep - range.startStep)) / visibleSteps) };
+  });
 
   readonly bpmControl = new FormControl(DEFAULT_BPM, {
     nonNullable: true,
@@ -139,6 +162,50 @@ export class StudioPageComponent implements LeaveConfirmation {
         this.bpmControl.setValue(bpm, { emitEvent: false });
       }
     });
+  }
+
+  /** Clic sur la règle ou sur une piste : la tête de lecture se place au temps le plus proche. */
+  onTimelineClick(event: MouseEvent): void {
+    const lane = (event.currentTarget as HTMLElement).closest('.timeline-inner')?.querySelector('.track-lane');
+    if (!lane) {
+      return;
+    }
+    const rect = lane.getBoundingClientRect();
+    if (event.clientX < rect.left) {
+      return; // clic sur la colonne des noms de pistes
+    }
+    void this.session.seek(stepFromFraction((event.clientX - rect.left) / rect.width, this.visibleBars()));
+  }
+
+  /** Alternative clavier au clic : la règle est un curseur (flèches, Page, Début, Fin). */
+  onRulerKey(event: KeyboardEvent): void {
+    const step = stepAfterKey(this.session.songStep(), event.key, this.session.songEndStep());
+    if (step !== null) {
+      event.preventDefault();
+      void this.session.seek(step);
+    }
+  }
+
+  /** La règle commence par la colonne des noms de pistes (150 px) : les % portent sur le reste. */
+  rulerOffset(percent: number): string {
+    return `calc(${TRACK_LABEL_WIDTH_PX}px + (100% - ${TRACK_LABEL_WIDTH_PX}px) * ${percent / 100})`;
+  }
+
+  rulerWidth(percent: number): string {
+    return `calc((100% - ${TRACK_LABEL_WIDTH_PX}px) * ${percent / 100})`;
+  }
+
+  toggleLoop(event: Event): void {
+    void this.session.setLoop({ enabled: (event.target as HTMLInputElement).checked });
+  }
+
+  onLoopBarsChange(): void {
+    const bars = { fromBar: Number(this.loopFrom.value), toBar: Number(this.loopTo.value) };
+    const error = validateLoopBars(bars);
+    this.loopError.set(error);
+    if (!error) {
+      void this.session.setLoop({ bars });
+    }
   }
 
   /** Utilisé par `unsavedChangesGuard` avant de quitter le studio. */

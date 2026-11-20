@@ -16,6 +16,14 @@ export interface StepCursor {
   readonly songStep: number;
   /** Date du pas sur l'horloge audio, en secondes. */
   readonly time: number;
+  /** Vrai pour le premier pas d'un nouveau tour de boucle (retour au début de la plage). */
+  readonly wrapped?: boolean;
+}
+
+/** Plage jouée en boucle, en pas absolus : `startStep` inclus, `endStep` exclu. */
+export interface LoopRange {
+  readonly startStep: number;
+  readonly endStep: number;
 }
 
 /**
@@ -26,12 +34,16 @@ export function collectDueSteps(
   cursor: StepCursor,
   until: number,
   bpm: number,
+  loop: LoopRange | null = null,
 ): { due: StepCursor[]; next: StepCursor } {
   const due: StepCursor[] = [];
   let next = cursor;
   while (next.time < until) {
     due.push(next);
-    next = { step: (next.songStep + 1) % STEPS_PER_BAR, songStep: next.songStep + 1, time: next.time + stepDurationSeconds(bpm) };
+    // L'horloge continue sans interruption : seul le pas revient au début de la boucle.
+    const wraps = loop !== null && next.songStep + 1 >= loop.endStep && next.songStep < loop.endStep;
+    const songStep = wraps ? loop.startStep : next.songStep + 1;
+    next = { step: songStep % STEPS_PER_BAR, songStep, time: next.time + stepDurationSeconds(bpm), ...(wraps ? { wrapped: true } : {}) };
   }
   return { due, next };
 }
@@ -44,6 +56,7 @@ export class StepScheduler {
     private readonly clock: () => number,
     private readonly bpm: () => number,
     private readonly onStep: (cursor: StepCursor) => void,
+    private readonly loop: () => LoopRange | null = () => null,
   ) {}
 
   get running(): boolean {
@@ -66,7 +79,7 @@ export class StepScheduler {
   }
 
   private tick(): void {
-    const { due, next } = collectDueSteps(this.cursor, this.clock() + SCHEDULE_AHEAD_SECONDS, this.bpm());
+    const { due, next } = collectDueSteps(this.cursor, this.clock() + SCHEDULE_AHEAD_SECONDS, this.bpm(), this.loop());
     this.cursor = next;
     due.forEach(cursor => this.onStep(cursor));
   }

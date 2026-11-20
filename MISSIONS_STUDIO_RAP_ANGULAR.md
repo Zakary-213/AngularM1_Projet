@@ -225,8 +225,8 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [ ] Placer et déplacer des clips sur la timeline.
 - [ ] Dupliquer, raccourcir et supprimer des clips.
 - [ ] Répéter des patterns pour construire intro, couplet, refrain et outro.
-- [ ] Jouer depuis une mesure ou une position sélectionnée.
-- [ ] Ajouter une plage de lecture en boucle.
+- [x] Jouer depuis une mesure ou une position sélectionnée.
+- [x] Ajouter une plage de lecture en boucle.
 - [ ] Prévoir **Annuler / Rétablir** pour les modifications essentielles.
 - [ ] Conserver exactement les positions de clips lors de la sauvegarde.
 

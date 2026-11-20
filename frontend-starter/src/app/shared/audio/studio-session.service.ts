@@ -4,12 +4,14 @@ import { validateAudioFile } from './audio-file';
 import { DrumPattern, DrumVoice, createDemoPattern, toggleStep } from './drum-pattern';
 import { gainToDecibels } from './mix-graph';
 import { InputDevice, MicrophoneRecorder, describeMicrophoneError, takeStartSeconds, toInputDevices } from './microphone-recorder';
-import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm } from './music-time';
+import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm, stepDurationSeconds } from './music-time';
 import { renderMix } from './offline-render';
 import { PatternTransport, TrackClip } from './pattern-transport';
 import { NOTE_NAMES, SCALE_LABELS } from './pitch/musical-scale';
 import { ProjectKey } from './pitch/vocal-styles';
 import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
+import { DEFAULT_LOOP_BARS, LoopBars, clampSongStep, loopStepRange, validateLoopBars } from './timeline-position';
+import { LoopRange } from './step-scheduler';
 import { MixerState, TrackId, TrackMix, clampTrackDb, createDefaultMixer, effectiveTrackGains, updateTrack } from './track-mix';
 import { encodeWav, peakLevel, rmsLevel } from './wav-encoder';
 
@@ -106,6 +108,20 @@ export class StudioSessionService implements OnDestroy {
   /** Pas en surbrillance dans le séquenceur, ou -1 à l'arrêt. */
   readonly currentStep = computed(() => (this.transportState() === 'stopped' ? -1 : this.songStep() % STEPS_PER_BAR));
   readonly metronome = signal(false);
+  /** Lecture en boucle d'une plage de mesures (désactivée pendant un enregistrement). */
+  readonly loopEnabled = signal(false);
+  readonly loopBars = signal<LoopBars>(DEFAULT_LOOP_BARS);
+  readonly loopRange = computed<LoopRange | null>(() =>
+    this.loopEnabled() && validateLoopBars(this.loopBars()) === null ? loopStepRange(this.loopBars()) : null,
+  );
+  /** Fin du contenu du morceau (pas absolu) : instrumentale, prises, et au moins 4 mesures. */
+  readonly songEndStep = computed(() => {
+    const stepSeconds = stepDurationSeconds(this.bpm());
+    const instrumental = this.instrumental()?.buffer.duration ?? 0;
+    const takes = this.takes().map(take => take.startSeconds + take.buffer.duration);
+    const lastSecond = Math.max(instrumental, ...takes, 0);
+    return clampSongStep(Math.max(4 * STEPS_PER_BAR, Math.ceil(lastSecond / stepSeconds)));
+  });
   /** Tonalité du projet (la mineur par défaut) : reprise par la correction vocale. */
   readonly projectKey = signal<ProjectKey>({ root: 9, scale: 'minor' });
   readonly projectKeyLabel = computed(() => `${NOTE_NAMES[this.projectKey().root]} ${SCALE_LABELS[this.projectKey().scale]}`);
@@ -195,6 +211,37 @@ export class StudioSessionService implements OnDestroy {
     }
     this.haltTransport();
     this.transportState.set('paused');
+  }
+
+  /**
+   * Place la tête de lecture sur un pas absolu. En lecture, la lecture repart de là ;
+   * à l'arrêt, la position est gardée pour le prochain ▶. Sans effet pendant une prise.
+   */
+  async seek(songStep: number): Promise<void> {
+    if (this.micState() !== 'idle') {
+      return;
+    }
+    const step = clampSongStep(songStep);
+    const wasPlaying = this.playing();
+    this.haltTransport();
+    this.songStep.set(step);
+    this.transportState.set('paused');
+    if (wasPlaying) {
+      await this.startPlayback();
+    }
+  }
+
+  /** Active ou règle la boucle ; une lecture en cours repart pour l'appliquer aussitôt. */
+  async setLoop(change: { enabled?: boolean; bars?: LoopBars }): Promise<void> {
+    if (change.bars) {
+      this.loopBars.set(change.bars);
+    }
+    if (change.enabled !== undefined) {
+      this.loopEnabled.set(change.enabled);
+    }
+    if (this.playing()) {
+      await this.seek(this.songStep());
+    }
   }
 
   /** Arrête et revient au début du morceau. */
@@ -520,9 +567,14 @@ export class StudioSessionService implements OnDestroy {
     try {
       const { context, master } = await this.engine.start();
       this.transport ??= new PatternTransport(context, master, () => this.pattern(), () => this.bpm(), () => this.metronome());
-      const fromSongStep = this.transportState() === 'paused' ? this.songStep() : 0;
+      // Pas de boucle pendant une prise : la voix doit suivre le morceau de façon linéaire.
+      const loop = includeTake ? this.loopRange() : null;
+      let fromSongStep = this.transportState() === 'paused' ? this.songStep() : 0;
+      if (loop && (fromSongStep < loop.startStep || fromSongStep >= loop.endStep)) {
+        fromSongStep = loop.startStep;
+      }
       this.transport.play(
-        { clips: this.trackClips(includeTake), gains: effectiveTrackGains(this.mixer()), fromSongStep, instrumentalEq: this.instrumentalEq() },
+        { clips: this.trackClips(includeTake), gains: effectiveTrackGains(this.mixer()), fromSongStep, instrumentalEq: this.instrumentalEq(), loop },
         this.bpm(),
       );
       this.engineError.set(null);

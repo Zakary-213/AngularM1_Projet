@@ -3,7 +3,7 @@ import { HttpErrorResponse, HttpEvent, HttpEventType, HttpResponse } from '@angu
 import { Observable, Subject, of, throwError } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioEngineService } from '../audio/audio-engine.service';
-import { StudioSessionService } from '../audio/studio-session.service';
+import { StudioSessionService, VocalTake } from '../audio/studio-session.service';
 import { MusicalProject, ProjectContent } from '../models/musical-project.model';
 import { ProjectService } from './project.service';
 import { TrackService } from './track.service';
@@ -222,6 +222,106 @@ describe('StudioProjectService', () => {
       expect(session.instrumental()).toBeNull();
       expect(service.instrumentalRef()).toBeNull();
       expect(service.saveState()).toBe('dirty');
+    });
+  });
+
+  describe('prises vocales (M8)', () => {
+    const TAKE_FILE = '64b0000000000000000000c1';
+    const recorded = (id: string, name: string): VocalTake => ({
+      id,
+      name,
+      blob: new Blob(['opus'], { type: 'audio/webm;codecs=opus' }),
+      fileId: null,
+      buffer: fakeBuffer(12),
+      url: `blob:${id}`,
+      mimeType: 'audio/webm;codecs=opus',
+      startSeconds: -0.09,
+      latencyMs: 40,
+    });
+
+    /** Simule la fin d'un enregistrement (le micro n'existe pas dans les tests). */
+    function fakeRecording(take: VocalTake): void {
+      vi.spyOn(session, 'stopRecording').mockImplementation(async () => {
+        session.takes.update(takes => [...takes, take]);
+        session.activeTakeId.set(take.id);
+        session.lastRecordedTake.set(take);
+      });
+    }
+
+    it('envoie la nouvelle prise en WebM puis la sauvegarde comme clip actif de la piste Voix', async () => {
+      service.load('p1');
+      tracksApi.upload.mockReturnValue(of(new HttpResponse({ body: { id: TAKE_FILE } as Track })));
+      fakeRecording(recorded('take-1', 'Prise 1'));
+      await service.stopRecording();
+
+      const [file, title] = tracksApi.upload.mock.calls[0] as [File, string];
+      expect(file.name).toBe('Prise 1.webm');
+      expect(file.type).toBe('audio/webm');
+      expect(title).toBe('Prise 1 · Minuit');
+      expect(session.takes()[0].fileId).toBe(TAKE_FILE);
+      expect(service.saveState()).toBe('dirty');
+
+      expect(service.renameTake('take-1', 'Couplet')).toBe(true);
+      service.shiftTake('take-1', 0.02);
+      expect(service.takeRefs()[0].startSeconds).toBeCloseTo(-0.07, 9);
+      api.save.mockReturnValue(of({ ...stored, revision: 5 }));
+      service.save();
+      const voice = (api.save.mock.calls[0][2] as ProjectContent).tracks.find(track => track.id === 'voice')!;
+      expect(voice.activeClipId).toBe('take-1');
+      expect(voice.clips[0]).toMatchObject({ id: 'take-1', label: 'Couplet', audioFileId: TAKE_FILE, startBeat: 0, offsetSeconds: 0.07 });
+    });
+
+    it('échec d’envoi d’une prise : message par prise et nouvel essai', async () => {
+      service.load('p1');
+      tracksApi.upload.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 0 })));
+      fakeRecording(recorded('take-1', 'Prise 1'));
+      await service.stopRecording();
+      expect(service.takeUploads()['take-1']).toMatchObject({ state: 'error' });
+      expect(service.takeRefs()).toEqual([]);
+
+      tracksApi.upload.mockReturnValueOnce(of(new HttpResponse({ body: { id: TAKE_FILE } as Track })));
+      service.retryTakeUpload('take-1');
+      expect(service.takeUploads()['take-1']).toBeUndefined();
+      expect(service.takeRefs().map(ref => ref.fileId)).toEqual([TAKE_FILE]);
+    });
+
+    it('à l’ouverture, récupère les prises du projet et la prise active, sans modification en attente', async () => {
+      const voice = {
+        id: 'voice',
+        name: 'Voix principale',
+        type: 'vocal' as const,
+        activeClipId: 'take-2',
+        clips: [
+          { id: 'take-1', startBeat: 0, durationBeats: 18, offsetSeconds: 0.05, audioFileId: 'f1', label: 'Prise 1' },
+          { id: 'take-2', startBeat: 8, durationBeats: 30, offsetSeconds: 0, audioFileId: 'f2', label: 'Refrain' },
+        ],
+      };
+      api.get.mockReturnValue(of({ ...stored, bpm: 90, tracks: [voice] }));
+      service.load('p1');
+      expect(tracksApi.audio.mock.calls.map(call => call[0])).toEqual(['f1', 'f2']);
+      await vi.waitFor(() => expect(session.takes().length).toBe(2));
+      expect(session.takes().map(take => take.name)).toEqual(['Prise 1', 'Refrain']);
+      expect(session.take()?.id).toBe('take-2');
+      expect(session.takes()[1].startSeconds).toBeCloseTo(8 * (60 / 90), 6);
+      expect(service.saveState()).toBe('saved');
+    });
+
+    it('prise supprimée de la bibliothèque : message, puis retrait du projet sur demande', () => {
+      const voice = { id: 'voice', name: 'Voix', type: 'vocal' as const, clips: [{ id: 'take-1', startBeat: 0, durationBeats: 8, audioFileId: 'f1', label: 'Prise 1' }] };
+      api.get.mockReturnValue(of({ ...stored, tracks: [voice] }));
+      tracksApi.audio.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 404 })));
+      service.load('p1');
+      expect(service.takeErrors()['take-1']).toContain('n’existe plus');
+      expect(service.saveState()).toBe('saved');
+      service.removeTake('take-1');
+      expect(service.takeRefs()).toEqual([]);
+      expect(service.saveState()).toBe('dirty');
+    });
+
+    it('session libre : la prise reste locale', async () => {
+      fakeRecording(recorded('take-1', 'Prise 1'));
+      await service.stopRecording();
+      expect(tracksApi.upload).not.toHaveBeenCalled();
     });
   });
 });

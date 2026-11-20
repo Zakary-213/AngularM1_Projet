@@ -40,6 +40,8 @@ const allowed = new Set([
   "audio/wav",
   "audio/x-wav",
   "audio/ogg",
+  // Format produit par MediaRecorder dans Chrome, Edge et Firefox (prises vocales, M8).
+  "audio/webm",
   "audio/mp4",
   "audio/x-m4a",
 ]);

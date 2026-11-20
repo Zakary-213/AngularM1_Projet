@@ -10,8 +10,8 @@ import { MusicalProject, ProjectContent, ProjectTrackType } from '../models/musi
 /**
  * Conversion entre l'état sérialisable du studio et le format de sauvegarde v1.
  * Les objets audio (buffers, nœuds, prises) n'y figurent jamais : l'instrumentale
- * est référencée par l'identifiant de son fichier dans la bibliothèque (M6) ;
- * les prises vocales le seront en M8.
+ * et les prises vocales sont référencées par l'identifiant de leur fichier dans
+ * la bibliothèque (M6, M8).
  */
 
 /** Instrumentale envoyée au serveur, telle qu'elle est référencée dans le projet. */
@@ -23,6 +23,16 @@ export interface InstrumentalRef {
   readonly durationBeats: number;
 }
 
+/** Prise vocale envoyée au serveur, telle qu'elle est référencée dans le projet. */
+export interface TakeRef {
+  readonly id: string;
+  readonly fileId: string;
+  readonly label: string;
+  /** Position du début du fichier dans le morceau, en secondes (négative si la prise commence avant). */
+  readonly startSeconds: number;
+  readonly durationSeconds: number;
+}
+
 export interface StudioState {
   readonly bpm: number;
   readonly key: ProjectKey;
@@ -30,6 +40,26 @@ export interface StudioState {
   readonly mixer: MixerState;
   readonly instrumental: InstrumentalRef | null;
   readonly instrumentalEq: ThreeBandEq;
+  readonly takes: readonly TakeRef[];
+  /** Prise jouée sur la piste Voix, parmi `takes`, ou `null`. */
+  readonly activeTakeId: string | null;
+}
+
+const POSITION_DECIMALS = 10000;
+const round = (value: number) => Math.round(value * POSITION_DECIMALS) / POSITION_DECIMALS;
+
+/**
+ * Position d'une prise en temps : le format n'accepte pas de début négatif, la part
+ * qui précède le morceau (compensation de latence) va dans `offsetSeconds`.
+ */
+export function takeClipPosition(startSeconds: number, bpm: number): { startBeat: number; offsetSeconds: number } {
+  return startSeconds >= 0
+    ? { startBeat: round((startSeconds * bpm) / 60), offsetSeconds: 0 }
+    : { startBeat: 0, offsetSeconds: round(-startSeconds) };
+}
+
+export function takeStartFromClip(startBeat: number, offsetSeconds: number, bpm: number): number {
+  return (startBeat * 60) / bpm - offsetSeconds;
 }
 
 const MIN_CLIP_BEATS = 0.25;
@@ -77,13 +107,22 @@ export function toProjectContent(state: StudioState): ProjectContent {
         mute: mix.muted,
         solo: mix.solo,
         ...(info.id === 'instrumental' ? { eq: { ...state.instrumentalEq } } : {}),
+        ...(info.id === 'voice' && state.activeTakeId && state.takes.some(take => take.id === state.activeTakeId) ? { activeClipId: state.activeTakeId } : {}),
         // Le pattern d'une mesure joue en boucle sur la batterie ; l'instrumentale démarre au début du morceau.
         clips:
           info.id === 'drums'
             ? [{ id: DRUMS_CLIP_ID, startBeat: 0, durationBeats: BEATS_PER_BAR, patternId: MAIN_PATTERN_ID }]
             : instrumental
               ? [{ id: INSTRUMENTAL_CLIP_ID, startBeat: 0, durationBeats: instrumental.durationBeats, offsetSeconds: 0, audioFileId: instrumental.fileId, label: instrumental.label.slice(0, CLIP_LABEL_MAX_LENGTH) }]
-              : [],
+              : info.id === 'voice'
+                ? state.takes.map(take => ({
+                    id: take.id,
+                    ...takeClipPosition(take.startSeconds, state.bpm),
+                    durationBeats: secondsToBeats(take.durationSeconds, state.bpm),
+                    audioFileId: take.fileId,
+                    label: take.label.slice(0, CLIP_LABEL_MAX_LENGTH),
+                  }))
+                : [],
       };
     }),
   };
@@ -133,15 +172,34 @@ function readInstrumental(project: MusicalProject): { ref: InstrumentalRef | nul
   return { ref, eq: track?.eq ? clampEq(track.eq) : FLAT_THREE_BAND_EQ };
 }
 
+function readTakes(project: MusicalProject, bpm: number): { takes: TakeRef[]; activeTakeId: string | null } {
+  const track = project.tracks?.find(candidate => candidate.id === 'voice');
+  const takes = (track?.clips ?? [])
+    .filter(clip => typeof clip.audioFileId === 'string' && clip.audioFileId.length > 0)
+    .map(clip => ({
+      id: clip.id,
+      fileId: clip.audioFileId!,
+      label: clip.label || 'Prise',
+      startSeconds: takeStartFromClip(clip.startBeat, clip.offsetSeconds ?? 0, bpm),
+      durationSeconds: (Math.max(MIN_CLIP_BEATS, clip.durationBeats) * 60) / bpm,
+    }));
+  const activeTakeId = takes.some(take => take.id === track?.activeClipId) ? track!.activeClipId! : (takes.at(-1)?.id ?? null);
+  return { takes, activeTakeId };
+}
+
 /** État du studio à partir d'un projet chargé ; les valeurs absentes ou invalides reprennent les défauts. */
 export function fromProject(project: MusicalProject): StudioState {
+  const bpm = Number.isFinite(project.bpm) ? clampBpm(project.bpm) : DEFAULT_BPM;
+  const { takes, activeTakeId } = readTakes(project, bpm);
   return {
-    bpm: Number.isFinite(project.bpm) ? clampBpm(project.bpm) : DEFAULT_BPM,
+    bpm,
     key: readKey(project),
     pattern: readPattern(project),
     mixer: readMixer(project),
     instrumental: readInstrumental(project).ref,
     instrumentalEq: readInstrumental(project).eq,
+    takes,
+    activeTakeId,
   };
 }
 

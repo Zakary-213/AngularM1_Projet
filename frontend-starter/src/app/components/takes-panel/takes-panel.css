@@ -1,0 +1,26 @@
+:host { display: block; border-top: 1px solid var(--line); }
+.takes { padding: 12px; font-size: 12px; }
+.takes-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 10px; }
+h3 { margin: 0; font-size: 14px; }
+h3 small { color: var(--muted); font-weight: 400; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 100%; }
+.field label { font-weight: 650; }
+.field small { color: var(--muted); max-width: 46ch; }
+select, input[type='text'] { min-height: 40px; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid #404040; background: #0d0d0d; color: inherit; }
+.take-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.take { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+/* La prise active est signalée par la bordure et par le bouton radio coché (pas seulement la couleur). */
+.take.active { border-color: #8bc8dd; }
+.choice { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; flex: 1 1 220px; min-width: 0; }
+.choice input { width: 20px; height: 20px; accent-color: #8bc8dd; }
+.choice small { color: var(--muted); margin-left: 8px; }
+.state { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.state progress { width: 90px; accent-color: var(--accent); }
+.actions, .confirm { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rename { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; }
+button { min-height: 36px; padding: 6px 10px; font-size: 11px; }
+button.danger { background: #b3261e; border-color: #b3261e; color: #ffffff; }
+.error { color: #ff8a80; margin: 0 0 6px; }
+.muted { color: var(--muted); margin: 0; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 2px; }
+.nudge { display: inline-flex; gap: 4px; padding-right: 6px; border-right: 1px solid var(--line); }

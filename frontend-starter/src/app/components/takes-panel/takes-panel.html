@@ -1,0 +1,73 @@
+<section class="takes" aria-labelledby="takes-title">
+  <div class="takes-head">
+    <h3 id="takes-title">Prises vocales <small>{{ session.takes().length }} / {{ maxTakes }}</small></h3>
+    <div class="field">
+      <label for="take-input">Micro</label>
+      <select id="take-input" (change)="onInputChange($event)" [disabled]="session.micState() !== 'idle'" aria-describedby="take-input-help">
+        <option value="" [selected]="!session.selectedInputId()">Entrée par défaut du système</option>
+        @for (device of session.inputDevices(); track device.deviceId) {
+          <option [value]="device.deviceId" [selected]="session.selectedInputId() === device.deviceId">{{ device.label }}</option>
+        }
+      </select>
+      <small id="take-input-help">Les noms des micros apparaissent après la première autorisation. Écoutez au casque : aucun retour micro n'est diffusé. Voix en retard ou en avance sur la prod ? Décalez la prise par pas de 10 ms.</small>
+    </div>
+  </div>
+
+  @if (studioProject.takesLoading() > 0) { <p role="status" class="muted">Récupération des prises du projet…</p> }
+  @for (missing of missingTakes(); track missing.id) {
+    <p class="error" role="alert">{{ missing.message }} <button type="button" (click)="studioProject.removeTake(missing.id)">Retirer du projet</button></p>
+  }
+
+  @if (session.takes().length === 0 && studioProject.takesLoading() === 0) {
+    <p class="muted">Aucune prise. Appuyez sur ● pour enregistrer pendant la lecture de la prod.</p>
+  } @else {
+    <ul class="take-list" role="radiogroup" aria-label="Prise jouée sur la piste Voix">
+      @for (take of session.takes(); track take.id) {
+        @let progress = uploadProgress(take.id);
+        @let uploadMessage = uploadError(take.id);
+        <li class="take" [class.active]="session.activeTakeId() === take.id">
+          @if (renamingId() === take.id) {
+            <form class="rename" [formGroup]="renameForm" (ngSubmit)="rename(take)">
+              <label [for]="'take-name-' + take.id">Nom de la prise</label>
+              <input [id]="'take-name-' + take.id" type="text" formControlName="name" [maxlength]="nameMaxLength" />
+              <button type="submit" class="button primary">Enregistrer</button>
+              <button type="button" (click)="renamingId.set(null)">Annuler</button>
+            </form>
+          } @else {
+            <label class="choice">
+              <input type="radio" name="active-take" [checked]="session.activeTakeId() === take.id" (change)="studioProject.selectTake(take.id)" />
+              <span><b>{{ take.name }}</b> <small>{{ formatSeconds(take.buffer.duration) }} · début {{ formatSeconds(take.startSeconds) }}</small></span>
+            </label>
+            <span class="state">
+              @if (progress !== null) {
+                <progress max="100" [value]="progress" [attr.aria-label]="'Envoi de ' + take.name"></progress> Envoi…
+              } @else if (uploadMessage) {
+                <span class="error">{{ uploadMessage }}</span>
+                <button type="button" (click)="studioProject.retryTakeUpload(take.id)">Réessayer l'envoi</button>
+              } @else if (take.fileId) { Enregistrée }
+              @else if (studioProject.project()) { Non envoyée }
+              @else { Locale (session libre) }
+            </span>
+            @if (confirmDeleteId() === take.id) {
+              <span class="confirm" role="group" [attr.aria-label]="'Confirmer la suppression de ' + take.name">
+                Supprimer « {{ take.name }} » ?
+                <button type="button" class="danger" (click)="remove(take)">Supprimer</button>
+                <button type="button" (click)="confirmDeleteId.set(null)">Annuler</button>
+              </span>
+            } @else {
+              <span class="actions">
+                <span class="nudge" role="group" [attr.aria-label]="'Décaler ' + take.name">
+                  <button type="button" (click)="studioProject.shiftTake(take.id, -nudgeSeconds)" [attr.aria-label]="'Avancer ' + take.name + ' de 10 millisecondes'">−10 ms</button>
+                  <button type="button" (click)="studioProject.shiftTake(take.id, nudgeSeconds)" [attr.aria-label]="'Retarder ' + take.name + ' de 10 millisecondes'">+10 ms</button>
+                </span>
+                <button type="button" (click)="startRename(take)" [attr.aria-label]="'Renommer ' + take.name">Renommer</button>
+                <button type="button" (click)="confirmDeleteId.set(take.id)" [disabled]="progress !== null" [attr.aria-label]="'Supprimer ' + take.name">Supprimer</button>
+              </span>
+            }
+          }
+        </li>
+      }
+    </ul>
+  }
+  @if (!session.canRecordTake()) { <p class="muted" role="status">Limite de {{ maxTakes }} prises atteinte : supprimez-en une pour enregistrer à nouveau.</p> }
+</section>

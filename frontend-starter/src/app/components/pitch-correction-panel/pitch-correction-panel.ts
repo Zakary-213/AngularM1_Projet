@@ -202,7 +202,7 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   useStudioTake(): void {
     const take = this.session.take();
     if (take) {
-      this.setSource({ label: 'Dernière prise du studio', samples: toMono(take.buffer), sampleRate: take.buffer.sampleRate, fromStudioTake: true });
+      this.setSource({ label: 'Prise active du studio', samples: toMono(take.buffer), sampleRate: take.buffer.sampleRate, fromStudioTake: true });
     }
   }
 

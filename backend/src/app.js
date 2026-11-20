@@ -8,6 +8,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { User } from "./models/User.js";
 import { Track } from "./models/Track.js";
+import { createProjectRouter } from "./routes/projects.js";
 
 // Les fichiers audio restent sur le disque du serveur dans ce TP.
 // MongoDB ne conserve que leurs métadonnées : titre, nom, taille, etc.
@@ -42,6 +43,9 @@ const allowed = new Set([
   "audio/mp4",
   "audio/x-m4a",
 ]);
+
+// Taille maximale d'un corps JSON (sauvegarde d'un projet comprise).
+const MAX_JSON_BODY = "1mb";
 
 // Photo de profil : 2 Mo suffisent pour une image affichée en petit format.
 const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
@@ -213,7 +217,8 @@ export function createApp() {
   // Express ne gère pas nativement le JSON : ce middleware transforme le corps JSON en objet JavaScript 
   // accessible via req.body.
   // Il est placé avant les routes pour que toutes les requêtes JSON soient traitées.
-  app.use(express.json());
+  // 1 Mo : un projet complet (16 pistes, patterns, clips) reste bien en dessous.
+  app.use(express.json({ limit: MAX_JSON_BODY }));
 
   /** Endpoint public utilisé pour vérifier que l'API répond. */
   app.get("/api/health", (_req, res) => {
@@ -591,6 +596,8 @@ export function createApp() {
     }
   });
 
+  app.use("/api/projects", createProjectRouter(auth));
+
   /** Gestionnaire central des erreurs connues de l'application. */
   app.use((error, _req, res, next) => {
     console.error("[error] Erreur reçue par le gestionnaire central", error);
@@ -604,6 +611,12 @@ export function createApp() {
       error?.message === "Format audio non accepté"
     ) {
       return res.status(400).json({ message: error.message });
+    }
+    if (error?.type === "entity.too.large") {
+      return res.status(413).json({ message: "Requête trop volumineuse" });
+    }
+    if (error?.type === "entity.parse.failed") {
+      return res.status(400).json({ message: "JSON invalide" });
     }
     if (error?.name === "ValidationError") {
       return res.status(400).json({ message: error.message });

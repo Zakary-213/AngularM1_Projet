@@ -1,4 +1,101 @@
-<section class="page-heading"><div><p class="eyebrow">CHAQUE IDÉE A SA PLACE</p><h1>Mes projets<span>.</span></h1><p>Vos sessions, vos brouillons et les morceaux à venir.</p></div><a class="button primary" routerLink="/studio">＋ Nouveau projet</a></section>
-<div class="toolbar"><div class="tabs" aria-label="Navigation des projets"><a routerLink="/projects" class="selected">Tous les projets <span>3</span></a><a routerLink="/collaborations">Partagés avec moi</a><a routerLink="/publications">Publiés</a></div><span class="muted">3 projets de démonstration</span></div>
-<div class="project-grid">@for (project of projects; track project.title) {<a class="project-card" routerLink="/studio"><div [class]="'cover ' + project.color"><span class="cover-number">{{ project.number }}</span><div class="cover-lines" aria-hidden="true"></div><span class="cover-caption">{{ project.genre }}</span><span class="cover-open">↗</span></div><div class="project-title"><h3>{{ project.title }}</h3><span>↗</span></div><p>{{ project.bpm }} BPM · {{ project.key }} · {{ project.tracks }} pistes</p><div class="card-footer"><span>{{ project.updated }}</span><span class="tag subtle">{{ project.status }}</span></div></a>}</div>
-<a class="new-project" routerLink="/studio"><span>＋</span><h3>Et si on créait quelque chose ?</h3><p>Ouvrir une nouvelle session dans le studio</p></a>
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">CHAQUE IDÉE A SA PLACE</p>
+    <h1>Mes projets<span>.</span></h1>
+    <p>Vos sessions sauvegardées. Elles restent privées : vous seul y avez accès.</p>
+  </div>
+</section>
+
+<section class="panel new-project-form" aria-labelledby="new-project-title">
+  <h2 id="new-project-title">Nouveau projet</h2>
+  <form [formGroup]="createForm" (ngSubmit)="create()" novalidate>
+    <div class="field">
+      <label for="project-title">Titre</label>
+      <input id="project-title" type="text" formControlName="title" [maxlength]="titleMaxLength" autocomplete="off" aria-describedby="project-title-error" [attr.aria-invalid]="createForm.controls.title.invalid && createForm.controls.title.touched" />
+      <small id="project-title-error" class="error">
+        @if (createForm.controls.title.touched && createForm.controls.title.invalid) { Donnez un titre de 1 à {{ titleMaxLength }} caractères. }
+      </small>
+    </div>
+    <fieldset class="origins">
+      <legend>Point de départ</legend>
+      @for (origin of origins; track origin.value) {
+        <label class="origin">
+          <input type="radio" formControlName="origin" [value]="origin.value" />
+          <span><b>{{ origin.label }}</b><small>{{ origin.description }}</small></span>
+        </label>
+      }
+    </fieldset>
+    <button type="submit" class="button primary" [disabled]="creating()">{{ creating() ? 'Création…' : 'Créer et ouvrir le studio' }}</button>
+    @if (createError(); as message) { <p class="error" role="alert">{{ message }}</p> }
+  </form>
+</section>
+
+<section aria-labelledby="project-list-title">
+  <div class="section-heading">
+    <h2 id="project-list-title">Projets sauvegardés</h2>
+    @if (listState() === 'loaded') { <span class="muted">{{ total() }} projet{{ total() > 1 ? 's' : '' }}</span> }
+  </div>
+
+  @if (actionError(); as message) { <p class="error" role="alert">{{ message }}</p> }
+
+  @switch (listState()) {
+    @case ('loading') { <p role="status" class="muted">Chargement des projets…</p> }
+    @case ('error') {
+      <div class="panel list-error" role="alert">
+        <p>{{ listError() }}</p>
+        <button type="button" (click)="load(page())">Réessayer</button>
+      </div>
+    }
+    @default {
+      @if (items().length === 0) {
+        <p class="panel empty">Aucun projet pour l’instant. Créez-en un ci-dessus pour commencer.</p>
+      } @else {
+        <ul class="project-list">
+          @for (project of items(); track project.id) {
+            <li class="panel project-item" [attr.aria-busy]="busyId() === project.id">
+              @if (renamingId() === project.id) {
+                <form class="rename" [formGroup]="renameForm" (ngSubmit)="rename(project)">
+                  <label [for]="'rename-' + project.id">Nouveau titre</label>
+                  <input [id]="'rename-' + project.id" type="text" formControlName="title" [maxlength]="titleMaxLength" />
+                  <div class="actions">
+                    <button type="submit" class="button primary" [disabled]="busyId() === project.id">Enregistrer</button>
+                    <button type="button" (click)="cancelRename()">Annuler</button>
+                  </div>
+                </form>
+              } @else {
+                <div class="project-head">
+                  <h3><a [routerLink]="['/studio', project.id]">{{ project.title }}</a></h3>
+                  <span class="tag subtle">{{ project.origin === 'import' ? 'PROD IMPORTÉE' : 'CRÉATION' }}</span>
+                </div>
+                <p class="meta">{{ project.bpm }} BPM · {{ keyLabel(project.key) }} · {{ project.trackCount }} piste{{ project.trackCount > 1 ? 's' : '' }}</p>
+                <p class="muted">Modifié le {{ formatDate(project.updatedAt) }}</p>
+                @if (confirmDeleteId() === project.id) {
+                  <div class="confirm" role="group" [attr.aria-label]="'Confirmer la suppression de ' + project.title">
+                    <p>Supprimer définitivement « {{ project.title }} » ? Les fichiers audio de la bibliothèque sont conservés.</p>
+                    <div class="actions">
+                      <button type="button" class="danger" (click)="delete(project)" [disabled]="busyId() === project.id">{{ busyId() === project.id ? 'Suppression…' : 'Supprimer' }}</button>
+                      <button type="button" (click)="confirmDeleteId.set(null)">Annuler</button>
+                    </div>
+                  </div>
+                } @else {
+                  <div class="actions">
+                    <a class="button primary" [routerLink]="['/studio', project.id]" [attr.aria-label]="'Ouvrir ' + project.title">Ouvrir</a>
+                    <button type="button" (click)="startRename(project)" [attr.aria-label]="'Renommer ' + project.title">Renommer</button>
+                    <button type="button" (click)="askDelete(project)" [attr.aria-label]="'Supprimer ' + project.title">Supprimer</button>
+                  </div>
+                }
+              }
+            </li>
+          }
+        </ul>
+        @if (pages() > 1) {
+          <nav class="pagination" aria-label="Pages de projets">
+            <button type="button" (click)="load(page() - 1)" [disabled]="page() <= 1">← Précédents</button>
+            <span>Page {{ page() }} / {{ pages() }}</span>
+            <button type="button" (click)="load(page() + 1)" [disabled]="page() >= pages()">Suivants →</button>
+          </nav>
+        }
+      }
+    }
+  }
+</section>

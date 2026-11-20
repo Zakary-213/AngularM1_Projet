@@ -6,7 +6,8 @@ import mongoose from "mongoose";
  *
  * Unités : positions et durées des clips en temps (beats), pour qu'un
  * changement de BPM conserve l'arrangement ; décalage dans un fichier audio
- * en secondes ; volumes linéaires de 0 à 1 ; panoramique de -1 (gauche) à 1.
+ * en secondes ; volume de piste en dB (fader du studio, -36 à +6) ; volume
+ * Master linéaire de 0 à 1 ; panoramique de -1 (gauche) à 1.
  * Les octets audio ne sont jamais stockés ici : un clip audio référence un
  * document Track (audioFileId) dont le fichier reste sur le disque.
  */
@@ -21,11 +22,14 @@ export const PROJECT_LIMITS = Object.freeze({
   maxPatterns: 64,
   stepsPerPattern: 16,
   maxNotesPerPattern: 512,
+  minTrackDb: -36,
+  maxTrackDb: 6,
 });
 
 export const TRACK_TYPES = ["drum", "instrument", "audio", "vocal"];
 export const DRUM_VOICES = ["kick", "snare", "hihat"];
-export const SCALES = ["major", "minor"];
+// Mêmes gammes que la correction vocale du studio (musical-scale.ts).
+export const SCALES = ["major", "minor", "harmonicMinor", "phrygianDominant"];
 
 const L = PROJECT_LIMITS;
 // Identifiants générés par le client (UUID) : stables entre sauvegardes et reconnexions.
@@ -81,7 +85,7 @@ const trackSchema = new mongoose.Schema(
     name: { type: String, required: true, trim: true, maxlength: 40 },
     type: { type: String, required: true, enum: TRACK_TYPES },
     color: { type: String, default: "#f5a623", match: /^#[0-9a-fA-F]{6}$/ },
-    volume: { type: Number, default: 0.8, min: 0, max: 1 },
+    volumeDb: { type: Number, default: 0, min: L.minTrackDb, max: L.maxTrackDb },
     pan: { type: Number, default: 0, min: -1, max: 1 },
     mute: { type: Boolean, default: false },
     solo: { type: Boolean, default: false },

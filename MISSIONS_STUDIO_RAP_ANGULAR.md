@@ -149,12 +149,12 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **But :** retrouver son travail d'une session à l'autre.
 
-- [ ] Inscription et connexion avec validations.
-- [ ] Authentification JWT et routes backend protégées.
-- [ ] Page **Mes projets** : créer, ouvrir, renommer, supprimer.
-- [ ] Nouveau projet : **« Créer une prod »** ou **« Importer une prod »**.
-- [ ] Sauvegarder les paramètres de base (nom, BPM, date, propriétaire).
-- [ ] Vérifier l'isolation des projets entre utilisateurs.
+- [x] Inscription et connexion avec validations.
+- [x] Authentification JWT et routes backend protégées.
+- [x] Page **Mes projets** : créer, ouvrir, renommer, supprimer.
+- [x] Nouveau projet : **« Créer une prod »** ou **« Importer une prod »**.
+- [x] Sauvegarder les paramètres de base (nom, BPM, date, propriétaire).
+- [x] Vérifier l'isolation des projets entre utilisateurs.
 
 **Livrable :** compte utilisateur + liste de projets persistants.
 

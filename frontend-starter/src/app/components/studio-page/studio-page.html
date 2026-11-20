@@ -1,14 +1,64 @@
+@if (projectId && studioProject.loadState() !== 'loaded') {
+  <section class="page-heading studio-heading">
+    <div>
+      <p class="eyebrow">STUDIO / PROJET</p>
+      @if (studioProject.loadState() === 'loading') {
+        <h1>Chargement<span>.</span></h1>
+        <p role="status">Ouverture du projet…</p>
+      } @else {
+        <h1>Projet indisponible<span>.</span></h1>
+        <p class="error" role="alert">{{ studioProject.loadError() }}</p>
+      }
+    </div>
+    <div class="heading-actions">
+      @if (studioProject.loadState() === 'error') { <button type="button" (click)="studioProject.load(projectId)">Réessayer</button> }
+      <a class="button secondary" routerLink="/projects">Mes projets</a>
+    </div>
+  </section>
+} @else {
 <section class="page-heading studio-heading">
   <div>
-    <p class="eyebrow">STUDIO / SESSION DE DÉMONSTRATION</p>
-    <h1>Minuit sur la ville<span>.</span></h1>
-    <p><span class="status-dot"></span> Session locale · rien n'est enregistré sur le serveur</p>
+    @if (studioProject.project(); as project) {
+      <p class="eyebrow">STUDIO / {{ project.origin === 'import' ? 'PROD IMPORTÉE' : 'CRÉATION' }}</p>
+      <h1>{{ project.title }}<span>.</span></h1>
+      <p class="save-status" role="status" [attr.data-state]="studioProject.saveState()">
+        <span class="status-dot" aria-hidden="true"></span>
+        @switch (studioProject.saveState()) {
+          @case ('saving') { Sauvegarde en cours… }
+          @case ('dirty') { Modifications non sauvegardées }
+          @case ('error') { Échec de la sauvegarde }
+          @case ('conflict') { Conflit : projet modifié ailleurs }
+          @default { Sauvegardé · révision {{ project.revision }} }
+        }
+      </p>
+      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie et mixeur. L'instrumentale et les prises restent dans cet onglet (envoi au serveur prévu en M6 et M8).</p>
+    } @else {
+      <p class="eyebrow">STUDIO / SESSION DE DÉMONSTRATION</p>
+      <h1>Session libre<span>.</span></h1>
+      <p><span class="status-dot"></span> Session locale · rien n'est enregistré. <a class="inline-link" routerLink="/projects">Créer un projet</a> pour sauvegarder.</p>
+    }
   </div>
   <div class="heading-actions">
-    <a class="button secondary" routerLink="/collaborations">♧ Collaborer</a>
+    @if (studioProject.project()) {
+      <button type="button" class="button primary" (click)="studioProject.save()" [disabled]="!studioProject.hasUnsavedChanges() || studioProject.saving() || studioProject.conflict()" aria-keyshortcuts="Control+S Meta+S">
+        {{ studioProject.saving() ? 'Sauvegarde…' : '💾 Sauvegarder' }}
+      </button>
+      <a class="button secondary" routerLink="/projects">Mes projets</a>
+    } @else {
+      <a class="button secondary" routerLink="/collaborations">♧ Collaborer</a>
+    }
     <button type="button" (click)="activeTab.set('Export')">↗ Exporter</button>
   </div>
 </section>
+@if (studioProject.saveError(); as message) {
+  <div class="panel save-alert" role="alert"><p>{{ message }}</p><button type="button" (click)="studioProject.save()">Réessayer</button></div>
+}
+@if (studioProject.conflict()) {
+  <div class="panel save-alert" role="alert">
+    <p>Ce projet a été modifié ailleurs (autre onglet ou appareil) depuis son ouverture. Votre version n'a pas été envoyée, rien n'a été écrasé.</p>
+    <button type="button" (click)="studioProject.reload()">Recharger la version du serveur</button>
+  </div>
+}
 
 <section class="transport panel" aria-label="Transport audio">
   <div class="transport-buttons">
@@ -114,3 +164,4 @@
     @default { <app-drum-rack-panel /> }
   }
 </section>
+}

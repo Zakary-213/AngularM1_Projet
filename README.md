@@ -84,7 +84,7 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Composition | Drum Rack, Piano Roll, instruments, timeline | ⏳ À faire (M3 → M5) |
-| Import | Instrumentale MP3 / WAV, forme d'onde, égaliseur | ⏳ À faire (M6) |
+| Import | Instrumentale MP3 / WAV envoyée dans vos fichiers audio, forme d'onde, égaliseur 3 bandes, retrouvée à la réouverture du projet | ✅ Fonctionnel (M6) |
 | Mix | Volume, mute et solo par piste (écoute et export) faits ; pan, EQ, réverbération, delay | ⏳ À faire (M7) |
 | Voix | Prise micro (bouton ●) et onglet « Correction vocale » : 6 styles (Naturel, Rap, Trap, Drill, Raï, Robot) + dose d'effet, mode personnalisé (gamme, notes, humanisation, transposition, égaliseur), courbe de hauteur, calcul dans un Web Worker, version corrigée utilisable sur la piste Voix | 🚧 Partiel (M9) |
 | Voix (studio) | Enregistrement multiprise, correction sur les pistes | ⏳ À faire (M8, M9) |
@@ -266,7 +266,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **141 / 141 tests frontend** et **26 / 26 tests backend** réussis, build OK (20 novembre 2026).
+Dernier résultat connu : **154 / 154 tests frontend** et **29 / 29 tests backend** réussis, build OK (20 novembre 2026).
 
 ---
 
@@ -308,9 +308,9 @@ Schéma : `backend/src/models/MusicalProject.js` ; routes : `backend/src/routes/
 
 `ProjectSummary` : `id`, `title`, `origin`, `bpm`, `key`, `trackCount`, `formatVersion`, `createdAt`, `updatedAt`.
 
-`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `clips[]`), `patterns[]` (64 max. ; `drumRows` de 16 pas, `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `clips[]`), `patterns[]` (64 max. ; `drumRows` de 16 pas, `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
 
-Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`, `tracks`, `patterns` et `master` sont copiés à la sauvegarde (liste blanche : `ownerId`, `origin`, `formatVersion`, `revision` envoyés sont ignorés) ; le document complet est validé avant écriture. Erreurs : `400` validation, révision absente ou JSON invalide ; `401` sans JWT ; `404` projet absent, identifiant mal formé **ou** projet d'un autre utilisateur ; `409 {message, revision}` si la révision envoyée n'est plus la révision actuelle (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `413` corps JSON au-delà de 1 Mo ; `422` si le projet stocké a un `formatVersion` non pris en charge (il n'est pas réécrit).
+Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`, `tracks`, `patterns` et `master` sont copiés à la sauvegarde (liste blanche : `ownerId`, `origin`, `formatVersion`, `revision` envoyés sont ignorés) ; le document complet est validé avant écriture. Un `audioFileId` doit désigner un fichier `Track` de l'utilisateur authentifié, sinon la sauvegarde est refusée (`400 « Fichier audio inconnu ou non autorisé »`) : un projet ne peut pas servir à lire le fichier d'un autre compte. Erreurs : `400` validation, révision absente, fichier audio d'un autre compte ou JSON invalide ; `401` sans JWT ; `404` projet absent, identifiant mal formé **ou** projet d'un autre utilisateur ; `409 {message, revision}` si la révision envoyée n'est plus la révision actuelle (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `413` corps JSON au-delà de 1 Mo ; `422` si le projet stocké a un `formatVersion` non pris en charge (il n'est pas réécrit).
 
 ---
 
@@ -340,6 +340,21 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 20 novembre 2026 — M6 : import d'une instrumentale MP3 / WAV (#12)
+
+- **Envoi** : dans un projet, l'instrumentale choisie est décodée tout de suite (écoute immédiate) puis envoyée à la bibliothèque par la route existante `POST /api/tracks` (25 Mo max., MP3/WAV contrôlés côté client, type MIME contrôlé côté serveur), avec barre de progression. Échec réseau : message, l'instrumentale reste écoutable, bouton « Réessayer l'envoi ». La sauvegarde est bloquée pendant l'envoi et la fermeture de la page demande confirmation.
+- **Sauvegarde** : le projet ne contient qu'une référence (`audioFileId`, nom affiché, durée en temps) et l'égaliseur de la piste ; jamais d'octets audio. Le serveur vérifie que le fichier référencé appartient à l'utilisateur (`400` sinon). À l'ouverture, le fichier est récupéré par `GET /api/tracks/:id/audio` puis décodé ; s'il a été supprimé de la bibliothèque, un message l'indique et la référence est conservée jusqu'à ce que l'utilisateur la retire.
+- **Timeline** : forme d'onde dessinée sur un canvas à partir des crêtes (min/max par colonne), recalculée seulement quand le fichier, le zoom ou la largeur changent, jamais pendant la lecture ; seule la portion visible est dessinée. Barre d'état : nom, durée, état (envoi, enregistrée, indisponible), « Remplacer » et « Retirer » (le fichier reste dans *Fichiers audio*).
+- **Égaliseur 3 bandes** dans le mixeur (piste Instrumentale) : plateau grave à 200 Hz, cloche médium à 1 kHz, plateau aigu à 4 kHz, ±12 dB, réglable pendant la lecture (changements lissés), appliqué à l'export WAV avec les mêmes filtres (`three-band-eq.ts`), bouton « Remettre à plat ».
+- **Limites** : pas encore de navigation dans le morceau (clic sur la timeline pour se placer) : lecture, pause et retour au début seulement ; l'instrumentale démarre toujours au début du morceau (déplacement des clips en M5) ; l'égaliseur agit sur tout le mix importé, pas sur ses instruments d'origine ; supprimer un projet ne supprime pas le fichier de la bibliothèque.
+
+**Vérifications**
+
+- Backend `npm test` : 29/29, dont 3 nouveaux : clip audio avec `label` et `eq` sauvegardés, fichier d'un autre utilisateur ou inexistant refusé sans écriture, égaliseur borné.
+- Frontend `npm test` : 154/154, dont l'égaliseur (filtres, bornes), les crêtes de la forme d'onde, la conversion du projet avec instrumentale, et le service studio : progression d'envoi puis référence sauvegardée, échec puis nouvel essai, session libre sans envoi, récupération à l'ouverture sans modification en attente, fichier supprimé (404), retrait. `npm run build` réussi.
+- Navigateur (Chromium via Playwright, `npm start` + vrai backend Express, route d'upload réelle écrivant sur disque, MongoDB remplacé par un stockage en mémoire) : fichier texte refusé, `song1.mp3` (3 min) importé et envoyé, forme d'onde dessinée, égaliseur réglé pendant la lecture, export WAV, sauvegarde puis rechargement (fichier et égaliseur retrouvés, état « Sauvegardé »), fichier supprimé de la bibliothèque → message, retrait → « Modifications non sauvegardées ». Envoi ralenti : barre de progression visible et sauvegarde désactivée pendant l'envoi. Pas de débordement à 360 px.
+- **Non vérifiés** : un vrai MongoDB (comme en M1) et l'écoute de l'égaliseur au casque (le rendu sonore n'a été contrôlé que par l'absence d'erreur et la taille du fichier exporté).
 
 ### 20 novembre 2026 — M1 : bibliothèque de projets persistants (#7)
 

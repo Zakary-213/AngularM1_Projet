@@ -240,15 +240,15 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **But :** ouvrir un projet directement à partir d'un beat déjà terminé.
 
-- [ ] Choisir un fichier **MP3 ou WAV**.
-- [ ] Valider format, taille, absence de fichier et erreurs d'import.
-- [ ] Uploader via une API protégée et afficher la progression.
-- [ ] Conserver le fichier et ses métadonnées dans le stockage.
-- [ ] Créer automatiquement une piste **Instrumentale** sur la timeline.
-- [ ] Afficher une **forme d'onde**, écouter, naviguer et régler le niveau sonore.
-- [ ] Ajouter un égaliseur **graves / médiums / aigus** sur la piste importée.
-- [ ] Sauvegarder la position et les réglages de la piste.
-- [ ] Autoriser l'ajout ultérieur de pistes vocales dans le même projet.
+- [x] Choisir un fichier **MP3 ou WAV**.
+- [x] Valider format, taille, absence de fichier et erreurs d'import.
+- [x] Uploader via une API protégée et afficher la progression.
+- [x] Conserver le fichier et ses métadonnées dans le stockage.
+- [x] Créer automatiquement une piste **Instrumentale** sur la timeline.
+- [ ] Afficher une **forme d'onde**, écouter, naviguer et régler le niveau sonore. *(forme d'onde, écoute et niveau faits ; navigation par clic sur la timeline restante)*
+- [x] Ajouter un égaliseur **graves / médiums / aigus** sur la piste importée.
+- [x] Sauvegarder la position et les réglages de la piste.
+- [x] Autoriser l'ajout ultérieur de pistes vocales dans le même projet.
 
 > [!NOTE]
 > Sur un MP3/WAV déjà mixé, augmenter les basses agit sur **l'ensemble des fréquences graves**. On ne peut pas régler séparément chaque instrument d'origine sans disposer des pistes sources ; cette séparation est hors périmètre.

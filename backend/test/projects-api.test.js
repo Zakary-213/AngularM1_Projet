@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import { createApp } from "../src/app.js";
 import { MusicalProject } from "../src/models/MusicalProject.js";
+import { Track } from "../src/models/Track.js";
 
 /*
  * Tests HTTP des routes /api/projects. MongoDB est remplacé par un stockage en
@@ -13,6 +14,8 @@ import { MusicalProject } from "../src/models/MusicalProject.js";
  */
 
 const store = new Map();
+/** Fichiers audio de la bibliothèque : identifiant → propriétaire. */
+const audioFiles = new Map();
 
 function matches(document, filter) {
   return Object.entries(filter).every(([key, value]) => String(document.get(key)) === String(value));
@@ -53,6 +56,9 @@ function installFakeStore() {
     document.updatedAt = new Date();
     return document;
   });
+  mock.method(Track, "countDocuments", async ({ _id, ownerId }) =>
+    _id.$in.filter((id) => audioFiles.get(String(id)) === String(ownerId)).length,
+  );
   mock.method(MusicalProject, "findOneAndDelete", async (filter) => {
     const document = sortedDocs(filter)[0];
     if (document) store.delete(String(document._id));
@@ -77,7 +83,10 @@ test.after(() => {
   server.close();
 });
 
-test.beforeEach(() => store.clear());
+test.beforeEach(() => {
+  store.clear();
+  audioFiles.clear();
+});
 
 async function call(user, method, path = "", body) {
   const headers = { "Content-Type": "application/json" };
@@ -217,6 +226,50 @@ test("JSON invalide : 400", async () => {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt.sign({ sub: alice }, secret)}` },
     body: "{pas du json",
+  });
+  assert.equal(response.status, 400);
+});
+
+function instrumentalTrack(audioFileId, extra = {}) {
+  return {
+    id: "instrumental",
+    name: "Instrumentale",
+    type: "audio",
+    eq: { lowDb: 4, midDb: -2, highDb: 0 },
+    clips: [{ id: "clip-instrumental", startBeat: 0, durationBeats: 96, audioFileId, label: "beat.mp3" }],
+    ...extra,
+  };
+}
+
+test("M6 : un clip audio référence un fichier de la bibliothèque de l'utilisateur, avec son égaliseur", async () => {
+  const { body: project } = await createProject(alice, "Prod importée", "import");
+  const aliceFile = new mongoose.Types.ObjectId().toString();
+  audioFiles.set(aliceFile, alice);
+  const saved = await call(alice, "PUT", `/${project.id}`, { revision: 0, tracks: [instrumentalTrack(aliceFile)] });
+  assert.equal(saved.status, 200);
+  const clip = saved.body.tracks[0].clips[0];
+  assert.equal(String(clip.audioFileId), aliceFile);
+  assert.equal(clip.label, "beat.mp3");
+  assert.deepEqual({ ...saved.body.tracks[0].eq }, { lowDb: 4, midDb: -2, highDb: 0 });
+});
+
+test("M6 : refuse le fichier audio d'un autre utilisateur ou un fichier inexistant", async () => {
+  const { body: project } = await createProject(alice, "Prod", "import");
+  const bobFile = new mongoose.Types.ObjectId().toString();
+  audioFiles.set(bobFile, bob);
+  for (const fileId of [bobFile, new mongoose.Types.ObjectId().toString()]) {
+    const response = await call(alice, "PUT", `/${project.id}`, { revision: 0, tracks: [instrumentalTrack(fileId)] });
+    assert.equal(response.status, 400);
+    assert.match(response.body.message, /Fichier audio/);
+  }
+  assert.equal((await call(alice, "GET", `/${project.id}`)).body.revision, 0, "rien n'est écrit");
+});
+
+test("M6 : égaliseur borné à ±12 dB", async () => {
+  const { body: project } = await createProject(alice);
+  const response = await call(alice, "PUT", `/${project.id}`, {
+    revision: 0,
+    tracks: [{ id: "instrumental", name: "Instrumentale", type: "audio", eq: { lowDb: 30 }, clips: [] }],
   });
   assert.equal(response.status, 400);
 });

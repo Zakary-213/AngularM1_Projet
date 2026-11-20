@@ -31,7 +31,7 @@
           @default { Sauvegardé · révision {{ project.revision }} }
         }
       </p>
-      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie et mixeur. L'instrumentale et les prises restent dans cet onglet (envoi au serveur prévu en M6 et M8).</p>
+      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie, mixeur et instrumentale (envoyée dans vos fichiers audio). Les prises vocales restent dans cet onglet (envoi prévu en M8).</p>
     } @else {
       <p class="eyebrow">STUDIO / SESSION DE DÉMONSTRATION</p>
       <h1>Session libre<span>.</span></h1>
@@ -40,7 +40,7 @@
   </div>
   <div class="heading-actions">
     @if (studioProject.project()) {
-      <button type="button" class="button primary" (click)="studioProject.save()" [disabled]="!studioProject.hasUnsavedChanges() || studioProject.saving() || studioProject.conflict()" aria-keyshortcuts="Control+S Meta+S">
+      <button type="button" class="button primary" (click)="studioProject.save()" [disabled]="!studioProject.canSave()" aria-keyshortcuts="Control+S Meta+S">
         {{ studioProject.saving() ? 'Sauvegarde…' : '💾 Sauvegarder' }}
       </button>
       <a class="button secondary" routerLink="/projects">Mes projets</a>
@@ -123,7 +123,11 @@
               @if (track.clip; as clip) {
                 <div [class]="'audio-clip ' + track.className" [class.is-muted]="track.mix.muted" [style.margin-left.%]="clip.offset" [style.width.%]="clip.width">
                   <span>{{ clip.label }}{{ track.mix.muted ? ' · muette' : '' }}</span>
-                  <div [class]="clip.pattern === 'note' ? 'note-pattern' : 'wave-pattern'" aria-hidden="true"></div>
+                  @if (clip.waveform; as wave) {
+                    <app-waveform class="clip-waveform" [buffer]="wave.buffer" [toSeconds]="wave.toSeconds" [color]="track.color" />
+                  } @else {
+                    <div [class]="clip.pattern === 'note' ? 'note-pattern' : 'wave-pattern'" aria-hidden="true"></div>
+                  }
                 </div>
               } @else if (track.id === 'instrumental') {
                 <div class="lane-action">
@@ -139,6 +143,48 @@
           </div>
         }
         @if (session.importError(); as message) { <p class="error lane-error" role="alert">{{ message }}</p> }
+        @if (session.instrumental() || studioProject.instrumentalRef()) {
+          <div class="instrumental-bar">
+            <p role="status">
+              @if (session.instrumental(); as loaded) {
+                <b>{{ loaded.name }}</b> · {{ formatDuration(loaded.buffer.duration) }} ·
+              } @else if (studioProject.instrumentalRef(); as ref) {
+                <b>{{ ref.label }}</b> ·
+              }
+              @switch (studioProject.upload().state) {
+                @case ('uploading') { Envoi vers vos fichiers… }
+                @case ('error') { Non envoyée }
+                @default {
+                  @if (studioProject.download() === 'loading') { Récupération du fichier… }
+                  @else if (!studioProject.project()) { Session libre : fichier local, non enregistré }
+                  @else if (session.instrumental()?.fileId) { Enregistrée dans vos fichiers audio }
+                  @else if (studioProject.download() === 'error') { Fichier indisponible }
+                }
+              }
+            </p>
+            @if (studioProject.upload(); as upload) {
+              @if (upload.state === 'uploading') {
+                <progress max="100" [value]="upload.progress" aria-label="Envoi de l'instrumentale">{{ upload.progress }} %</progress>
+                <small>{{ upload.progress }} %</small>
+              }
+              @if (upload.state === 'error') {
+                <p class="error" role="alert">{{ upload.message }}</p>
+                <button type="button" (click)="studioProject.retryUpload()">Réessayer l'envoi</button>
+              }
+            }
+            @if (studioProject.downloadError(); as message) {
+              <p class="error" role="alert">{{ message }}</p>
+              <button type="button" (click)="studioProject.retryDownload()">Réessayer</button>
+            }
+            <div class="instrumental-actions">
+              <label class="button secondary file-button" [class.disabled]="studioProject.uploading() || session.importing()">
+                Remplacer
+                <input type="file" class="visually-hidden-input" [accept]="audioAccept" (change)="onInstrumentalSelected($event)" [disabled]="studioProject.uploading() || session.importing()" aria-label="Remplacer l'instrumentale (MP3 ou WAV, 25 Mo maximum)" />
+              </label>
+              <button type="button" (click)="studioProject.removeInstrumental()" [disabled]="studioProject.uploading()">Retirer</button>
+            </div>
+          </div>
+        }
       </div>
     </div>
   </section>

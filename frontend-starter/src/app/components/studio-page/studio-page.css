@@ -55,3 +55,13 @@ button:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-
 .save-alert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; border-color: #7a2e29; }
 .save-alert p { margin: 0; color: #ffb4ab; }
 .inline-link { text-decoration: underline; }
+
+.clip-waveform { height: 34px; margin-top: 4px; }
+.instrumental-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 12px; }
+.instrumental-bar p { margin: 0; }
+.instrumental-bar progress { width: 160px; max-width: 100%; accent-color: var(--accent); }
+.instrumental-actions { display: flex; gap: 8px; margin-left: auto; }
+.file-button { position: relative; cursor: pointer; }
+.file-button.disabled { opacity: 0.5; cursor: not-allowed; }
+.file-button:focus-within { outline: 3px solid #8bc8dd; outline-offset: 2px; }
+.visually-hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }

@@ -21,6 +21,8 @@ export interface ProjectClip {
   readonly offsetSeconds?: number;
   readonly patternId?: string;
   readonly audioFileId?: string;
+  /** Nom affiché du clip (ex. nom du fichier importé). */
+  readonly label?: string;
 }
 
 export interface ProjectTrack {
@@ -33,6 +35,8 @@ export interface ProjectTrack {
   readonly pan?: number;
   readonly mute?: boolean;
   readonly solo?: boolean;
+  /** Égaliseur 3 bandes en dB (graves, médiums, aigus). */
+  readonly eq?: { readonly lowDb: number; readonly midDb: number; readonly highDb: number };
   readonly clips: readonly ProjectClip[];
 }
 

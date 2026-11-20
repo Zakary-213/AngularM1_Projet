@@ -52,6 +52,8 @@ export interface ProjectDrumRow {
 export interface ProjectPattern {
   readonly id: string;
   readonly name: string;
+  /** Kit de sons (`boomBap` ou `trap`), depuis la M3 ; absent dans les projets plus anciens. */
+  readonly kit?: string;
   readonly drumRows: readonly ProjectDrumRow[];
 }
 

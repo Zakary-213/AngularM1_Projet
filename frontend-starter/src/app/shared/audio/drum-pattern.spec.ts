@@ -35,6 +35,12 @@ describe('patterns avec vélocité (M3)', () => {
   it('nomme les niveaux et numérote les nouveaux patterns', () => {
     expect([1, 0.7, 0.4, 0.55].map(velocityLabel)).toEqual(['fort', 'moyen', 'doux', 'moyen']);
     expect(nextPatternName([])).toBe('Pattern 01');
-    expect(nextPatternName([{ id: 'a', name: 'Pattern 01', steps: createEmptyPattern() }, { id: 'b', name: 'Refrain', steps: createEmptyPattern() }, { id: 'c', name: 'Pattern 07', steps: createEmptyPattern() }])).toBe('Pattern 08');
+    const entry = (id: string, name: string) => ({ id, name, steps: createEmptyPattern(), kit: 'boomBap' as const });
+    expect(nextPatternName([entry('a', 'Pattern 01'), entry('b', 'Refrain'), entry('c', 'Pattern 07')])).toBe('Pattern 08');
+  });
+
+  it('M3 : six instruments, dont clap, percussion et 808', () => {
+    expect(Object.keys(createEmptyPattern())).toEqual(['kick', 'snare', 'clap', 'hihat', 'perc', 'bass808']);
+    expect(createDemoPattern().bass808.every(velocity => velocity === 0)).toBe(true);
   });
 });

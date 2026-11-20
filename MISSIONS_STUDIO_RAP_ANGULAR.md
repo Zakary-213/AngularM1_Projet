@@ -184,8 +184,8 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **But :** composer un vrai rythme de rap.
 
-- [ ] Intégrer une première bibliothèque **autorisée** de kick, snare, clap, hi-hat et percussions.
-- [ ] Ajouter des samples **808 / basses** et des sons de préécoute.
+- [x] Intégrer une première bibliothèque **autorisée** de kick, snare, clap, hi-hat et percussions. *(sons synthétisés en code : aucune licence de sample à gérer)*
+- [x] Ajouter des samples **808 / basses** et des sons de préécoute. *(808 synthétisée, accordée sur la tonalité ; deux kits : boom bap et trap)*
 - [x] Créer un **séquenceur de 16 pas** avec instruments par ligne.
 - [x] Programmer, désactiver et déplacer des frappes.
 - [x] Gérer la vélocité élémentaire et le BPM.

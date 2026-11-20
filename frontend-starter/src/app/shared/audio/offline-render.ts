@@ -1,4 +1,5 @@
 import { DrumPattern, hitsAtStep } from './drum-pattern';
+import { DrumSound } from './drum-synth';
 import { playDrumHit } from './drum-synth';
 import { AudioClip, createMasterChain, scheduleClip } from './mix-graph';
 import { STEPS_PER_BAR, barsToSeconds, stepDurationSeconds } from './music-time';
@@ -8,8 +9,8 @@ export const EXPORT_CHANNELS = 2;
 export const MAX_EXPORT_BARS = 16;
 
 export interface MixDescription {
-  /** Pattern joué à ce pas absolu (clips de la piste Batterie), ou `null` : batterie silencieuse. */
-  readonly patternAt: (songStep: number) => DrumPattern | null;
+  /** Pattern et son joués à ce pas absolu (clips de la piste Batterie), ou `null` : batterie silencieuse. */
+  readonly drumsAt: (songStep: number) => { readonly pattern: DrumPattern; readonly sound: DrumSound } | null;
   readonly bpm: number;
   /** Nombre de mesures rendues : le pattern d'une mesure est répété. */
   readonly bars: number;
@@ -37,9 +38,9 @@ export function renderMix(mix: MixDescription, sampleRate = EXPORT_SAMPLE_RATE):
   drums.connect(master);
   const stepSeconds = stepDurationSeconds(mix.bpm);
   for (let step = 0; step < mix.bars * STEPS_PER_BAR; step++) {
-    const pattern = mix.patternAt(step);
-    if (pattern) {
-      hitsAtStep(pattern, step).forEach(hit => playDrumHit(context, drums, hit.voice, step * stepSeconds, hit.velocity));
+    const playing = mix.drumsAt(step);
+    if (playing) {
+      hitsAtStep(playing.pattern, step).forEach(hit => playDrumHit(context, drums, hit.voice, step * stepSeconds, hit.velocity, playing.sound));
     }
   }
   mix.clips.forEach(clip => scheduleClip(context, master, clip, 0));

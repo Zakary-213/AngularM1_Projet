@@ -87,3 +87,5 @@ button.danger { background: #b3261e; border-color: #b3261e; color: #ffffff; }
 .shift { white-space: nowrap; padding-right: 6px; }
 .shift-button { width: 28px; min-height: 44px; padding: 0; font-size: 11px; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 2px; }
+.row-head { display: inline-flex; align-items: center; gap: 6px; }
+.preview-button { width: 32px; min-height: 36px; padding: 0; font-size: 11px; }

@@ -107,3 +107,12 @@ test("M3 : vélocités facultatives, 16 valeurs entre 0 et 1", async () => {
   assert.ok((await errorsOf(validProject({ patterns: row([1, 0.5]) }))).some((path) => path.endsWith("velocities")));
   assert.ok((await errorsOf(validProject({ patterns: row(valid.map((v, i) => (i === 3 ? 2 : v))) }))).some((path) => path.endsWith("velocities")));
 });
+
+test("M3 : nouveaux instruments et kit du pattern", async () => {
+  const pattern = (extra) => [{ id: "pat-1", name: "X", drumRows: [{ voice: "bass808", steps: steps([0]) }, { voice: "clap", steps: steps([4]) }], ...extra }];
+  assert.deepEqual(await errorsOf(validProject({ patterns: pattern({ kit: "trap" }) })), []);
+  assert.deepEqual(await errorsOf(validProject({ patterns: pattern({}) })), [], "kit facultatif");
+  assert.ok((await errorsOf(validProject({ patterns: pattern({ kit: "dubstep" }) }))).some((path) => path.endsWith("kit")));
+  const unknownVoice = [{ id: "pat-1", name: "X", drumRows: [{ voice: "cowbell", steps: steps([0]) }] }];
+  assert.ok((await errorsOf(validProject({ patterns: unknownVoice }))).some((path) => path.endsWith("voice")));
+});

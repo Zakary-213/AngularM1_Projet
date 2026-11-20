@@ -36,6 +36,11 @@ const state: StudioState = {
     { id: 'take-b', fileId: '64b0000000000000000000b2', label: 'Refrain', startSeconds: 6, durationSeconds: 30 },
   ],
   activeTakeId: 'take-b',
+  drumClips: [
+    { id: 'drums-intro', startBar: 0, lengthBars: 4 },
+    { id: 'drums-refrain', startBar: 8, lengthBars: 8 },
+  ],
+  instrumentalStartBeat: 4,
 };
 
 describe('conversion studio ↔ format de sauvegarde v1', () => {
@@ -51,7 +56,10 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
       ['instrumental', 'audio'],
       ['voice', 'vocal'],
     ]);
-    expect(content.tracks[0].clips).toEqual([{ id: 'clip-drums', startBeat: 0, durationBeats: 4, patternId: 'pattern-1' }]);
+    expect(content.tracks[0].clips).toEqual([
+      { id: 'drums-intro', startBeat: 0, durationBeats: 16, patternId: 'pattern-1' },
+      { id: 'drums-refrain', startBeat: 32, durationBeats: 32, patternId: 'pattern-1' },
+    ]);
     expect(content.tracks[0].volumeDb).toBe(-6);
     expect(content.tracks[2].mute).toBe(true);
     expect(content.patterns[0].drumRows.every(row => row.steps.length === 16)).toBe(true);
@@ -61,7 +69,7 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     const instrumental = toProjectContent(state).tracks.find(track => track.id === 'instrumental')!;
     expect(instrumental.eq).toEqual({ lowDb: 3, midDb: -2, highDb: 1 });
     expect(instrumental.clips).toEqual([
-      { id: 'clip-instrumental', startBeat: 0, durationBeats: 186.67, offsetSeconds: 0, audioFileId: '64b0000000000000000000aa', label: 'beat.mp3' },
+      { id: 'clip-instrumental', startBeat: 4, durationBeats: 186.67, offsetSeconds: 0, audioFileId: '64b0000000000000000000aa', label: 'beat.mp3' },
     ]);
     const noInstrumental = toProjectContent({ ...state, instrumental: null }).tracks.find(track => track.id === 'instrumental')!;
     expect(noInstrumental.clips).toEqual([]);
@@ -91,6 +99,14 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     const voice = content.tracks.find(track => track.id === 'voice')!;
     const loaded = fromProject(project({ ...content, tracks: content.tracks.map(track => (track.id === 'voice' ? { ...voice, activeClipId: 'inconnue' } : track)) }));
     expect(loaded.activeTakeId).toBe('take-b');
+  });
+
+  it('M5 : un ancien projet (pattern en boucle sans fin) reçoit l’arrangement par défaut', () => {
+    const legacy = fromProject(project({ tracks: [{ id: 'drums', name: 'Batterie', type: 'drum', clips: [{ id: 'clip-drums', startBeat: 0, durationBeats: 4, patternId: 'pattern-1' }] }] }));
+    expect(legacy.drumClips).toEqual([{ id: 'drums-1', startBar: 0, lengthBars: 8 }]);
+    expect(fromProject(project()).drumClips).toEqual([{ id: 'drums-1', startBar: 0, lengthBars: 8 }]);
+    const emptied = fromProject(project({ tracks: [{ id: 'drums', name: 'Batterie', type: 'drum', clips: [] }] }));
+    expect(emptied.drumClips).toEqual([]);
   });
 
   it('convertit une durée en temps au tempo du projet', () => {

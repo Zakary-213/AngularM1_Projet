@@ -120,6 +120,26 @@
       <button type="button" (click)="zoom('out')" [disabled]="!canZoomOut()" aria-label="Dézoomer la timeline">−</button>
       <button type="button" (click)="zoom('in')" [disabled]="!canZoomIn()" aria-label="Zoomer la timeline">+</button>
     </div>
+    <div class="clip-toolbar" role="toolbar" aria-label="Édition des clips">
+      <button type="button" (click)="session.undo()" [disabled]="!session.canUndo()" aria-keyshortcuts="Control+Z Meta+Z">↶ Annuler</button>
+      <button type="button" (click)="session.redo()" [disabled]="!session.canRedo()" aria-keyshortcuts="Control+Shift+Z Control+Y Meta+Shift+Z">↷ Rétablir</button>
+      <button type="button" (click)="addDrumClip()">＋ Clip de batterie</button>
+      @if (selection(); as clip) {
+        <span class="clip-selection" role="status">Sélection : <b>{{ clip.ariaLabel }}</b></span>
+        <button type="button" (click)="moveClip(clip, -1)" [attr.aria-label]="clip.kind === 'drum' ? 'Plus tôt d’une mesure' : 'Plus tôt d’un temps'">◀</button>
+        <button type="button" (click)="moveClip(clip, 1)" [attr.aria-label]="clip.kind === 'drum' ? 'Plus tard d’une mesure' : 'Plus tard d’un temps'">▶</button>
+        @if (clip.kind === 'drum') {
+          <button type="button" (click)="resizeSelected(-1)">− 1 mesure</button>
+          <button type="button" (click)="resizeSelected(1)">+ 1 mesure</button>
+          <button type="button" (click)="duplicateSelected()" aria-keyshortcuts="Control+D Meta+D">Dupliquer</button>
+          <button type="button" class="danger" (click)="deleteSelected()" aria-keyshortcuts="Delete">Supprimer</button>
+        }
+        <button type="button" (click)="selectedClip.set(null)">Désélectionner</button>
+      } @else {
+        <span class="clip-selection muted">Cliquez sur un clip pour le modifier.</span>
+      }
+    </div>
+    <p id="clip-help" class="visually-hidden">Glissez le clip pour le déplacer. Au clavier : flèches pour déplacer (Maj : d’une mesure pour l’audio), Suppr pour supprimer un clip de batterie, Ctrl + D pour le dupliquer, Échap pour désélectionner. Ctrl + Z annule, Ctrl + Maj + Z rétablit.</p>
     <div class="timeline-scroll">
       <div class="timeline-inner">
         <div class="timeline-ruler" role="slider" tabindex="0" aria-label="Position de lecture" aria-describedby="ruler-help"
@@ -140,22 +160,30 @@
             </div>
             <div class="track-lane" (click)="onTimelineClick($event)">
               @if (loopBand(); as band) { <span class="loop-band" [style.left.%]="band.left" [style.width.%]="band.width" aria-hidden="true"></span> }
-              @if (track.clip; as clip) {
-                <div [class]="'audio-clip ' + track.className" [class.is-muted]="track.mix.muted" [style.margin-left.%]="clip.offset" [style.width.%]="clip.width">
+              @for (clip of track.clips; track clip.kind + clip.id) {
+                <button type="button" [class]="'audio-clip timeline-clip ' + track.className" [class.is-muted]="track.mix.muted"
+                  [class.selected]="selection() === clip" [class.dragging]="dragPreview()?.id === clip.id"
+                  [style.left.%]="clip.left + (dragPreview()?.id === clip.id ? dragPreview()!.offsetPercent : 0)" [style.width.%]="clip.width"
+                  [attr.aria-label]="clip.ariaLabel + (track.mix.muted ? ', piste muette' : '')" [attr.aria-pressed]="selection() === clip" aria-describedby="clip-help"
+                  (click)="selectClip(clip, $event)" (keydown)="onClipKey($event, clip)"
+                  (pointerdown)="onClipPointerDown($event, clip)" (pointermove)="onClipPointerMove($event)" (pointerup)="onClipPointerUp($event)" (pointercancel)="onClipPointerCancel()">
                   <span>{{ clip.label }}{{ track.mix.muted ? ' · muette' : '' }}</span>
                   @if (clip.waveform; as wave) {
                     <app-waveform class="clip-waveform" [buffer]="wave.buffer" [toSeconds]="wave.toSeconds" [color]="track.color" />
                   } @else {
-                    <div [class]="clip.pattern === 'note' ? 'note-pattern' : 'wave-pattern'" aria-hidden="true"></div>
+                    <span [class]="clip.pattern === 'note' ? 'note-pattern' : 'wave-pattern'" aria-hidden="true"></span>
                   }
-                </div>
-              } @else if (track.id === 'instrumental') {
+                </button>
+              }
+              @if (track.id === 'drums' && session.drumClips().length === 0) {
+                <p class="lane-hint">Aucun clip de batterie : placez la tête de lecture puis « ＋ Clip de batterie ».</p>
+              } @else if (track.id === 'instrumental' && !session.instrumental()) {
                 <div class="lane-action">
                   <label for="studio-instrumental">Importer une instrumentale (MP3 / WAV, 25 Mo max.)</label>
                   <input id="studio-instrumental" type="file" [accept]="audioAccept" (change)="onInstrumentalSelected($event)" [disabled]="session.importing()" />
                   @if (session.importing()) { <small role="status">Décodage en cours…</small> }
                 </div>
-              } @else if (track.id === 'voice') {
+              } @else if (track.id === 'voice' && !session.take()) {
                 <p class="lane-hint">Appuyez sur ● pour enregistrer une prise sur la prod.</p>
               }
               @if (playheadPercent(); as left) { <span class="playhead" [style.left.%]="left" aria-hidden="true"></span> }

@@ -38,7 +38,9 @@ describe('StudioSessionService — position et boucle', () => {
     expect(session.loopRange()).toBeNull();
   });
 
-  it('la fin du morceau couvre au moins 4 mesures', () => {
+  it('la fin du morceau suit les clips de batterie, avec au moins 4 mesures', () => {
+    expect(session.songEndStep()).toBe(8 * 16); // clip de batterie par défaut : 8 mesures
+    session.loadArrangement([], 0);
     expect(session.songEndStep()).toBe(64);
   });
 });

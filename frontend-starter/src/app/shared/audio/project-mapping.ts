@@ -3,6 +3,7 @@ import { BEATS_PER_BAR, DEFAULT_BPM, STEPS_PER_BAR, clampBpm } from './music-tim
 import { SCALE_NAMES, ScaleName } from './pitch/musical-scale';
 import { ProjectKey } from './pitch/vocal-styles';
 import { STUDIO_TRACKS } from './studio-tracks';
+import { DEFAULT_DRUM_CLIPS, DrumClip } from './arrangement';
 import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
 import { MixerState, TRACK_IDS, TrackId, TrackMix, clampTrackDb, createDefaultMixer } from './track-mix';
 import { MusicalProject, ProjectContent, ProjectTrackType } from '../models/musical-project.model';
@@ -43,6 +44,10 @@ export interface StudioState {
   readonly takes: readonly TakeRef[];
   /** Prise jouée sur la piste Voix, parmi `takes`, ou `null`. */
   readonly activeTakeId: string | null;
+  /** Clips de la piste Batterie (M5). */
+  readonly drumClips: readonly DrumClip[];
+  /** Début de l'instrumentale, en temps. */
+  readonly instrumentalStartBeat: number;
 }
 
 const POSITION_DECIMALS = 10000;
@@ -111,9 +116,9 @@ export function toProjectContent(state: StudioState): ProjectContent {
         // Le pattern d'une mesure joue en boucle sur la batterie ; l'instrumentale démarre au début du morceau.
         clips:
           info.id === 'drums'
-            ? [{ id: DRUMS_CLIP_ID, startBeat: 0, durationBeats: BEATS_PER_BAR, patternId: MAIN_PATTERN_ID }]
+            ? state.drumClips.map(clip => ({ id: clip.id, startBeat: clip.startBar * BEATS_PER_BAR, durationBeats: clip.lengthBars * BEATS_PER_BAR, patternId: MAIN_PATTERN_ID }))
             : instrumental
-              ? [{ id: INSTRUMENTAL_CLIP_ID, startBeat: 0, durationBeats: instrumental.durationBeats, offsetSeconds: 0, audioFileId: instrumental.fileId, label: instrumental.label.slice(0, CLIP_LABEL_MAX_LENGTH) }]
+              ? [{ id: INSTRUMENTAL_CLIP_ID, startBeat: state.instrumentalStartBeat, durationBeats: instrumental.durationBeats, offsetSeconds: 0, audioFileId: instrumental.fileId, label: instrumental.label.slice(0, CLIP_LABEL_MAX_LENGTH) }]
               : info.id === 'voice'
                 ? state.takes.map(take => ({
                     id: take.id,
@@ -163,13 +168,37 @@ function readMixer(project: MusicalProject): MixerState {
   return mixer;
 }
 
-function readInstrumental(project: MusicalProject): { ref: InstrumentalRef | null; eq: ThreeBandEq } {
+/**
+ * Clips de batterie. Jusqu'à la M5, le projet stockait un unique clip `clip-drums`
+ * d'une mesure qui signifiait « le pattern boucle sans fin » : il devient
+ * l'arrangement par défaut. Une piste Batterie vide reste vide (choix de l'utilisateur).
+ */
+function readDrumClips(project: MusicalProject): readonly DrumClip[] {
+  const track = project.tracks?.find(candidate => candidate.id === 'drums');
+  if (!track) {
+    return DEFAULT_DRUM_CLIPS;
+  }
+  const clips = track.clips.filter(clip => clip.patternId);
+  const legacyLoop = clips.length === 1 && clips[0].id === DRUMS_CLIP_ID && clips[0].startBeat === 0 && clips[0].durationBeats === BEATS_PER_BAR;
+  if (legacyLoop) {
+    return DEFAULT_DRUM_CLIPS;
+  }
+  return clips
+    .map(clip => ({
+      id: clip.id,
+      startBar: Math.max(0, Math.round(clip.startBeat / BEATS_PER_BAR)),
+      lengthBars: Math.max(1, Math.round(clip.durationBeats / BEATS_PER_BAR)),
+    }))
+    .sort((a, b) => a.startBar - b.startBar);
+}
+
+function readInstrumental(project: MusicalProject): { ref: InstrumentalRef | null; eq: ThreeBandEq; startBeat: number } {
   const track = project.tracks?.find(candidate => candidate.id === 'instrumental');
   const clip = track?.clips?.find(candidate => typeof candidate.audioFileId === 'string' && candidate.audioFileId.length > 0);
   const ref = clip
     ? { fileId: clip.audioFileId!, label: clip.label || 'Instrumentale', durationBeats: Math.max(MIN_CLIP_BEATS, clip.durationBeats) }
     : null;
-  return { ref, eq: track?.eq ? clampEq(track.eq) : FLAT_THREE_BAND_EQ };
+  return { ref, eq: track?.eq ? clampEq(track.eq) : FLAT_THREE_BAND_EQ, startBeat: Math.max(0, Math.round(clip?.startBeat ?? 0)) };
 }
 
 function readTakes(project: MusicalProject, bpm: number): { takes: TakeRef[]; activeTakeId: string | null } {
@@ -200,6 +229,8 @@ export function fromProject(project: MusicalProject): StudioState {
     instrumentalEq: readInstrumental(project).eq,
     takes,
     activeTakeId,
+    drumClips: readDrumClips(project),
+    instrumentalStartBeat: readInstrumental(project).startBeat,
   };
 }
 

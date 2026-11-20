@@ -9,6 +9,7 @@ import { renderMix } from './offline-render';
 import { PatternTransport, TrackClip } from './pattern-transport';
 import { NOTE_NAMES, SCALE_LABELS } from './pitch/musical-scale';
 import { ProjectKey } from './pitch/vocal-styles';
+import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
 import { MixerState, TrackId, TrackMix, clampTrackDb, createDefaultMixer, effectiveTrackGains, updateTrack } from './track-mix';
 import { encodeWav, peakLevel } from './wav-encoder';
 
@@ -22,6 +23,8 @@ export type TransportState = 'stopped' | 'playing' | 'paused';
 export interface LoadedAudio {
   readonly name: string;
   readonly buffer: AudioBuffer;
+  /** Fichier de la bibliothèque serveur (Track) une fois envoyé, sinon `null` (local à l'onglet). */
+  readonly fileId: string | null;
 }
 
 export interface VocalTake {
@@ -75,6 +78,8 @@ export class StudioSessionService implements OnDestroy {
   readonly engineError = signal<string | null>(null);
 
   readonly instrumental = signal<LoadedAudio | null>(null);
+  /** Égaliseur 3 bandes de la piste instrumentale (dB), appliqué à l'écoute et à l'export. */
+  readonly instrumentalEq = signal<ThreeBandEq>(FLAT_THREE_BAND_EQ);
   readonly importing = signal(false);
   readonly importError = signal<string | null>(null);
 
@@ -105,6 +110,10 @@ export class StudioSessionService implements OnDestroy {
     effect(() => {
       const gains = effectiveTrackGains(this.mixer());
       this.transport?.setTrackGains(gains);
+    });
+    effect(() => {
+      const eq = this.instrumentalEq();
+      this.transport?.setInstrumentalEq(eq);
     });
   }
 
@@ -156,23 +165,46 @@ export class StudioSessionService implements OnDestroy {
     this.mixer.update(mixer => updateTrack(mixer, track, safe));
   }
 
-  async importInstrumental(file: File): Promise<void> {
+  /** Décode un MP3/WAV local et l'installe sur la piste instrumentale. Renvoie `true` si le fichier est utilisable. */
+  async importInstrumental(file: File): Promise<boolean> {
     const validationError = validateAudioFile(file);
     this.importError.set(validationError);
     if (validationError) {
-      return;
+      return false;
     }
     this.importing.set(true);
     try {
       const buffer = await this.engine.decode(await file.arrayBuffer());
-      this.instrumental.set({ name: file.name, buffer });
+      this.setInstrumental({ name: file.name, buffer, fileId: null });
       console.log('[studio] instrumentale chargée', { durationSeconds: buffer.duration });
+      return true;
     } catch (error) {
       console.error('[studio] décodage impossible', error);
       this.importError.set('Fichier illisible ou corrompu : le navigateur ne parvient pas à le décoder.');
+      return false;
     } finally {
       this.importing.set(false);
     }
+  }
+
+  /** Remplace ou retire l'instrumentale ; la lecture en cours est arrêtée pour ne pas jouer l'ancien fichier. */
+  setInstrumental(instrumental: LoadedAudio | null): void {
+    if (this.transportState() !== 'stopped') {
+      this.stopPlayback();
+    }
+    this.instrumental.set(instrumental);
+  }
+
+  /** Associe l'instrumentale courante au fichier envoyé, si c'est toujours le même buffer. */
+  markInstrumentalUploaded(buffer: AudioBuffer, fileId: string): void {
+    const current = this.instrumental();
+    if (current?.buffer === buffer) {
+      this.instrumental.set({ ...current, fileId });
+    }
+  }
+
+  setInstrumentalEq(change: Partial<ThreeBandEq>): void {
+    this.instrumentalEq.update(eq => clampEq({ ...eq, ...change }));
   }
 
   /**
@@ -254,7 +286,12 @@ export class StudioSessionService implements OnDestroy {
     this.exportReport.set(null);
     try {
       const gains = effectiveTrackGains(this.mixer());
-      const clips = this.trackClips(true).map(({ track, clip }) => ({ ...clip, gain: clip.gain * gains[track] }));
+      // À l'export, l'égaliseur de l'instrumentale est porté par son clip (même réglage qu'à l'écoute).
+      const clips = this.trackClips(true).map(({ track, clip }) => ({
+        ...clip,
+        gain: clip.gain * gains[track],
+        ...(track === 'instrumental' ? { eq: this.instrumentalEq() } : {}),
+      }));
       const rendered = await renderMix({ pattern: this.pattern(), bpm: this.bpm(), bars, drumsGain: gains.drums, clips });
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
       const wav = new Blob([encodeWav(channels, rendered.sampleRate)], { type: 'audio/wav' });
@@ -274,7 +311,10 @@ export class StudioSessionService implements OnDestroy {
       const { context, master } = await this.engine.start();
       this.transport ??= new PatternTransport(context, master, () => this.pattern(), () => this.bpm(), () => this.metronome());
       const fromSongStep = this.transportState() === 'paused' ? this.songStep() : 0;
-      this.transport.play({ clips: this.trackClips(includeTake), gains: effectiveTrackGains(this.mixer()), fromSongStep }, this.bpm());
+      this.transport.play(
+        { clips: this.trackClips(includeTake), gains: effectiveTrackGains(this.mixer()), fromSongStep, instrumentalEq: this.instrumentalEq() },
+        this.bpm(),
+      );
       this.engineError.set(null);
       this.songStep.set(fromSongStep);
       this.transportState.set('playing');

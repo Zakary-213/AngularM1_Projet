@@ -24,6 +24,8 @@ export const PROJECT_LIMITS = Object.freeze({
   maxNotesPerPattern: 512,
   minTrackDb: -36,
   maxTrackDb: 6,
+  maxEqDb: 12,
+  clipLabelMaxLength: 120,
 });
 
 export const TRACK_TYPES = ["drum", "instrument", "audio", "vocal"];
@@ -59,9 +61,15 @@ const pitchCorrectionSchema = new mongoose.Schema(
   { _id: false },
 );
 
+// Égaliseur 3 bandes d'une piste, en dB (graves, médiums, aigus) ; 0 = neutre.
+const eqBand = { type: Number, default: 0, min: -L.maxEqDb, max: L.maxEqDb };
+const eqSchema = new mongoose.Schema({ lowDb: eqBand, midDb: eqBand, highDb: eqBand }, { _id: false });
+
 const clipSchema = new mongoose.Schema(
   {
     id: stableId,
+    // Nom affiché du clip (ex. nom du fichier importé) ; jamais utilisé comme nom de stockage.
+    label: { type: String, trim: true, maxlength: L.clipLabelMaxLength },
     startBeat: { type: Number, required: true, min: 0 },
     durationBeats: { type: Number, required: true, min: 0.25 },
     offsetSeconds: { type: Number, default: 0, min: 0 },
@@ -89,6 +97,7 @@ const trackSchema = new mongoose.Schema(
     pan: { type: Number, default: 0, min: -1, max: 1 },
     mute: { type: Boolean, default: false },
     solo: { type: Boolean, default: false },
+    eq: { type: eqSchema, default: () => ({}) },
     clips: { type: [clipSchema], default: [], validate: maxItems(L.maxClipsPerTrack) },
   },
   { _id: false },

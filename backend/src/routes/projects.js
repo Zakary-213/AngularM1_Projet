@@ -1,6 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import { MusicalProject, PROJECT_FORMAT_VERSION, PROJECT_LIMITS } from "../models/MusicalProject.js";
+import { Track } from "../models/Track.js";
 
 /*
  * Routes /api/projects (M1). Chaque requête est authentifiée et chaque accès
@@ -64,6 +65,25 @@ function ownedFilter(req) {
     throw new RequestError(404, "Projet inconnu");
   }
   return { _id: req.params.id, ownerId: req.auth.sub };
+}
+
+/**
+ * Un clip audio ne peut référencer qu'un fichier de la bibliothèque de l'utilisateur :
+ * sinon un projet pourrait servir à lire le fichier d'un autre compte.
+ */
+async function assertOwnedAudioFiles(tracks, ownerId) {
+  const ids = [
+    ...new Set(
+      (tracks ?? []).flatMap((track) => (track.clips ?? []).map((clip) => clip.audioFileId).filter(Boolean)).map(String),
+    ),
+  ];
+  if (ids.length === 0) {
+    return;
+  }
+  const owned = await Track.countDocuments({ _id: { $in: ids }, ownerId });
+  if (owned !== ids.length) {
+    throw new RequestError(400, "Fichier audio inconnu ou non autorisé dans le projet");
+  }
 }
 
 /** Transforme une erreur connue en réponse JSON, sinon la transmet au gestionnaire central. */
@@ -167,6 +187,9 @@ export function createProjectRouter(auth) {
       const candidate = new MusicalProject({ ...existing, ...fields });
       await candidate.validate();
       const validated = pick(candidate.toObject(), Object.keys(fields));
+      if (validated.tracks) {
+        await assertOwnedAudioFiles(validated.tracks, req.auth.sub);
+      }
 
       // La condition sur la révision rend l'écriture atomique face à une autre sauvegarde.
       const updated = await MusicalProject.findOneAndUpdate(

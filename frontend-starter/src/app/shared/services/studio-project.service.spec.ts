@@ -1,10 +1,13 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpErrorResponse, HttpEvent, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Observable, Subject, of, throwError } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AudioEngineService } from '../audio/audio-engine.service';
 import { StudioSessionService } from '../audio/studio-session.service';
 import { MusicalProject, ProjectContent } from '../models/musical-project.model';
 import { ProjectService } from './project.service';
+import { TrackService } from './track.service';
+import { Track } from '../models/track.model';
 import { StudioProjectService } from './studio-project.service';
 
 const stored: MusicalProject = {
@@ -22,15 +25,45 @@ const stored: MusicalProject = {
   updatedAt: '2026-11-20T00:00:00.000Z',
 };
 
+/** Faux AudioBuffer : seules la durée et les métadonnées sont lues par ces tests. */
+function fakeBuffer(duration = 120): AudioBuffer {
+  return { duration, length: duration * 100, sampleRate: 100, numberOfChannels: 1, getChannelData: () => new Float32Array(1) } as unknown as AudioBuffer;
+}
+
+const FILE_ID = '64b0000000000000000000aa';
+const withInstrumental: MusicalProject = {
+  ...stored,
+  bpm: 90,
+  tracks: [
+    {
+      id: 'instrumental',
+      name: 'Instrumentale',
+      type: 'audio',
+      eq: { lowDb: 5, midDb: 0, highDb: -3 },
+      clips: [{ id: 'clip-instrumental', startBeat: 0, durationBeats: 180, offsetSeconds: 0, audioFileId: FILE_ID, label: 'beat.mp3' }],
+    },
+  ],
+};
+
 describe('StudioProjectService', () => {
   let api: { get: ReturnType<typeof vi.fn>; save: ReturnType<typeof vi.fn> };
+  let tracksApi: { upload: ReturnType<typeof vi.fn>; audio: ReturnType<typeof vi.fn> };
+  let engine: { decode: ReturnType<typeof vi.fn>; suspend: ReturnType<typeof vi.fn>; currentTime: () => number };
   let service: StudioProjectService;
   let session: StudioSessionService;
 
   beforeEach(() => {
     api = { get: vi.fn(() => of(stored)), save: vi.fn() };
+    tracksApi = { upload: vi.fn(), audio: vi.fn(() => of(new Blob(['audio']))) };
+    engine = { decode: vi.fn(async () => fakeBuffer()), suspend: vi.fn(async () => undefined), currentTime: () => 0 };
     TestBed.configureTestingModule({
-      providers: [StudioSessionService, StudioProjectService, { provide: ProjectService, useValue: api }],
+      providers: [
+        StudioSessionService,
+        StudioProjectService,
+        { provide: ProjectService, useValue: api },
+        { provide: TrackService, useValue: tracksApi },
+        { provide: AudioEngineService, useValue: engine },
+      ],
     });
     service = TestBed.inject(StudioProjectService);
     session = TestBed.inject(StudioSessionService);
@@ -110,5 +143,85 @@ describe('StudioProjectService', () => {
     api.get.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 404 })) as Observable<MusicalProject>);
     service.load('p1');
     expect(service.loadError()).toBe('Projet introuvable ou non autorisé.');
+  });
+
+  describe('instrumentale (M6)', () => {
+    const file = () => new File(['fake mp3'], 'beat.mp3', { type: 'audio/mpeg' });
+
+    it('envoie le fichier avec la progression, puis le référence dans le projet à sauvegarder', async () => {
+      service.load('p1');
+      const events = new Subject<HttpEvent<Track>>();
+      tracksApi.upload.mockReturnValue(events);
+      await service.importInstrumental(file());
+
+      expect(session.instrumental()?.name).toBe('beat.mp3');
+      expect(tracksApi.upload).toHaveBeenCalledWith(expect.any(File), 'beat.mp3');
+      events.next({ type: HttpEventType.UploadProgress, loaded: 40, total: 100 });
+      expect(service.upload()).toEqual({ state: 'uploading', progress: 40 });
+      expect(service.canSave()).toBe(false);
+
+      events.next(new HttpResponse({ body: { id: FILE_ID } as Track }));
+      expect(service.upload()).toEqual({ state: 'idle' });
+      expect(session.instrumental()?.fileId).toBe(FILE_ID);
+      expect(service.instrumentalRef()).toEqual({ fileId: FILE_ID, label: 'beat.mp3', durationBeats: 264 });
+      expect(service.saveState()).toBe('dirty');
+
+      api.save.mockReturnValue(of({ ...stored, revision: 5 }));
+      service.save();
+      const content = api.save.mock.calls[0][2] as ProjectContent;
+      const clip = content.tracks.find(track => track.id === 'instrumental')!.clips[0];
+      expect(clip.audioFileId).toBe(FILE_ID);
+      expect(clip.label).toBe('beat.mp3');
+    });
+
+    it('échec d’envoi : message, instrumentale toujours écoutable, nouvel essai possible', async () => {
+      service.load('p1');
+      tracksApi.upload.mockReturnValueOnce(throwError(() => new HttpErrorResponse({ status: 0 })));
+      await service.importInstrumental(file());
+      expect(service.upload()).toMatchObject({ state: 'error' });
+      expect(session.instrumental()).not.toBeNull();
+      expect(service.instrumentalRef()).toBeNull();
+
+      tracksApi.upload.mockReturnValueOnce(of(new HttpResponse({ body: { id: FILE_ID } as Track })));
+      service.retryUpload();
+      expect(tracksApi.upload).toHaveBeenCalledTimes(2);
+      expect(service.instrumentalRef()?.fileId).toBe(FILE_ID);
+    });
+
+    it('session libre : fichier seulement local, aucun envoi', async () => {
+      await service.importInstrumental(file());
+      expect(session.instrumental()?.fileId).toBeNull();
+      expect(tracksApi.upload).not.toHaveBeenCalled();
+    });
+
+    it('à l’ouverture, récupère le fichier référencé et son égaliseur, sans modification en attente', async () => {
+      api.get.mockReturnValue(of(withInstrumental));
+      service.load('p1');
+      expect(tracksApi.audio).toHaveBeenCalledWith(FILE_ID);
+      await vi.waitFor(() => expect(session.instrumental()?.fileId).toBe(FILE_ID));
+      expect(session.instrumental()?.name).toBe('beat.mp3');
+      expect(session.instrumentalEq()).toEqual({ lowDb: 5, midDb: 0, highDb: -3 });
+      expect(service.saveState()).toBe('saved');
+    });
+
+    it('fichier supprimé de la bibliothèque : message explicite, référence conservée', () => {
+      api.get.mockReturnValue(of(withInstrumental));
+      tracksApi.audio.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 404 })));
+      service.load('p1');
+      expect(service.download()).toBe('error');
+      expect(service.downloadError()).toContain('n’existe plus');
+      expect(service.instrumentalRef()?.fileId).toBe(FILE_ID);
+      expect(service.saveState()).toBe('saved');
+    });
+
+    it('retirer l’instrumentale la sort du projet (modification à sauvegarder)', async () => {
+      api.get.mockReturnValue(of(withInstrumental));
+      service.load('p1');
+      await vi.waitFor(() => expect(session.instrumental()).not.toBeNull());
+      service.removeInstrumental();
+      expect(session.instrumental()).toBeNull();
+      expect(service.instrumentalRef()).toBeNull();
+      expect(service.saveState()).toBe('dirty');
+    });
   });
 });

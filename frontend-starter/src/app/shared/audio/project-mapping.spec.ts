@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoPattern, toggleStep } from './drum-pattern';
-import { StudioState, contentFingerprint, createEmptyPattern, fromProject, toProjectContent } from './project-mapping';
+import { StudioState, contentFingerprint, createEmptyPattern, fromProject, secondsToBeats, toProjectContent } from './project-mapping';
+import { FLAT_THREE_BAND_EQ } from './three-band-eq';
 import { createDefaultMixer, updateTrack } from './track-mix';
 import { MusicalProject } from '../models/musical-project.model';
 
@@ -27,6 +28,8 @@ const state: StudioState = {
   key: { root: 2, scale: 'harmonicMinor' },
   pattern: toggleStep(createDemoPattern(), 'snare', 0),
   mixer: updateTrack(updateTrack(createDefaultMixer(), 'drums', { volumeDb: -6, solo: true }), 'voice', { muted: true }),
+  instrumental: { fileId: '64b0000000000000000000aa', label: 'beat.mp3', durationBeats: 186.67 },
+  instrumentalEq: { lowDb: 3, midDb: -2, highDb: 1 },
 };
 
 describe('conversion studio ↔ format de sauvegarde v1', () => {
@@ -48,6 +51,22 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(content.patterns[0].drumRows.every(row => row.steps.length === 16)).toBe(true);
   });
 
+  it('référence l’instrumentale par son fichier et porte son égaliseur, sans octets audio', () => {
+    const instrumental = toProjectContent(state).tracks.find(track => track.id === 'instrumental')!;
+    expect(instrumental.eq).toEqual({ lowDb: 3, midDb: -2, highDb: 1 });
+    expect(instrumental.clips).toEqual([
+      { id: 'clip-instrumental', startBeat: 0, durationBeats: 186.67, offsetSeconds: 0, audioFileId: '64b0000000000000000000aa', label: 'beat.mp3' },
+    ]);
+    const noInstrumental = toProjectContent({ ...state, instrumental: null }).tracks.find(track => track.id === 'instrumental')!;
+    expect(noInstrumental.clips).toEqual([]);
+  });
+
+  it('convertit une durée en temps au tempo du projet', () => {
+    expect(secondsToBeats(60, 90)).toBe(90);
+    expect(secondsToBeats(10, 140)).toBe(23.33);
+    expect(secondsToBeats(0, 120)).toBe(0.25);
+  });
+
   it('nouveau projet : rythme de départ pour « Créer », grille vide pour « Importer »', () => {
     expect(fromProject(project({ origin: 'create' })).pattern).toEqual(createDemoPattern());
     expect(fromProject(project({ origin: 'import' })).pattern).toEqual(createEmptyPattern());
@@ -66,6 +85,8 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(loaded.key).toEqual({ root: 9, scale: 'minor' });
     expect(loaded.mixer.drums.volumeDb).toBe(6);
     expect(loaded.pattern).toEqual(createEmptyPattern());
+    expect(loaded.instrumental).toBeNull();
+    expect(loaded.instrumentalEq).toEqual(FLAT_THREE_BAND_EQ);
   });
 
   it('l’empreinte change avec une modification et revient à l’identique après annulation', () => {

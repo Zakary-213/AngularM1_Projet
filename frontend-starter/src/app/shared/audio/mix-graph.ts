@@ -1,3 +1,5 @@
+import { ThreeBandEq, createEqChain, isFlatEq } from './three-band-eq';
+
 /**
  * Éléments du graphe de mixage partagés par l'écoute et l'export.
  * Gains linéaires (0 à 1) sauf mention contraire ; niveaux affichés en dBFS.
@@ -31,6 +33,11 @@ export interface AudioClip {
   /** Position du début du fichier par rapport au début du morceau, en secondes (peut être négative). */
   readonly startSeconds: number;
   readonly gain: number;
+  /**
+   * Égaliseur propre au clip, pour l'export hors ligne. À l'écoute, l'égaliseur
+   * est porté par la piste (réglable pendant la lecture) et ce champ reste vide.
+   */
+  readonly eq?: ThreeBandEq;
 }
 
 /**
@@ -60,7 +67,14 @@ export function scheduleClip(
   source.buffer = clip.buffer;
   const gain = context.createGain();
   gain.gain.value = clip.gain;
-  source.connect(gain).connect(output);
+  source.connect(gain);
+  if (clip.eq && !isFlatEq(clip.eq)) {
+    const chain = createEqChain(context, clip.eq);
+    gain.connect(chain.input);
+    chain.output.connect(output);
+  } else {
+    gain.connect(output);
+  }
   source.start(when, offset);
   return source;
 }

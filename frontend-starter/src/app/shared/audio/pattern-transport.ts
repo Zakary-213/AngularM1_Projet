@@ -4,6 +4,7 @@ import { playMetronomeClick } from './metronome';
 import { AudioClip, scheduleClip } from './mix-graph';
 import { STEPS_PER_BEAT, stepDurationSeconds } from './music-time';
 import { StepCursor, StepScheduler } from './step-scheduler';
+import { EqChain, FLAT_THREE_BAND_EQ, ThreeBandEq, createEqChain } from './three-band-eq';
 import { TRACK_IDS, TrackId } from './track-mix';
 
 /** Délai entre le clic et la première frappe : laisse le temps de tout programmer. */
@@ -23,6 +24,8 @@ export interface PlayOptions {
   readonly gains: Readonly<Record<TrackId, number>>;
   /** Pas absolu de départ : 0 au début du morceau, sinon reprise après une pause. */
   readonly fromSongStep?: number;
+  /** Égaliseur de la piste instrumentale au démarrage (neutre par défaut). */
+  readonly instrumentalEq?: ThreeBandEq;
 }
 
 /**
@@ -35,6 +38,9 @@ export class PatternTransport {
   private readonly scheduler: StepScheduler;
   private bus: GainNode | null = null;
   private trackGains: Partial<Record<TrackId, GainNode>> = {};
+  /** Entrée de chaque piste : son gain, ou l'égaliseur placé avant lui (instrumentale). */
+  private trackInputs: Partial<Record<TrackId, AudioNode>> = {};
+  private instrumentalEq: EqChain | null = null;
   private sources: AudioBufferSourceNode[] = [];
   private songStart: number | null = null;
   /** Pas programmés mais pas encore entendus, pour l'affichage de la tête de lecture. */
@@ -84,7 +90,7 @@ export class PatternTransport {
     return this.shownSongStep;
   }
 
-  play({ clips, gains, fromSongStep = 0 }: PlayOptions, bpm: number): number {
+  play({ clips, gains, fromSongStep = 0, instrumentalEq = FLAT_THREE_BAND_EQ }: PlayOptions, bpm: number): number {
     this.stop();
     // Bus dédié à cette lecture : le déconnecter coupe aussi les frappes déjà programmées.
     this.bus = this.context.createGain();
@@ -94,12 +100,16 @@ export class PatternTransport {
       gain.gain.value = gains[id];
       gain.connect(this.bus);
       this.trackGains[id] = gain;
+      this.trackInputs[id] = gain;
     }
+    this.instrumentalEq = createEqChain(this.context, instrumentalEq);
+    this.instrumentalEq.output.connect(this.trackGains.instrumental!);
+    this.trackInputs.instrumental = this.instrumentalEq.input;
     const startTime = this.context.currentTime + START_DELAY_SECONDS;
     // Les clips sont placés en secondes : la position de reprise est convertie au tempo courant.
     const fromSeconds = fromSongStep * stepDurationSeconds(bpm);
     this.sources = clips
-      .map(({ track, clip }) => scheduleClip(this.context, this.trackGains[track]!, clip, startTime, fromSeconds))
+      .map(({ track, clip }) => scheduleClip(this.context, this.trackInputs[track]!, clip, startTime, fromSeconds))
       .filter((source): source is AudioBufferSourceNode => source !== null);
     this.scheduler.start(startTime, fromSongStep);
     this.songStart = startTime - fromSeconds;
@@ -114,6 +124,11 @@ export class PatternTransport {
     }
   }
 
+  /** Applique un nouvel égaliseur à l'instrumentale pendant la lecture. */
+  setInstrumentalEq(eq: ThreeBandEq): void {
+    this.instrumentalEq?.apply(eq);
+  }
+
   stop(): void {
     this.scheduler.stop();
     this.sources.forEach(source => {
@@ -124,6 +139,8 @@ export class PatternTransport {
     this.bus?.disconnect();
     this.bus = null;
     this.trackGains = {};
+    this.trackInputs = {};
+    this.instrumentalEq = null;
     this.songStart = null;
     this.pendingSteps = [];
     this.shownSongStep = -1;

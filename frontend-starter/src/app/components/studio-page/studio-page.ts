@@ -6,6 +6,7 @@ import { DrumRackPanelComponent } from '../drum-rack-panel/drum-rack-panel';
 import { ExportPanelComponent } from '../export-panel/export-panel';
 import { MixerPanelComponent } from '../mixer-panel/mixer-panel';
 import { PitchCorrectionPanelComponent } from '../pitch-correction-panel/pitch-correction-panel';
+import { WaveformComponent } from '../waveform/waveform';
 import { AUDIO_FILE_ACCEPT } from '../../shared/audio/audio-file';
 import { DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../../shared/audio/music-time';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
@@ -24,7 +25,14 @@ type EditorTab = 'Batterie' | 'Correction vocale' | 'Mixeur' | 'Export';
 
 interface TimelineTrack extends StudioTrackInfo {
   /** `null` : piste vide, rien à afficher dans la ligne. */
-  readonly clip: { readonly label: string; readonly offset: number; readonly width: number; readonly pattern: 'note' | 'wave' } | null;
+  readonly clip: {
+    readonly label: string;
+    readonly offset: number;
+    readonly width: number;
+    readonly pattern: 'note' | 'wave';
+    /** Fichier à dessiner et fin de la portion visible (secondes), pour l'instrumentale. */
+    readonly waveform?: { readonly buffer: AudioBuffer; readonly toSeconds: number };
+  } | null;
   readonly mix: TrackMix;
 }
 
@@ -36,7 +44,7 @@ interface TimelineTrack extends StudioTrackInfo {
  */
 @Component({
   selector: 'app-studio-page',
-  imports: [RouterLink, ReactiveFormsModule, DrumRackPanelComponent, ExportPanelComponent, MixerPanelComponent, PitchCorrectionPanelComponent],
+  imports: [RouterLink, ReactiveFormsModule, DrumRackPanelComponent, ExportPanelComponent, MixerPanelComponent, PitchCorrectionPanelComponent, WaveformComponent],
   providers: [StudioSessionService, StudioProjectService],
   host: {
     '(window:beforeunload)': 'onBeforeUnload($event)',
@@ -93,7 +101,13 @@ export class StudioPageComponent implements LeaveConfirmation {
       if (info.id === 'drums') {
         clip = { label: 'Pattern 01 · boucle 1 mesure', offset: 0, width: 100, pattern: 'note' };
       } else if (info.id === 'instrumental' && instrumental) {
-        clip = { label: instrumental.name, offset: 0, width: percent(instrumental.buffer.duration), pattern: 'wave' };
+        clip = {
+          label: instrumental.name,
+          offset: 0,
+          width: percent(instrumental.buffer.duration),
+          pattern: 'wave',
+          waveform: { buffer: instrumental.buffer, toSeconds: Math.min(instrumental.buffer.duration, visibleSeconds) },
+        };
       } else if (info.id === 'voice' && take) {
         const offset = percent(Math.max(0, take.startSeconds));
         clip = offset < 100 ? { label: 'Prise voix · 01', offset, width: Math.max(1, Math.min(100 - offset, percent(take.buffer.duration))), pattern: 'wave' } : null;
@@ -118,11 +132,14 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   /** Utilisé par `unsavedChangesGuard` avant de quitter le studio. */
   canLeave(): boolean {
+    if (this.studioProject.uploading()) {
+      return confirm('L’instrumentale est en cours d’envoi. Quitter interrompt l’envoi. Quitter quand même ?');
+    }
     return !this.studioProject.hasUnsavedChanges() || confirm('Des modifications ne sont pas sauvegardées. Quitter quand même ?');
   }
 
   onBeforeUnload(event: BeforeUnloadEvent): void {
-    if (this.studioProject.hasUnsavedChanges()) {
+    if (this.studioProject.hasUnsavedChanges() || this.studioProject.uploading()) {
       event.preventDefault();
     }
   }
@@ -148,8 +165,13 @@ export class StudioPageComponent implements LeaveConfirmation {
     const file = input.files?.[0];
     input.value = '';
     if (file) {
-      void this.session.importInstrumental(file);
+      void this.studioProject.importInstrumental(file);
     }
+  }
+
+  formatDuration(seconds: number): string {
+    const total = Math.round(seconds);
+    return `${Math.floor(total / 60)} min ${String(total % 60).padStart(2, '0')} s`;
   }
 
   pad(value: number): string {

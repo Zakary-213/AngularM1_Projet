@@ -3,7 +3,7 @@ import { playDrumHit } from './drum-synth';
 import { playMetronomeClick } from './metronome';
 import { AudioClip, scheduleClip } from './mix-graph';
 import { STEPS_PER_BEAT, stepDurationSeconds } from './music-time';
-import { StepCursor, StepScheduler } from './step-scheduler';
+import { LoopRange, StepCursor, StepScheduler } from './step-scheduler';
 import { EqChain, FLAT_THREE_BAND_EQ, ThreeBandEq, createEqChain } from './three-band-eq';
 import { TRACK_IDS, TrackId } from './track-mix';
 
@@ -26,6 +26,8 @@ export interface PlayOptions {
   readonly fromSongStep?: number;
   /** Égaliseur de la piste instrumentale au démarrage (neutre par défaut). */
   readonly instrumentalEq?: ThreeBandEq;
+  /** Plage jouée en boucle ; le départ doit se trouver dans la plage. */
+  readonly loop?: LoopRange | null;
 }
 
 /**
@@ -42,6 +44,10 @@ export class PatternTransport {
   private trackInputs: Partial<Record<TrackId, AudioNode>> = {};
   private instrumentalEq: EqChain | null = null;
   private sources: AudioBufferSourceNode[] = [];
+  /** Clips et boucle de la lecture en cours, pour reprogrammer les fichiers à chaque tour. */
+  private playingClips: readonly TrackClip[] = [];
+  private loop: LoopRange | null = null;
+  private playBpm = 0;
   private songStart: number | null = null;
   /** Pas programmés mais pas encore entendus, pour l'affichage de la tête de lecture. */
   private pendingSteps: StepCursor[] = [];
@@ -59,6 +65,9 @@ export class PatternTransport {
       bpm,
       cursor => {
         this.pendingSteps.push(cursor);
+        if (cursor.wrapped && this.loop) {
+          this.scheduleLoopPass(cursor.time);
+        }
         const drums = this.trackGains.drums;
         if (drums) {
           voicesAtStep(pattern(), cursor.step).forEach(voice => playDrumHit(context, drums, voice, cursor.time));
@@ -68,6 +77,7 @@ export class PatternTransport {
           playMetronomeClick(context, this.bus, cursor.time, cursor.step === 0);
         }
       },
+      () => this.loop,
     );
   }
 
@@ -90,7 +100,7 @@ export class PatternTransport {
     return this.shownSongStep;
   }
 
-  play({ clips, gains, fromSongStep = 0, instrumentalEq = FLAT_THREE_BAND_EQ }: PlayOptions, bpm: number): number {
+  play({ clips, gains, fromSongStep = 0, instrumentalEq = FLAT_THREE_BAND_EQ, loop = null }: PlayOptions, bpm: number): number {
     this.stop();
     // Bus dédié à cette lecture : le déconnecter coupe aussi les frappes déjà programmées.
     this.bus = this.context.createGain();
@@ -108,9 +118,10 @@ export class PatternTransport {
     const startTime = this.context.currentTime + START_DELAY_SECONDS;
     // Les clips sont placés en secondes : la position de reprise est convertie au tempo courant.
     const fromSeconds = fromSongStep * stepDurationSeconds(bpm);
-    this.sources = clips
-      .map(({ track, clip }) => scheduleClip(this.context, this.trackInputs[track]!, clip, startTime, fromSeconds))
-      .filter((source): source is AudioBufferSourceNode => source !== null);
+    this.playingClips = clips;
+    this.loop = loop;
+    this.playBpm = bpm;
+    this.sources = this.scheduleClips(startTime, fromSeconds);
     this.scheduler.start(startTime, fromSongStep);
     this.songStart = startTime - fromSeconds;
     this.shownSongStep = fromSongStep - 1;
@@ -129,6 +140,35 @@ export class PatternTransport {
     this.instrumentalEq?.apply(eq);
   }
 
+  /**
+   * Programme les fichiers audio à partir de la position `fromSeconds` du morceau,
+   * joués à la date `when`. En boucle, chaque source s'arrête à la fin de la plage.
+   */
+  private scheduleClips(when: number, fromSeconds: number): AudioBufferSourceNode[] {
+    const loopEndSeconds = this.loop ? this.loop.endStep * stepDurationSeconds(this.playBpm) : null;
+    return this.playingClips
+      .map(({ track, clip }) => {
+        const source = scheduleClip(this.context, this.trackInputs[track]!, clip, when, fromSeconds);
+        if (source && loopEndSeconds !== null) {
+          source.stop(when + Math.max(0, loopEndSeconds - fromSeconds));
+        }
+        if (source) {
+          // Libère la référence quand la source a fini de jouer (un tour de boucle en crée de nouvelles).
+          source.onended = () => {
+            this.sources = this.sources.filter(candidate => candidate !== source);
+          };
+        }
+        return source;
+      })
+      .filter((source): source is AudioBufferSourceNode => source !== null);
+  }
+
+  /** Nouveau tour de boucle : les fichiers repartent du début de la plage, à la date du pas. */
+  private scheduleLoopPass(when: number): void {
+    const loopStartSeconds = this.loop!.startStep * stepDurationSeconds(this.playBpm);
+    this.sources.push(...this.scheduleClips(when, loopStartSeconds));
+  }
+
   stop(): void {
     this.scheduler.stop();
     this.sources.forEach(source => {
@@ -136,6 +176,8 @@ export class PatternTransport {
       source.disconnect();
     });
     this.sources = [];
+    this.playingClips = [];
+    this.loop = null;
     this.bus?.disconnect();
     this.bus = null;
     this.trackGains = {};

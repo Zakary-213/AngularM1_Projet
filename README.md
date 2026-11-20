@@ -266,7 +266,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **172 / 172 tests frontend** et **31 / 31 tests backend** réussis, build OK (20 novembre 2026).
+Dernier résultat connu : **184 / 184 tests frontend** et **31 / 31 tests backend** réussis, build OK (20 novembre 2026).
 
 ---
 
@@ -340,6 +340,14 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 20 novembre 2026 — M5, partie 1 : se placer dans le morceau et boucle (#46, #11)
+
+- **Se placer** : clic sur la règle ou sur une piste → tête de lecture au temps le plus proche (calée sur la grille). En lecture, la lecture repart de là ; à l'arrêt, la position est gardée pour le prochain ▶ (■ revient au début). La règle est un curseur accessible (`role="slider"`, position annoncée « mesure 3, temps 2 ») : flèches = un temps, Page précédente / suivante = une mesure, Début, Fin (fin de l'instrumentale ou de la dernière prise). Les touches n'agissent que lorsque la règle a le focus : aucun conflit avec la saisie.
+- **Boucle** : case « Boucle » et plage « de la mesure … à … » (bornes incluses, validées avec message). Le séquenceur revient au début de la plage sur l'horloge audio, sans interruption ; à chaque tour, l'instrumentale et la prise sont reprogrammées à la date exacte du pas et arrêtées en fin de plage. Bande hachurée sur la règle et les pistes. Une lecture démarrée hors de la plage commence au début de la boucle ; changer la boucle pendant la lecture l'applique aussitôt. La boucle est ignorée pendant un enregistrement (la prise doit suivre le morceau) et n'est pas sauvegardée avec le projet (réglage d'écoute).
+- **Limites** : la fenêtre visible commence toujours à la mesure 1 (dézoomer pour voir plus loin) ; un changement de BPM pendant une boucle décale les fichiers audio jusqu'au tour suivant.
+
+**Vérifications** : frontend `npm test` 184/184 (positions au clic et au clavier, bornes, plage de boucle, retour du séquenceur au début de la boucle avec horloge continue, placement de la session à l'arrêt et pendant une prise) ; `npm run build` réussi. Navigateur (Chromium, `npm start`) : clic au milieu → mesure 9, clavier (+1 temps, +1 mesure, Début, Fin = mesure 68 avec une instrumentale de 3 min), lecture depuis la mesure 9, plage invalide signalée, boucle des mesures 1 à 2 relevée toutes les 0,4 s pendant 9,6 s (le compteur revient bien à la mesure 1), 360 px sans débordement, console sans erreur. **Non vérifié** : l'écoute du raccord de boucle au casque (absence de clic à la reprise de l'instrumentale).
 
 ### 20 novembre 2026 — M8 : enregistrement vocal multiprise (#14)
 

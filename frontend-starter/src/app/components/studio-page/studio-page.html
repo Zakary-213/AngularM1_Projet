@@ -107,13 +107,28 @@
   </aside>
   <section class="arrangement panel" aria-label="Timeline multipiste">
     <div class="timeline-toolbar">
+      <fieldset class="loop-controls" aria-describedby="loop-error">
+        <legend class="visually-hidden">Lecture en boucle</legend>
+        <label class="loop-toggle"><input type="checkbox" [checked]="session.loopEnabled()" (change)="toggleLoop($event)" [disabled]="session.micState() !== 'idle'" /> Boucle</label>
+        <label for="loop-from">de la mesure</label>
+        <input id="loop-from" type="number" min="1" [max]="maxSongBars" step="1" [formControl]="loopFrom" (change)="onLoopBarsChange()" [attr.aria-invalid]="loopError() !== null" />
+        <label for="loop-to">à</label>
+        <input id="loop-to" type="number" min="1" [max]="maxSongBars" step="1" [formControl]="loopTo" (change)="onLoopBarsChange()" [attr.aria-invalid]="loopError() !== null" />
+        <small id="loop-error" class="error" role="alert">{{ loopError() }}</small>
+      </fieldset>
       <span>{{ visibleBars() }} mesures visibles</span>
       <button type="button" (click)="zoom('out')" [disabled]="!canZoomOut()" aria-label="Dézoomer la timeline">−</button>
       <button type="button" (click)="zoom('in')" [disabled]="!canZoomIn()" aria-label="Zoomer la timeline">+</button>
     </div>
     <div class="timeline-scroll">
       <div class="timeline-inner">
-        <div class="timeline-ruler"><span>PISTES · {{ tracks().length }}</span>@for (bar of rulerBars(); track $index) {<span>{{ bar }}</span>}</div>
+        <div class="timeline-ruler" role="slider" tabindex="0" aria-label="Position de lecture" aria-describedby="ruler-help"
+          aria-valuemin="0" [attr.aria-valuemax]="session.songEndStep()" [attr.aria-valuenow]="session.songStep()" [attr.aria-valuetext]="positionText()"
+          (click)="onTimelineClick($event)" (keydown)="onRulerKey($event)">
+          <span>PISTES · {{ tracks().length }}</span>@for (bar of rulerBars(); track $index) {<span>{{ bar }}</span>}
+          @if (loopBand(); as band) { <span class="loop-band" [style.left]="rulerOffset(band.left)" [style.width]="rulerWidth(band.width)" aria-hidden="true"></span> }
+        </div>
+        <p id="ruler-help" class="visually-hidden">Cliquez sur la règle ou une piste pour vous placer. Au clavier : flèches pour un temps, Page précédente et suivante pour une mesure, Début et Fin.</p>
         @for (track of tracks(); track track.id) {
           <div class="timeline-row">
             <div class="track-label">
@@ -123,7 +138,8 @@
                 <button type="button" (click)="session.setTrack(track.id, { solo: !track.mix.solo })" [attr.aria-pressed]="track.mix.solo" [attr.aria-label]="'Solo : ' + track.name" [class.toggle-on]="track.mix.solo">S</button>
               </div>
             </div>
-            <div class="track-lane">
+            <div class="track-lane" (click)="onTimelineClick($event)">
+              @if (loopBand(); as band) { <span class="loop-band" [style.left.%]="band.left" [style.width.%]="band.width" aria-hidden="true"></span> }
               @if (track.clip; as clip) {
                 <div [class]="'audio-clip ' + track.className" [class.is-muted]="track.mix.muted" [style.margin-left.%]="clip.offset" [style.width.%]="clip.width">
                   <span>{{ clip.label }}{{ track.mix.muted ? ' · muette' : '' }}</span>

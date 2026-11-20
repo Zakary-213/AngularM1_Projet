@@ -2,7 +2,9 @@ import { Injectable, OnDestroy, computed, effect, inject, signal } from '@angula
 import { AudioEngineService } from './audio-engine.service';
 import { validateAudioFile } from './audio-file';
 import {
+  DEFAULT_KIT,
   DEFAULT_PATTERN_ID,
+  DrumKit,
   DrumPattern,
   DrumVoice,
   MAX_PATTERNS,
@@ -21,7 +23,8 @@ import { InputDevice, MicrophoneRecorder, describeMicrophoneError, takeStartSeco
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm, stepDurationSeconds } from './music-time';
 import { renderMix } from './offline-render';
 import { PatternTransport, TrackClip } from './pattern-transport';
-import { NOTE_NAMES, SCALE_LABELS } from './pitch/musical-scale';
+import { NOTE_NAMES, SCALE_LABELS, midiToFrequency } from './pitch/musical-scale';
+import { DrumSound, playDrumHit } from './drum-synth';
 import { ProjectKey } from './pitch/vocal-styles';
 import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
 import { DEFAULT_LOOP_BARS, LoopBars, MAX_SONG_BARS, clampSongStep, loopStepRange, validateLoopBars } from './timeline-position';
@@ -54,6 +57,10 @@ export const TAKE_NAME_MAX_LENGTH = 40;
 const LEVEL_UPDATE_MS = 100;
 /** Crête au-delà de laquelle la prise risque d'être saturée. */
 const CLIPPING_PEAK = 0.98;
+/** Octave de la 808 : do1 (MIDI 24, 32,7 Hz) à si1 (61,7 Hz), le registre des basses de rap. */
+const BASS_OCTAVE_MIDI = 24;
+/** Délai de la préécoute : laisse au contexte audio le temps de programmer la frappe. */
+const PREVIEW_DELAY_SECONDS = 0.01;
 /** Pas du décalage manuel d'une prise (correction de latence), en secondes. */
 export const TAKE_NUDGE_SECONDS = 0.01;
 /** Décalage manuel maximal dans un sens ou dans l'autre, en secondes. */
@@ -138,7 +145,7 @@ export class StudioSessionService implements OnDestroy {
   /** BPM effectivement utilisé : une saisie invalide ne l'écrase jamais. */
   readonly bpm = signal(DEFAULT_BPM);
   /** Bibliothèque de patterns du projet (M3) ; chaque clip de batterie en joue un. */
-  readonly patterns = signal<readonly PatternEntry[]>([{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: createDemoPattern() }]);
+  readonly patterns = signal<readonly PatternEntry[]>([{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: createDemoPattern(), kit: DEFAULT_KIT }]);
   /** Pattern affiché et modifié dans le Drum Rack. */
   readonly editedPatternId = signal(DEFAULT_PATTERN_ID);
   readonly editedPattern = computed(() => this.patterns().find(entry => entry.id === this.editedPatternId()) ?? this.patterns()[0]);
@@ -281,7 +288,7 @@ export class StudioSessionService implements OnDestroy {
   /** Copie d'un pattern, pour créer une variante (refrain, break…). */
   duplicatePattern(id: string): string | null {
     const source = this.patterns().find(entry => entry.id === id);
-    return source ? this.insertPattern(source.steps, `${source.name} (copie)`.slice(0, PATTERN_NAME_MAX_LENGTH)) : null;
+    return source ? this.insertPattern(source.steps, `${source.name} (copie)`.slice(0, PATTERN_NAME_MAX_LENGTH), source.kit) : null;
   }
 
   renamePattern(id: string, name: string): boolean {
@@ -313,23 +320,52 @@ export class StudioSessionService implements OnDestroy {
 
   /** Remplace la bibliothèque de patterns (ouverture d'un projet). */
   loadPatterns(patterns: readonly PatternEntry[]): void {
-    const safe = patterns.length > 0 ? patterns : [{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: createEmptyPattern() }];
+    const safe = patterns.length > 0 ? patterns : [{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: createEmptyPattern(), kit: DEFAULT_KIT }];
     this.patterns.set(safe);
     this.editedPatternId.set(safe[0].id);
   }
 
   /** Pattern joué à un pas absolu, d'après les clips de batterie. */
   patternAt(songStep: number): DrumPattern | null {
-    const id = patternIdAtBar(this.drumClips(), Math.floor(songStep / STEPS_PER_BAR));
-    return id ? (this.patterns().find(entry => entry.id === id)?.steps ?? null) : null;
+    return this.patternEntryAt(songStep)?.steps ?? null;
   }
 
-  private insertPattern(steps: DrumPattern, name = nextPatternName(this.patterns())): string | null {
+  /** Fréquence de la 808 : fondamentale de la tonalité du projet, à l'octave 1 (do1 = MIDI 24). */
+  readonly bassHz = computed(() => midiToFrequency(BASS_OCTAVE_MIDI + this.projectKey().root));
+
+  /** Change le kit (sons) d'un pattern. */
+  setPatternKit(id: string, kit: DrumKit): void {
+    this.patterns.update(patterns => patterns.map(entry => (entry.id === id ? { ...entry, kit } : entry)));
+  }
+
+  /** Préécoute d'un instrument avec le kit du pattern affiché (au clic : le contexte audio peut démarrer). */
+  async previewVoice(voice: DrumVoice): Promise<void> {
+    try {
+      const { context, master } = await this.engine.start();
+      playDrumHit(context, master, voice, context.currentTime + PREVIEW_DELAY_SECONDS, 1, { kit: this.editedPattern().kit, bassHz: this.bassHz() });
+    } catch (error) {
+      console.error('[studio] préécoute impossible', error);
+      this.engineError.set("Le moteur audio n'a pas pu démarrer dans ce navigateur.");
+    }
+  }
+
+  private patternEntryAt(songStep: number): PatternEntry | null {
+    const id = patternIdAtBar(this.drumClips(), Math.floor(songStep / STEPS_PER_BAR));
+    return id ? (this.patterns().find(entry => entry.id === id) ?? null) : null;
+  }
+
+  /** Ce que la batterie joue à un pas : pattern, kit et note de la 808 (écoute et export). */
+  private drumsAt(songStep: number): { pattern: DrumPattern; sound: DrumSound } | null {
+    const entry = this.patternEntryAt(songStep);
+    return entry ? { pattern: entry.steps, sound: { kit: entry.kit, bassHz: this.bassHz() } } : null;
+  }
+
+  private insertPattern(steps: DrumPattern, name = nextPatternName(this.patterns()), kit: DrumKit = this.editedPattern().kit): string | null {
     if (this.patterns().length >= MAX_PATTERNS) {
       return null;
     }
     const id = createPatternId();
-    this.patterns.update(patterns => [...patterns, { id, name, steps }]);
+    this.patterns.update(patterns => [...patterns, { id, name, steps, kit }]);
     this.editedPatternId.set(id);
     return id;
   }
@@ -824,7 +860,7 @@ export class StudioSessionService implements OnDestroy {
         ...(track === 'instrumental' ? { eq: this.instrumentalEq() } : {}),
       }));
       const rendered = await renderMix({
-        patternAt: step => this.patternAt(step),
+        drumsAt: step => this.drumsAt(step),
         bpm: this.bpm(),
         bars,
         drumsGain: gains.drums,
@@ -849,7 +885,7 @@ export class StudioSessionService implements OnDestroy {
       this.transport ??= new PatternTransport(
         context,
         master,
-        songStep => this.patternAt(songStep),
+        songStep => this.drumsAt(songStep),
         () => this.bpm(),
         () => this.metronome(),
       );

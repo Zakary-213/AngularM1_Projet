@@ -84,8 +84,8 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Timeline | Se placer (clic, clavier), boucle, clips de batterie (déplacer, dupliquer, raccourcir, supprimer), instrumentale et prises déplaçables, Annuler / Rétablir, positions sauvegardées | ✅ Fonctionnel (M5) |
-| Batterie | Drum Rack 16 pas avec vélocité (forte / moyenne / douce), bibliothèque de patterns (créer, dupliquer, renommer, supprimer), un pattern par clip de batterie, décalage des frappes | ✅ Fonctionnel (M3, partie 1) |
-| Composition | Nouveaux sons (clap, percussions, 808), préécoute, Piano Roll | ⏳ À faire (M3, M4) |
+| Batterie | Drum Rack 16 pas, 6 instruments synthétisés (kick, snare, clap, hi-hat, percussion, 808 accordée sur la tonalité), 2 kits (boom bap, trap), préécoute, vélocité, bibliothèque de patterns, un pattern par clip de batterie | ✅ Fonctionnel (M3) |
+| Composition | Piano Roll et instruments mélodiques | ⏳ À faire (M4) |
 | Import | Instrumentale MP3 / WAV envoyée dans vos fichiers audio, forme d'onde, égaliseur 3 bandes, retrouvée à la réouverture du projet | ✅ Fonctionnel (M6) |
 | Mix | Volume, mute et solo par piste (écoute et export) faits ; pan, EQ, réverbération, delay | ⏳ À faire (M7) |
 | Voix | Prise micro (bouton ●) et onglet « Correction vocale » : 6 styles (Naturel, Rap, Trap, Drill, Raï, Robot) + dose d'effet, mode personnalisé (gamme, notes, humanisation, transposition, égaliseur), courbe de hauteur, calcul dans un Web Worker, version corrigée utilisable sur la piste Voix | 🚧 Partiel (M9) |
@@ -268,7 +268,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **215 / 215 tests frontend** et **32 / 32 tests backend** réussis, build OK (20 novembre 2026).
+Dernier résultat connu : **217 / 217 tests frontend** et **33 / 33 tests backend** réussis, build OK (20 novembre 2026).
 
 ---
 
@@ -310,7 +310,7 @@ Schéma : `backend/src/models/MusicalProject.js` ; routes : `backend/src/routes/
 
 `ProjectSummary` : `id`, `title`, `origin`, `bpm`, `key`, `trackCount`, `formatVersion`, `createdAt`, `updatedAt`.
 
-`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `activeClipId` facultatif (prise jouée, doit désigner un clip de la piste), `clips[]`), `patterns[]` (64 max. ; `id`, `name`, `drumRows` : `voice`, `steps` (16 booléens) et `velocities` facultatives (16 valeurs de 0 à 1, M3), `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Sur la piste Batterie, chaque clip joue le pattern en boucle de `startBeat` à `startBeat + durationBeats` (M5) ; une piste Batterie sans clip est silencieuse. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `activeClipId` facultatif (prise jouée, doit désigner un clip de la piste), `clips[]`), `patterns[]` (64 max. ; `id`, `name`, `kit` facultatif (`boomBap`\|`trap`, M3), `drumRows` : `voice` (`kick`\|`snare`\|`clap`\|`hihat`\|`perc`\|`bass808`), `steps` (16 booléens) et `velocities` facultatives (16 valeurs de 0 à 1, M3), `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Sur la piste Batterie, chaque clip joue le pattern en boucle de `startBeat` à `startBeat + durationBeats` (M5) ; une piste Batterie sans clip est silencieuse. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
 
 Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`, `tracks`, `patterns` et `master` sont copiés à la sauvegarde (liste blanche : `ownerId`, `origin`, `formatVersion`, `revision` envoyés sont ignorés) ; le document complet est validé avant écriture. Un `audioFileId` doit désigner un fichier `Track` de l'utilisateur authentifié, sinon la sauvegarde est refusée (`400 « Fichier audio inconnu ou non autorisé »`) : un projet ne peut pas servir à lire le fichier d'un autre compte. Erreurs : `400` validation, révision absente, fichier audio d'un autre compte ou JSON invalide ; `401` sans JWT ; `404` projet absent, identifiant mal formé **ou** projet d'un autre utilisateur ; `409 {message, revision}` si la révision envoyée n'est plus la révision actuelle (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `413` corps JSON au-delà de 1 Mo ; `422` si le projet stocké a un `formatVersion` non pris en charge (il n'est pas réécrit).
 
@@ -342,6 +342,17 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 20 novembre 2026 — M3, partie 2 : nouveaux sons, kits et préécoute (#9)
+
+- **Bibliothèque de sons** : clap (trois rafales de bruit filtré rapprochées, puis une queue), percussion (tom court qui descend), 808 (sinus grave avec glissement d'attaque et saturation douce pour rester audible sur de petites enceintes) s'ajoutent au kick, à la snare et au hi-hat. Tout est **synthétisé en code** : aucun sample téléchargé ni distribué, donc aucune licence à vérifier ; le même code joue à l'écoute et à l'export.
+- **808 accordée** : elle joue la fondamentale de la tonalité du projet à l'octave 1 (do1 = 32,7 Hz à si1 = 61,7 Hz ; la mineur → 55 Hz), affichée dans le Drum Rack (« 808 (La) »).
+- **Kits** : chaque pattern choisit son kit. *Boom bap* : kick rond, hi-hat plus doux, 808 courte ; *Trap* : kick plus sec et plus haut, hi-hat plus brillant et plus court, 808 longue. Le kit est copié à la duplication d'un pattern.
+- **Préécoute** : ▶ devant chaque instrument le joue immédiatement avec le kit du pattern affiché (le contexte audio démarre au clic).
+- **Format** : `kit` facultatif par pattern et trois nouveaux instruments acceptés par le serveur ; les projets antérieurs ont des lignes vides pour ces instruments et le kit boom bap.
+- **Limites** : la 808 joue une seule note (pas de mélodie de basse : Piano Roll en M4) ; deux kits seulement ; pas de sample importé par l'utilisateur.
+
+**Vérifications** : backend `npm test` 33/33 (nouveaux instruments, kit facultatif, valeurs refusées) ; frontend `npm test` 217/217 (six instruments, kit copié à la duplication, 808 à 55 Hz en la et 32,7 Hz en do, projets antérieurs) ; `npm run build` réussi. Navigateur (Chromium) : préécoute des six instruments sans erreur ; export d'une mesure analysé (énergie sous ~120 Hz) : 0,071 sans 808, 0,113 avec la 808 sur les pas 1 et 9, 0,140 en kit Trap (808 plus longue) ; 360 px sans débordement, console sans erreur. **Non vérifié** : le rendu à l'oreille et sur de petites enceintes.
 
 ### 20 novembre 2026 — M3, partie 1 : patterns et vélocité (#9)
 

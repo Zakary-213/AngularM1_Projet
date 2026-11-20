@@ -1,7 +1,8 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { clipsUsingPattern } from '../../shared/audio/arrangement';
-import { DRUM_VOICES, DRUM_VOICE_LABELS, DrumVoice, MAX_PATTERNS, PATTERN_NAME_MAX_LENGTH, velocityLabel } from '../../shared/audio/drum-pattern';
+import { DRUM_KITS, DRUM_KIT_LABELS, DRUM_VOICES, DRUM_VOICE_LABELS, DrumKit, DrumVoice, MAX_PATTERNS, PATTERN_NAME_MAX_LENGTH, velocityLabel } from '../../shared/audio/drum-pattern';
+import { NOTE_NAMES } from '../../shared/audio/pitch/musical-scale';
 import { STEPS_PER_BAR, STEPS_PER_BEAT } from '../../shared/audio/music-time';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
 
@@ -24,6 +25,10 @@ export class DrumRackPanelComponent {
   readonly stepsPerBeat = STEPS_PER_BEAT;
   readonly maxPatterns = MAX_PATTERNS;
   readonly nameMaxLength = PATTERN_NAME_MAX_LENGTH;
+  readonly kits = DRUM_KITS;
+  readonly kitLabels = DRUM_KIT_LABELS;
+  /** Note de la 808 (fondamentale de la tonalité du projet). */
+  readonly bassNote = computed(() => NOTE_NAMES[this.session.projectKey().root]);
 
   readonly renaming = signal(false);
   readonly confirmDelete = signal(false);
@@ -43,6 +48,14 @@ export class DrumRackPanelComponent {
     const velocity = this.velocityAt(voice, step);
     const state = velocity > 0 ? `frappe ${velocityLabel(velocity)}` : 'vide';
     return `${this.voiceLabels[voice]}, pas ${step + 1}, ${state}`;
+  }
+
+  rowLabel(voice: DrumVoice): string {
+    return voice === 'bass808' ? `808 (${this.bassNote()})` : this.voiceLabels[voice];
+  }
+
+  onKitChange(event: Event): void {
+    this.session.setPatternKit(this.session.editedPatternId(), (event.target as HTMLSelectElement).value as DrumKit);
   }
 
   onPatternChange(event: Event): void {

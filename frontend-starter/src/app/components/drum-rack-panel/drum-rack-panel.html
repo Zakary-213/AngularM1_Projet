@@ -7,6 +7,14 @@
       }
     </select>
   </div>
+  <div class="field">
+    <label for="pattern-kit">Kit</label>
+    <select id="pattern-kit" (change)="onKitChange($event)">
+      @for (kit of kits; track kit) {
+        <option [value]="kit" [selected]="kit === session.editedPattern().kit">{{ kitLabels[kit] }}</option>
+      }
+    </select>
+  </div>
   <button type="button" (click)="create()" [disabled]="session.patterns().length >= maxPatterns" aria-label="Nouveau pattern">＋ Nouveau</button>
   <button type="button" (click)="duplicate()" [disabled]="session.patterns().length >= maxPatterns" aria-label="Dupliquer le pattern">Dupliquer</button>
   <button type="button" (click)="startRename()" aria-label="Renommer le pattern">Renommer</button>
@@ -32,14 +40,19 @@
 }
 @if (patternMessage(); as message) { <p class="error" role="alert">{{ message }}</p> }
 
-<p class="muted">Batterie synthétisée, sans sample. Cliquez une case pour la faire passer de vide à <b>forte</b>, <b>moyenne</b>, <b>douce</b> puis vide. ◀ ▶ décalent toutes les frappes d'un instrument d'un pas. Les modifications s'entendent pendant la lecture.</p>
+<p class="muted">Batterie synthétisée, sans sample (aucune licence à gérer). ▶ devant un instrument le fait entendre. Cliquez une case pour la faire passer de vide à <b>forte</b>, <b>moyenne</b>, <b>douce</b> puis vide ; ◀ ▶ décalent toutes les frappes d'un instrument d'un pas. La 808 joue la fondamentale de la tonalité du projet ({{ bassNote() }}). Les modifications s'entendent pendant la lecture.</p>
 <div class="sequencer-scroll">
   <table class="sequencer">
     <caption class="visually-hidden">{{ session.editedPattern().name }} : une mesure de 16 pas ; chaque bouton règle la force d'une frappe.</caption>
     <tbody>
       @for (voice of voices; track voice) {
         <tr>
-          <th scope="row">{{ voiceLabels[voice] }}</th>
+          <th scope="row">
+            <span class="row-head">
+              <button type="button" class="preview-button" (click)="session.previewVoice(voice)" [attr.aria-label]="'Écouter ' + rowLabel(voice)">▶</button>
+              {{ rowLabel(voice) }}
+            </span>
+          </th>
           <td class="shift">
             <button type="button" class="shift-button" (click)="session.shiftRow(voice, -1)" [attr.aria-label]="'Décaler les frappes de ' + voiceLabels[voice] + ' d’un pas plus tôt'">◀</button>
             <button type="button" class="shift-button" (click)="session.shiftRow(voice, 1)" [attr.aria-label]="'Décaler les frappes de ' + voiceLabels[voice] + ' d’un pas plus tard'">▶</button>

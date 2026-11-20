@@ -29,7 +29,9 @@ export const PROJECT_LIMITS = Object.freeze({
 });
 
 export const TRACK_TYPES = ["drum", "instrument", "audio", "vocal"];
-export const DRUM_VOICES = ["kick", "snare", "hihat"];
+// Instruments du Drum Rack (sons synthétisés) ; clap, percussion et 808 depuis la M3.
+export const DRUM_VOICES = ["kick", "snare", "clap", "hihat", "perc", "bass808"];
+export const DRUM_KITS = ["boomBap", "trap"];
 // Mêmes gammes que la correction vocale du studio (musical-scale.ts).
 export const SCALES = ["major", "minor", "harmonicMinor", "phrygianDominant"];
 
@@ -150,6 +152,8 @@ const patternSchema = new mongoose.Schema(
   {
     id: stableId,
     name: { type: String, required: true, trim: true, maxlength: 40 },
+    // Kit de sons du pattern ; absent dans les projets antérieurs à la M3 (boom bap).
+    kit: { type: String, enum: DRUM_KITS },
     drumRows: { type: [drumRowSchema], default: [] },
     notes: { type: [noteSchema], default: [], validate: maxItems(L.maxNotesPerPattern) },
   },

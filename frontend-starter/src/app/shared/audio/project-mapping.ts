@@ -1,4 +1,4 @@
-import { DEFAULT_PATTERN_ID, DRUM_VOICES, DrumPattern, DrumVoice, PatternEntry, createDemoPattern, createEmptyPattern } from './drum-pattern';
+import { DEFAULT_KIT, DEFAULT_PATTERN_ID, DRUM_KITS, DRUM_VOICES, DrumKit, DrumVoice, PatternEntry, createDemoPattern, createEmptyPattern } from './drum-pattern';
 
 export { createEmptyPattern } from './drum-pattern';
 import { BEATS_PER_BAR, DEFAULT_BPM, STEPS_PER_BAR, clampBpm } from './music-time';
@@ -91,6 +91,7 @@ export function toProjectContent(state: StudioState): ProjectContent {
     patterns: state.patterns.map(pattern => ({
       id: pattern.id,
       name: pattern.name,
+      kit: pattern.kit,
       drumRows: DRUM_VOICES.map(voice => ({ voice, steps: pattern.steps[voice].map(velocity => velocity > 0), velocities: [...pattern.steps[voice]] })),
     })),
     tracks: STUDIO_TRACKS.map(info => {
@@ -146,7 +147,7 @@ function readRow(row: { steps?: readonly boolean[]; velocities?: readonly number
 function readPatterns(project: MusicalProject): PatternEntry[] {
   if (!project.patterns?.length) {
     // Nouveau projet : rythme de départ pour « Créer une prod », grille vide pour « Importer une prod ».
-    return [{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: project.origin === 'import' ? createEmptyPattern() : createDemoPattern() }];
+    return [{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: project.origin === 'import' ? createEmptyPattern() : createDemoPattern(), kit: DEFAULT_KIT }];
   }
   return project.patterns.map(stored => {
     const steps = createEmptyPattern() as Record<DrumVoice, readonly number[]>;
@@ -156,7 +157,9 @@ function readPatterns(project: MusicalProject): PatternEntry[] {
         steps[row.voice as DrumVoice] = values;
       }
     }
-    return { id: stored.id, name: stored.name || 'Pattern', steps };
+    // Kit absent (projet antérieur) ou inconnu : boom bap.
+    const kit: DrumKit = DRUM_KITS.includes(stored.kit as DrumKit) ? (stored.kit as DrumKit) : DEFAULT_KIT;
+    return { id: stored.id, name: stored.name || 'Pattern', steps, kit };
   });
 }
 

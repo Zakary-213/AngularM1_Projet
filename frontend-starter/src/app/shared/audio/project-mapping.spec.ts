@@ -27,8 +27,8 @@ const state: StudioState = {
   bpm: 140,
   key: { root: 2, scale: 'harmonicMinor' },
   patterns: [
-    { id: 'pattern-1', name: 'Couplet', steps: toggleStep(createDemoPattern(), 'snare', 0) },
-    { id: 'pattern-refrain', name: 'Refrain', steps: cycleStep(cycleStep(createDemoPattern(), 'kick', 2), 'kick', 2) },
+    { id: 'pattern-1', name: 'Couplet', steps: toggleStep(createDemoPattern(), 'snare', 0), kit: 'boomBap' },
+    { id: 'pattern-refrain', name: 'Refrain', steps: cycleStep(cycleStep(createDemoPattern(), 'bass808', 2), 'bass808', 2), kit: 'trap' },
   ],
   mixer: updateTrack(updateTrack(createDefaultMixer(), 'drums', { volumeDb: -6, solo: true }), 'voice', { muted: true }),
   instrumental: { fileId: '64b0000000000000000000aa', label: 'beat.mp3', durationBeats: 186.67 },
@@ -68,9 +68,10 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(content.patterns.map(pattern => pattern.name)).toEqual(['Couplet', 'Refrain']);
     expect(content.patterns[0].drumRows.every(row => row.steps.length === 16 && row.velocities?.length === 16)).toBe(true);
     // Kick du refrain, pas 3 : vélocité moyenne (deux clics), lisible aussi comme simple frappe.
-    const kick = content.patterns[1].drumRows.find(row => row.voice === 'kick')!;
-    expect(kick.velocities![2]).toBe(0.7);
-    expect(kick.steps[2]).toBe(true);
+    const bass = content.patterns[1].drumRows.find(row => row.voice === 'bass808')!;
+    expect(bass.velocities![2]).toBe(0.7);
+    expect(bass.steps[2]).toBe(true);
+    expect(content.patterns.map(pattern => pattern.kit)).toEqual(['boomBap', 'trap']);
   });
 
   it('référence l’instrumentale par son fichier et porte son égaliseur, sans octets audio', () => {
@@ -119,6 +120,9 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     );
     expect(loaded.patterns[0].steps.kick[0]).toBe(1);
     expect(loaded.patterns[0].steps.kick[1]).toBe(0);
+    // Instruments ajoutés en M3 : lignes vides ; kit absent : boom bap.
+    expect(loaded.patterns[0].steps.bass808.every(velocity => velocity === 0)).toBe(true);
+    expect(loaded.patterns[0].kit).toBe('boomBap');
     expect(loaded.drumClips[0].patternId).toBe('p-old');
   });
 
@@ -137,7 +141,7 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
   });
 
   it('nouveau projet : rythme de départ pour « Créer », grille vide pour « Importer »', () => {
-    expect(fromProject(project({ origin: 'create' })).patterns).toEqual([{ id: 'pattern-1', name: 'Pattern 01', steps: createDemoPattern() }]);
+    expect(fromProject(project({ origin: 'create' })).patterns).toEqual([{ id: 'pattern-1', name: 'Pattern 01', steps: createDemoPattern(), kit: 'boomBap' }]);
     expect(fromProject(project({ origin: 'import' })).patterns[0].steps).toEqual(createEmptyPattern());
   });
 

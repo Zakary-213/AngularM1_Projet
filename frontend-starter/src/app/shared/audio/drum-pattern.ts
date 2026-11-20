@@ -1,14 +1,24 @@
 import { STEPS_PER_BAR } from './music-time';
 
-export type DrumVoice = 'kick' | 'snare' | 'hihat';
+export type DrumVoice = 'kick' | 'snare' | 'clap' | 'hihat' | 'perc' | 'bass808';
 
-export const DRUM_VOICES: readonly DrumVoice[] = ['kick', 'snare', 'hihat'];
+/** Ordre des lignes du Drum Rack. */
+export const DRUM_VOICES: readonly DrumVoice[] = ['kick', 'snare', 'clap', 'hihat', 'perc', 'bass808'];
 
 export const DRUM_VOICE_LABELS: Readonly<Record<DrumVoice, string>> = {
   kick: 'Kick',
   snare: 'Snare',
+  clap: 'Clap',
   hihat: 'Hi-hat',
+  perc: 'Percussion',
+  bass808: '808',
 };
+
+/** Kit de sons d'un pattern (réglages du synthé, voir drum-synth.ts). */
+export type DrumKit = 'boomBap' | 'trap';
+export const DRUM_KITS: readonly DrumKit[] = ['boomBap', 'trap'];
+export const DRUM_KIT_LABELS: Readonly<Record<DrumKit, string>> = { boomBap: 'Boom bap', trap: 'Trap' };
+export const DEFAULT_KIT: DrumKit = 'boomBap';
 
 /**
  * Pattern d'une mesure : pour chaque instrument, 16 pas portant la vélocité de la
@@ -25,6 +35,7 @@ export interface PatternEntry {
   readonly id: string;
   readonly name: string;
   readonly steps: DrumPattern;
+  readonly kit: DrumKit;
 }
 
 export const MAX_PATTERNS = 64;
@@ -46,12 +57,13 @@ function clampVelocity(velocity: number): number {
 }
 
 export function createEmptyPattern(): DrumPattern {
-  return { kick: rowFrom({}), snare: rowFrom({}), hihat: rowFrom({}) };
+  return { kick: rowFrom({}), snare: rowFrom({}), clap: rowFrom({}), hihat: rowFrom({}), perc: rowFrom({}), bass808: rowFrom({}) };
 }
 
 /** Rythme boom-bap de départ ; les hi-hats en contretemps sont plus doux pour faire « respirer » le groove. */
 export function createDemoPattern(): DrumPattern {
   return {
+    ...createEmptyPattern(),
     kick: rowFrom({ 0: 1, 7: 0.7, 10: 1 }),
     snare: rowFrom({ 4: 1, 12: 1 }),
     hihat: rowFrom({ 0: 1, 2: 0.4, 4: 1, 6: 0.4, 8: 1, 10: 0.4, 12: 1, 14: 0.4 }),

@@ -61,4 +61,14 @@ describe('StudioSessionService — bibliothèque de patterns', () => {
     for (let i = 1; i < MAX_PATTERNS; i++) session.createPattern();
     expect(session.createPattern()).toBeNull();
   });
+
+  it('M3 : kit par pattern, copié à la duplication ; 808 accordée sur la tonalité', () => {
+    session.setPatternKit('pattern-1', 'trap');
+    const copy = session.duplicatePattern('pattern-1')!;
+    expect(session.patterns().find(p => p.id === copy)?.kit).toBe('trap');
+    session.projectKey.set({ root: 9, scale: 'minor' });
+    expect(session.bassHz()).toBeCloseTo(55, 6); // la1
+    session.projectKey.set({ root: 0, scale: 'major' });
+    expect(session.bassHz()).toBeCloseTo(32.703, 3); // do1
+  });
 });

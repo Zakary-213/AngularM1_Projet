@@ -64,3 +64,15 @@ export function peakLevel(channels: readonly Float32Array[]): number {
   }
   return peak;
 }
+
+/** Niveau efficace (RMS) d'une trame, entre 0 et 1 : sert à l'indicateur de niveau du micro. */
+export function rmsLevel(samples: Float32Array): number {
+  if (samples.length === 0) {
+    return 0;
+  }
+  let sum = 0;
+  for (const sample of samples) {
+    sum += sample * sample;
+  }
+  return Math.sqrt(sum / samples.length);
+}

@@ -2,6 +2,8 @@ import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { createApp } from "../src/app.js";
 import { MusicalProject } from "../src/models/MusicalProject.js";
 import { Track } from "../src/models/Track.js";
@@ -16,6 +18,8 @@ import { Track } from "../src/models/Track.js";
 const store = new Map();
 /** Fichiers audio de la bibliothèque : identifiant → propriétaire. */
 const audioFiles = new Map();
+/** Fichiers écrits sur disque par les tests d'upload, supprimés à la fin. */
+const uploadedNames = [];
 
 function matches(document, filter) {
   return Object.entries(filter).every(([key, value]) => String(document.get(key)) === String(value));
@@ -56,6 +60,13 @@ function installFakeStore() {
     document.updatedAt = new Date();
     return document;
   });
+  mock.method(Track, "create", async (data) => {
+    const document = new Track(data);
+    await document.validate();
+    audioFiles.set(String(document._id), String(data.ownerId));
+    uploadedNames.push(data.storedName);
+    return document;
+  });
   mock.method(Track, "countDocuments", async ({ _id, ownerId }) =>
     _id.$in.filter((id) => audioFiles.get(String(id)) === String(ownerId)).length,
   );
@@ -78,7 +89,8 @@ test.before(async () => {
   base = `http://127.0.0.1:${server.address().port}/api/projects`;
 });
 
-test.after(() => {
+test.after(async () => {
+  await Promise.all(uploadedNames.map((name) => fs.rm(path.resolve("data/uploads", name), { force: true })));
   mock.restoreAll();
   server.close();
 });
@@ -272,4 +284,39 @@ test("M6 : égaliseur borné à ±12 dB", async () => {
     tracks: [{ id: "instrumental", name: "Instrumentale", type: "audio", eq: { lowDb: 30 }, clips: [] }],
   });
   assert.equal(response.status, 400);
+});
+
+const voiceTrack = (clips, activeClipId) => ({ id: "voice", name: "Voix principale", type: "vocal", clips, ...(activeClipId ? { activeClipId } : {}) });
+
+test("M8 : plusieurs prises sur la piste Voix, la prise active doit être l'une d'elles", async () => {
+  const { body: project } = await createProject(alice);
+  const files = [new mongoose.Types.ObjectId().toString(), new mongoose.Types.ObjectId().toString()];
+  files.forEach((id) => audioFiles.set(id, alice));
+  const clips = files.map((audioFileId, i) => ({ id: `take-${i}`, startBeat: i * 4, durationBeats: 8, offsetSeconds: i === 0 ? 0.09 : 0, audioFileId, label: `Prise ${i + 1}` }));
+
+  const saved = await call(alice, "PUT", `/${project.id}`, { revision: 0, tracks: [voiceTrack(clips, "take-1")] });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.tracks[0].activeClipId, "take-1");
+  assert.equal(saved.body.tracks[0].clips.length, 2);
+  assert.equal(saved.body.tracks[0].clips[0].offsetSeconds, 0.09);
+
+  const invalid = await call(alice, "PUT", `/${project.id}`, { revision: 1, tracks: [voiceTrack(clips, "take-inconnue")] });
+  assert.equal(invalid.status, 400);
+});
+
+async function uploadTrack(user, bytes, type, name) {
+  const form = new FormData();
+  form.append("audio", new Blob([bytes], { type }), name);
+  form.append("title", "Prise 1 · Projet");
+  const response = await fetch(base.replace("/projects", "/tracks"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${jwt.sign({ sub: user }, secret)}` },
+    body: form,
+  });
+  return response.status;
+}
+
+test("M8 : une prise WebM (MediaRecorder) est acceptée par l'upload, un fichier texte est refusé", async () => {
+  assert.equal(await uploadTrack(alice, Buffer.from("webm"), "audio/webm", "Prise 1.webm"), 201);
+  assert.equal(await uploadTrack(alice, Buffer.from("texte"), "text/plain", "notes.txt"), 400);
 });

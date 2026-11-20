@@ -3,7 +3,7 @@
 <fieldset class="box">
   <legend>1. Voix à corriger ({{ maxSeconds }} s maximum)</legend>
   <div class="row">
-    <button type="button" class="button" (click)="useStudioTake()" [disabled]="!session.take()">Dernière prise du studio</button>
+    <button type="button" class="button" (click)="useStudioTake()" [disabled]="!session.take()">Prise active du studio</button>
     <button type="button" class="button" (click)="useTestVoice()">Voix de test</button>
     <div class="field">
       <label for="pitch-file">Ou un fichier vocal MP3 / WAV</label>

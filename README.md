@@ -87,7 +87,7 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Import | Instrumentale MP3 / WAV envoyée dans vos fichiers audio, forme d'onde, égaliseur 3 bandes, retrouvée à la réouverture du projet | ✅ Fonctionnel (M6) |
 | Mix | Volume, mute et solo par piste (écoute et export) faits ; pan, EQ, réverbération, delay | ⏳ À faire (M7) |
 | Voix | Prise micro (bouton ●) et onglet « Correction vocale » : 6 styles (Naturel, Rap, Trap, Drill, Raï, Robot) + dose d'effet, mode personnalisé (gamme, notes, humanisation, transposition, égaliseur), courbe de hauteur, calcul dans un Web Worker, version corrigée utilisable sur la piste Voix | 🚧 Partiel (M9) |
-| Voix (studio) | Enregistrement multiprise, correction sur les pistes | ⏳ À faire (M8, M9) |
+| Voix (studio) | Jusqu'à 8 prises sur la piste Voix (prise active, renommer, supprimer, décaler par 10 ms), choix du micro, indicateur de niveau et alerte de saturation, prises envoyées dans vos fichiers audio et retrouvées à la réouverture | ✅ Fonctionnel (M8) |
 | ✍️ Paroles IA | Génération de couplets selon le thème et la cadence (BPM, mesures, flow), édition, prompteur synchronisé | ⏳ À faire (M12) |
 | Livraison | Sauvegarde complète, export WAV, tests de bout en bout | ⏳ À faire (M10, M11) |
 
@@ -266,7 +266,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **154 / 154 tests frontend** et **29 / 29 tests backend** réussis, build OK (20 novembre 2026).
+Dernier résultat connu : **172 / 172 tests frontend** et **31 / 31 tests backend** réussis, build OK (20 novembre 2026).
 
 ---
 
@@ -291,7 +291,7 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 
 `User` contient `id`, `name`, `email`, `createdAt`, `hasAvatar` et `avatarUpdatedAt` ; le nom de stockage de la photo n'est jamais exposé. Photo de profil : le type annoncé **et** la signature binaire du fichier sont vérifiés (`400` sinon), `413` au-delà de 2 Mo, l'ancienne photo est supprimée après remplacement.
 
-`Page<Track>` contient `items`, `page`, `limit`, `total` et `pages`. Formats audio acceptés : MP3, WAV, OGG et M4A, 25 Mo maximum. Erreurs courantes : `400` validation, `401` authentification, `404` ressource absente ou non autorisée, `409` email déjà utilisé.
+`Page<Track>` contient `items`, `page`, `limit`, `total` et `pages`. Formats audio acceptés : MP3, WAV, OGG, M4A et WebM (prises enregistrées par MediaRecorder), 25 Mo maximum. Erreurs courantes : `400` validation, `401` authentification, `404` ressource absente ou non autorisée, `409` email déjà utilisé.
 
 ### Projets musicaux (format v1, M1 #7)
 
@@ -308,7 +308,7 @@ Schéma : `backend/src/models/MusicalProject.js` ; routes : `backend/src/routes/
 
 `ProjectSummary` : `id`, `title`, `origin`, `bpm`, `key`, `trackCount`, `formatVersion`, `createdAt`, `updatedAt`.
 
-`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `clips[]`), `patterns[]` (64 max. ; `drumRows` de 16 pas, `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `activeClipId` facultatif (prise jouée, doit désigner un clip de la piste), `clips[]`), `patterns[]` (64 max. ; `drumRows` de 16 pas, `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
 
 Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`, `tracks`, `patterns` et `master` sont copiés à la sauvegarde (liste blanche : `ownerId`, `origin`, `formatVersion`, `revision` envoyés sont ignorés) ; le document complet est validé avant écriture. Un `audioFileId` doit désigner un fichier `Track` de l'utilisateur authentifié, sinon la sauvegarde est refusée (`400 « Fichier audio inconnu ou non autorisé »`) : un projet ne peut pas servir à lire le fichier d'un autre compte. Erreurs : `400` validation, révision absente, fichier audio d'un autre compte ou JSON invalide ; `401` sans JWT ; `404` projet absent, identifiant mal formé **ou** projet d'un autre utilisateur ; `409 {message, revision}` si la révision envoyée n'est plus la révision actuelle (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `413` corps JSON au-delà de 1 Mo ; `422` si le projet stocké a un `formatVersion` non pris en charge (il n'est pas réécrit).
 
@@ -340,6 +340,21 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 20 novembre 2026 — M8 : enregistrement vocal multiprise (#14)
+
+- **Prises** : jusqu'à 8 prises sur la piste Voix (`MAX_TAKES`). Une seule est jouée et exportée : la **prise active**, choisie dans la liste (bouton radio + bordure, pas seulement une couleur). Renommer (40 caractères max.), supprimer avec confirmation (la précédente devient active, l'ObjectURL est libéré), décaler par pas de 10 ms (±1 s autour de la position enregistrée) pour corriger à l'oreille la latence que l'estimation du navigateur n'a pas compensée. Changer de prise active efface la correction vocale de l'ancienne : une correction appartient à une prise.
+- **Micro** : choix de l'entrée (`enumerateDevices`, noms disponibles après la première autorisation ; micro débranché → retour à l'entrée par défaut, signalé). Indicateur de niveau (`<meter>` + texte en dB pour les lecteurs d'écran) mis à jour 10 fois par seconde depuis un `AnalyserNode` jamais relié aux haut-parleurs (pas de larsen), alerte « Saturation » au-delà de −0,2 dBFS pendant une seconde. Micro fermé à l'arrêt de la prise.
+- **Sauvegarde** : dans un projet, chaque prise est envoyée dès l'arrêt de l'enregistrement par `POST /api/tracks` (nouveau type accepté : `audio/webm`, format de Chrome, Edge et Firefox), avec progression et « Réessayer l'envoi » par prise. Le projet référence chaque prise envoyée comme clip de la piste Voix (`audioFileId`, nom, position, durée) et la prise active (`activeClipId`, validée côté serveur). Une position négative (prise commencée avant le morceau à cause de la compensation de latence) est stockée en `offsetSeconds`. À l'ouverture, les prises sont récupérées et remises dans l'ordre ; une prise supprimée de la bibliothèque est signalée et peut être retirée du projet. L'enregistrement original n'est jamais modifié.
+- **Interface** : liste des prises et barre de l'instrumentale sorties de la zone de timeline qui défile, pour rester lisibles sur mobile ; forme d'onde de la prise active sur la piste Voix (composant de M6).
+- **Limites** : une seule prise jouée à la fois (pas de superposition de prises ni de comping par segments) ; la version corrigée d'une prise n'est pas sauvegardée (M10) ; supprimer une prise ne supprime pas son fichier de la bibliothèque ; le décalage est manuel, sans mesure automatique de la latence aller-retour.
+
+**Vérifications**
+
+- Backend `npm test` : 31/31, dont 2 nouveaux : plusieurs prises avec prise active (inconnue → `400`), upload WebM accepté et fichier texte refusé.
+- Frontend `npm test` : 172/172, dont les prises dans la session (ordre de restauration, prise active et correction effacée, renommage borné, suppression et prise suivante, limite de 8, décalage borné), le service projet (envoi WebM puis sauvegarde avec prise active et position, échec puis nouvel essai, récupération à l'ouverture sans modification en attente, prise supprimée puis retrait, session libre locale), la conversion du format (positions négatives, prise active absente) et les outils (liste des micros, format de fichier, niveau RMS). `npm run build` réussi.
+- Navigateur (Chromium avec micro simulé, `npm start` + vrai backend Express et vraie route d'upload, MongoDB remplacé par un stockage en mémoire) : deux prises enregistrées et envoyées, micros simulés listés après autorisation, indicateur de niveau qui suit les bips du micro simulé, choix de la prise active, renommage, sauvegarde puis rechargement (ordre, noms et prise active retrouvés, état « Sauvegardé »), lecture, suppression, décalage de +20 ms conservé après rechargement, 360 px sans débordement. Le parcours M6 a été rejoué sans régression.
+- **Non vérifiés** : une vraie voix au casque (le micro simulé n'émet que des bips), Firefox et Safari (formats Ogg et MP4), le refus de permission dans un vrai navigateur (couvert par les tests des messages d'erreur de M0), un vrai MongoDB.
 
 ### 20 novembre 2026 — M6 : import d'une instrumentale MP3 / WAV (#12)
 

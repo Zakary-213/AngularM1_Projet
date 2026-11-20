@@ -57,6 +57,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-
 .inline-link { text-decoration: underline; }
 
 .clip-waveform { height: 34px; margin-top: 4px; }
+.input-meter { width: 90px; height: 10px; }
+.clip-warning { color: #ff8a80; font-size: 11px; }
 .instrumental-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 12px; }
 .instrumental-bar p { margin: 0; }
 .instrumental-bar progress { width: 160px; max-width: 100%; accent-color: var(--accent); }

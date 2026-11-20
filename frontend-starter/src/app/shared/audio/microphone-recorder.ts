@@ -39,6 +39,29 @@ export function takeStartSeconds(recorderStartTime: number, songStartTime: numbe
   return recorderStartTime - songStartTime - roundTripLatencySeconds;
 }
 
+/** Entrée audio proposée dans la liste « Micro ». */
+export interface InputDevice {
+  readonly deviceId: string;
+  readonly label: string;
+}
+
+/**
+ * Entrées audio disponibles. Les noms ne sont fournis par le navigateur qu'après
+ * une autorisation du micro : avant, un nom générique est affiché.
+ */
+export function toInputDevices(devices: readonly MediaDeviceInfo[]): InputDevice[] {
+  return devices
+    .filter(device => device.kind === 'audioinput' && device.deviceId !== '')
+    .map((device, index) => ({ deviceId: device.deviceId, label: device.label || `Micro ${index + 1}` }));
+}
+
+/** Type MIME sans paramètres et extension de fichier, pour l'envoi d'une prise au serveur. */
+export function recordingFileFormat(mimeType: string): { type: string; extension: string } {
+  const type = mimeType.split(';')[0].trim().toLowerCase();
+  const extension = type === 'audio/mp4' ? 'm4a' : type === 'audio/ogg' ? 'ogg' : type === 'audio/wav' ? 'wav' : 'webm';
+  return { type, extension };
+}
+
 export interface RecordedTake {
   readonly blob: Blob;
   readonly mimeType: string;
@@ -55,8 +78,16 @@ export class MicrophoneRecorder {
     return this.recorder?.state === 'recording';
   }
 
-  /** Demande l'accès au micro. À appeler uniquement depuis l'action « Enregistrer ». */
-  async open(): Promise<void> {
+  /** Flux du micro ouvert, pour l'indicateur de niveau (jamais envoyé aux haut-parleurs). */
+  get inputStream(): MediaStream | null {
+    return this.stream;
+  }
+
+  /**
+   * Demande l'accès au micro. À appeler uniquement depuis l'action « Enregistrer ».
+   * `deviceId` : entrée choisie dans la liste ; absente, l'entrée par défaut du système.
+   */
+  async open(deviceId?: string | null): Promise<void> {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       throw new Error("Ce navigateur ne permet pas d'enregistrer le micro.");
     }
@@ -67,7 +98,12 @@ export class MicrophoneRecorder {
     this.release();
     // Traitements « visio » désactivés : ils dégradent une voix chantée ou rappée.
     this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+      },
     });
     this.recorder = new MediaRecorder(this.stream, { mimeType });
   }

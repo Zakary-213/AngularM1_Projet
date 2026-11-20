@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoPattern, toggleStep } from './drum-pattern';
-import { StudioState, contentFingerprint, createEmptyPattern, fromProject, secondsToBeats, toProjectContent } from './project-mapping';
+import { StudioState, contentFingerprint, createEmptyPattern, fromProject, secondsToBeats, takeClipPosition, takeStartFromClip, toProjectContent } from './project-mapping';
 import { FLAT_THREE_BAND_EQ } from './three-band-eq';
 import { createDefaultMixer, updateTrack } from './track-mix';
 import { MusicalProject } from '../models/musical-project.model';
@@ -30,6 +30,12 @@ const state: StudioState = {
   mixer: updateTrack(updateTrack(createDefaultMixer(), 'drums', { volumeDb: -6, solo: true }), 'voice', { muted: true }),
   instrumental: { fileId: '64b0000000000000000000aa', label: 'beat.mp3', durationBeats: 186.67 },
   instrumentalEq: { lowDb: 3, midDb: -2, highDb: 1 },
+  takes: [
+    // Début négatif : la compensation de latence fait commencer la prise juste avant le morceau.
+    { id: 'take-a', fileId: '64b0000000000000000000b1', label: 'Prise 1', startSeconds: -0.09, durationSeconds: 12 },
+    { id: 'take-b', fileId: '64b0000000000000000000b2', label: 'Refrain', startSeconds: 6, durationSeconds: 30 },
+  ],
+  activeTakeId: 'take-b',
 };
 
 describe('conversion studio ↔ format de sauvegarde v1', () => {
@@ -61,6 +67,32 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(noInstrumental.clips).toEqual([]);
   });
 
+  it('sauvegarde les prises envoyées comme clips de la piste Voix, avec la prise active', () => {
+    const voice = toProjectContent(state).tracks.find(track => track.id === 'voice')!;
+    expect(voice.activeClipId).toBe('take-b');
+    expect(voice.clips).toEqual([
+      { id: 'take-a', startBeat: 0, offsetSeconds: 0.09, durationBeats: 28, audioFileId: '64b0000000000000000000b1', label: 'Prise 1' },
+      { id: 'take-b', startBeat: 14, offsetSeconds: 0, durationBeats: 70, audioFileId: '64b0000000000000000000b2', label: 'Refrain' },
+    ]);
+    const none = toProjectContent({ ...state, takes: [], activeTakeId: null }).tracks.find(track => track.id === 'voice')!;
+    expect(none.clips).toEqual([]);
+    expect(none.activeClipId).toBeUndefined();
+  });
+
+  it('position d’une prise : secondes ↔ temps, y compris un début négatif', () => {
+    expect(takeClipPosition(6, 140)).toEqual({ startBeat: 14, offsetSeconds: 0 });
+    expect(takeClipPosition(-0.25, 140)).toEqual({ startBeat: 0, offsetSeconds: 0.25 });
+    expect(takeStartFromClip(14, 0, 140)).toBeCloseTo(6, 9);
+    expect(takeStartFromClip(0, 0.25, 140)).toBe(-0.25);
+  });
+
+  it('prise active absente ou inconnue : la dernière prise devient active', () => {
+    const content = toProjectContent(state);
+    const voice = content.tracks.find(track => track.id === 'voice')!;
+    const loaded = fromProject(project({ ...content, tracks: content.tracks.map(track => (track.id === 'voice' ? { ...voice, activeClipId: 'inconnue' } : track)) }));
+    expect(loaded.activeTakeId).toBe('take-b');
+  });
+
   it('convertit une durée en temps au tempo du projet', () => {
     expect(secondsToBeats(60, 90)).toBe(90);
     expect(secondsToBeats(10, 140)).toBe(23.33);
@@ -87,6 +119,8 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(loaded.pattern).toEqual(createEmptyPattern());
     expect(loaded.instrumental).toBeNull();
     expect(loaded.instrumentalEq).toEqual(FLAT_THREE_BAND_EQ);
+    expect(loaded.takes).toEqual([]);
+    expect(loaded.activeTakeId).toBeNull();
   });
 
   it('l’empreinte change avec une modification et revient à l’identique après annulation', () => {

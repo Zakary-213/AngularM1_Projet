@@ -282,17 +282,17 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **But :** poser sa voix sur une prod créée ou importée.
 
-- [ ] Demander l'autorisation d'accéder au microphone.
-- [ ] Sélectionner le microphone si plusieurs entrées sont disponibles.
-- [ ] Prévoir une piste vocale et un bouton **● Record**.
-- [ ] Jouer la prod au casque pendant l'enregistrement.
-- [ ] Enregistrer la voix sur une **piste indépendante**.
-- [ ] Stopper l'enregistrement et afficher sa **forme d'onde**.
-- [ ] Réécouter immédiatement **prod + voix**.
-- [ ] Effectuer plusieurs prises ; supprimer et recommencer une prise.
-- [ ] Déplacer ou décaler une prise pour corriger une éventuelle latence.
-- [ ] Sauvegarder les prises et conserver les originaux.
-- [ ] Gérer un refus de permission ou un micro indisponible.
+- [x] Demander l'autorisation d'accéder au microphone.
+- [x] Sélectionner le microphone si plusieurs entrées sont disponibles.
+- [x] Prévoir une piste vocale et un bouton **● Record**.
+- [x] Jouer la prod au casque pendant l'enregistrement.
+- [x] Enregistrer la voix sur une **piste indépendante**.
+- [x] Stopper l'enregistrement et afficher sa **forme d'onde**.
+- [x] Réécouter immédiatement **prod + voix**.
+- [x] Effectuer plusieurs prises ; supprimer et recommencer une prise.
+- [x] Déplacer ou décaler une prise pour corriger une éventuelle latence.
+- [x] Sauvegarder les prises et conserver les originaux.
+- [x] Gérer un refus de permission ou un micro indisponible.
 
 **Livrable :** piste(s) vocales enregistrées et synchronisées.
 

@@ -1,8 +1,9 @@
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { AudioEngineService } from '../audio/audio-engine.service';
-import { StudioSessionService } from '../audio/studio-session.service';
-import { InstrumentalRef, StudioState, contentFingerprint, fromProject, secondsToBeats, toProjectContent } from '../audio/project-mapping';
+import { StudioSessionService, VocalTake } from '../audio/studio-session.service';
+import { recordingFileFormat } from '../audio/microphone-recorder';
+import { InstrumentalRef, StudioState, TakeRef, contentFingerprint, fromProject, secondsToBeats, toProjectContent } from '../audio/project-mapping';
 import { MusicalProject, PROJECT_FORMAT_VERSION } from '../models/musical-project.model';
 import { ProjectService } from './project.service';
 import { TrackService } from './track.service';
@@ -16,6 +17,9 @@ export type InstrumentalUpload =
   | { readonly state: 'idle' }
   | { readonly state: 'uploading'; readonly progress: number }
   | { readonly state: 'error'; readonly message: string };
+
+/** Envoi d'une prise vocale : en cours (avec progression) ou en échec. Absente : rien en cours. */
+export type TakeUpload = { readonly state: 'uploading'; readonly progress: number } | { readonly state: 'error'; readonly message: string };
 
 /** Récupération du fichier de l'instrumentale à l'ouverture d'un projet. */
 export type InstrumentalDownload = 'idle' | 'loading' | 'error';
@@ -49,7 +53,17 @@ export class StudioProjectService {
   /** Dernier fichier choisi, gardé pour un nouvel essai d'envoi. */
   private pendingFile: { file: File; buffer: AudioBuffer } | null = null;
 
-  readonly uploading = computed(() => this.upload().state === 'uploading');
+  /** Prises telles qu'elles seront sauvegardées : seulement celles déjà envoyées au serveur. */
+  readonly takeRefs = signal<TakeRef[]>([]);
+  /** État d'envoi par identifiant de prise. */
+  readonly takeUploads = signal<Readonly<Record<string, TakeUpload>>>({});
+  /** Prises du projet qui n'ont pas pu être récupérées, par identifiant (message à afficher). */
+  readonly takeErrors = signal<Readonly<Record<string, string>>>({});
+  readonly takesLoading = signal(0);
+
+  readonly uploading = computed(
+    () => this.upload().state === 'uploading' || Object.values(this.takeUploads()).some(upload => upload.state === 'uploading'),
+  );
 
   private readonly currentState = computed<StudioState>(() => {
     const ref = this.instrumentalRef();
@@ -63,6 +77,8 @@ export class StudioProjectService {
       // Durée recalculée depuis le fichier quand il est chargé : elle suit le tempo courant.
       instrumental: ref && loaded?.fileId === ref.fileId ? { ...ref, durationBeats: secondsToBeats(loaded.buffer.duration, bpm) } : ref,
       instrumentalEq: this.session.instrumentalEq(),
+      takes: this.takeRefs(),
+      activeTakeId: this.takeRefs().some(take => take.id === this.session.activeTakeId()) ? this.session.activeTakeId() : null,
     };
   });
 
@@ -184,6 +200,132 @@ export class StudioProjectService {
     }
   }
 
+  /** Termine la prise en cours ; dans un projet, l'envoie aussitôt à la bibliothèque. */
+  async stopRecording(): Promise<void> {
+    const previous = this.session.lastRecordedTake();
+    await this.session.stopRecording();
+    const take = this.session.lastRecordedTake();
+    if (take && take !== previous && this.project()) {
+      this.sendTake(take);
+    }
+  }
+
+  retryTakeUpload(id: string): void {
+    const take = this.session.takes().find(candidate => candidate.id === id);
+    if (take && this.takeUploads()[id]?.state === 'error') {
+      this.sendTake(take);
+    }
+  }
+
+  selectTake(id: string): void {
+    this.session.selectTake(id);
+  }
+
+  renameTake(id: string, name: string): boolean {
+    if (!this.session.renameTake(id, name)) {
+      return false;
+    }
+    const label = this.session.takes().find(take => take.id === id)!.name;
+    this.takeRefs.update(refs => refs.map(ref => (ref.id === id ? { ...ref, label } : ref)));
+    return true;
+  }
+
+  /** Décale une prise ; la position sauvegardée suit si la prise est déjà envoyée. */
+  shiftTake(id: string, deltaSeconds: number): void {
+    const startSeconds = this.session.shiftTake(id, deltaSeconds);
+    if (startSeconds !== null) {
+      this.takeRefs.update(refs => refs.map(ref => (ref.id === id ? { ...ref, startSeconds } : ref)));
+    }
+  }
+
+  /** Retire une prise du projet. Son fichier reste dans la bibliothèque (page Fichiers audio). */
+  removeTake(id: string): void {
+    if (this.takeUploads()[id]?.state === 'uploading') {
+      return;
+    }
+    this.session.removeTake(id);
+    this.takeRefs.update(refs => refs.filter(ref => ref.id !== id));
+    this.takeUploads.update(({ [id]: _removed, ...rest }) => rest);
+    this.takeErrors.update(({ [id]: _removed, ...rest }) => rest);
+  }
+
+  private sendTake(take: VocalTake): void {
+    const { type, extension } = recordingFileFormat(take.mimeType);
+    // Nom de fichier indicatif : le serveur génère son propre nom de stockage.
+    const file = new File([take.blob], `${take.name}.${extension}`, { type });
+    const title = `${take.name} · ${this.project()?.title ?? 'Studio'}`;
+    this.setTakeUpload(take.id, { state: 'uploading', progress: 0 });
+    this.tracks.upload(file, title).subscribe({
+      next: event => {
+        if (event.type === HttpEventType.UploadProgress) {
+          this.setTakeUpload(take.id, { state: 'uploading', progress: event.total ? Math.round((100 * event.loaded) / event.total) : 0 });
+          return;
+        }
+        if (event.type !== HttpEventType.Response || !event.body) {
+          return;
+        }
+        const fileId = event.body.id;
+        this.setTakeUpload(take.id, null);
+        // Supprimée pendant l'envoi : le fichier reste dans la bibliothèque, mais pas dans le projet.
+        const current = this.session.takes().find(candidate => candidate.id === take.id);
+        if (!current) {
+          return;
+        }
+        this.session.markTakeUploaded(take.id, fileId);
+        this.takeRefs.update(refs => [
+          ...refs,
+          { id: take.id, fileId, label: current.name, startSeconds: current.startSeconds, durationSeconds: take.buffer.duration },
+        ]);
+        console.log('[studio-project] prise envoyée', { id: take.id, fileId });
+      },
+      error: (error: unknown) => {
+        console.error('[studio-project] envoi de la prise impossible', error);
+        this.setTakeUpload(take.id, { state: 'error', message: this.uploadErrorMessage(error) });
+      },
+    });
+  }
+
+  private setTakeUpload(id: string, upload: TakeUpload | null): void {
+    this.takeUploads.update(({ [id]: _previous, ...rest }) => (upload ? { ...rest, [id]: upload } : rest));
+  }
+
+  private fetchTake(ref: TakeRef, order: readonly string[]): void {
+    this.takesLoading.update(count => count + 1);
+    this.tracks.audio(ref.fileId).subscribe({
+      next: blob => {
+        void this.decodeTake(ref, blob, order);
+      },
+      error: (error: unknown) => {
+        console.error('[studio-project] prise introuvable', error);
+        this.takesLoading.update(count => count - 1);
+        this.takeErrors.update(errors => ({
+          ...errors,
+          [ref.id]:
+            error instanceof HttpErrorResponse && error.status === 404
+              ? `« ${ref.label} » n’existe plus dans votre bibliothèque.`
+              : `« ${ref.label} » n’a pas pu être récupérée.`,
+        }));
+      },
+    });
+  }
+
+  private async decodeTake(ref: TakeRef, blob: Blob, order: readonly string[]): Promise<void> {
+    try {
+      const buffer = await this.engine.decode(await blob.arrayBuffer());
+      if (this.takeRefs().some(candidate => candidate.id === ref.id)) {
+        this.session.restoreTake(
+          { id: ref.id, name: ref.label, blob, fileId: ref.fileId, buffer, url: URL.createObjectURL(blob), mimeType: blob.type, startSeconds: ref.startSeconds, latencyMs: 0 },
+          order,
+        );
+      }
+    } catch (error) {
+      console.error('[studio-project] décodage de la prise impossible', error);
+      this.takeErrors.update(errors => ({ ...errors, [ref.id]: `« ${ref.label} » ne peut pas être décodée par ce navigateur.` }));
+    } finally {
+      this.takesLoading.update(count => count - 1);
+    }
+  }
+
   private sendPendingFile(): void {
     const pending = this.pendingFile;
     if (!pending) {
@@ -265,11 +407,17 @@ export class StudioProjectService {
     this.download.set('idle');
     this.downloadError.set(null);
     this.instrumentalRef.set(state.instrumental);
+    this.session.clearTakes(state.activeTakeId);
+    this.takeRefs.set([...state.takes]);
+    this.takeUploads.set({});
+    this.takeErrors.set({});
     this.project.set(project);
     this.savedFingerprint.set(contentFingerprint(state));
     if (state.instrumental) {
       this.fetchInstrumental(state.instrumental);
     }
+    const order = state.takes.map(take => take.id);
+    state.takes.forEach(take => this.fetchTake(take, order));
   }
 
   private fail(message: string): void {

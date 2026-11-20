@@ -37,6 +37,8 @@ export interface ProjectTrack {
   readonly solo?: boolean;
   /** Égaliseur 3 bandes en dB (graves, médiums, aigus). */
   readonly eq?: { readonly lowDb: number; readonly midDb: number; readonly highDb: number };
+  /** Prise jouée parmi les clips de la piste (piste Voix). */
+  readonly activeClipId?: string;
   readonly clips: readonly ProjectClip[];
 }
 

@@ -3,7 +3,7 @@ import { AudioEngineService } from './audio-engine.service';
 import { validateAudioFile } from './audio-file';
 import { DrumPattern, DrumVoice, createDemoPattern, toggleStep } from './drum-pattern';
 import { gainToDecibels } from './mix-graph';
-import { MicrophoneRecorder, describeMicrophoneError, takeStartSeconds } from './microphone-recorder';
+import { InputDevice, MicrophoneRecorder, describeMicrophoneError, takeStartSeconds, toInputDevices } from './microphone-recorder';
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm } from './music-time';
 import { renderMix } from './offline-render';
 import { PatternTransport, TrackClip } from './pattern-transport';
@@ -11,11 +11,22 @@ import { NOTE_NAMES, SCALE_LABELS } from './pitch/musical-scale';
 import { ProjectKey } from './pitch/vocal-styles';
 import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
 import { MixerState, TrackId, TrackMix, clampTrackDb, createDefaultMixer, effectiveTrackGains, updateTrack } from './track-mix';
-import { encodeWav, peakLevel } from './wav-encoder';
+import { encodeWav, peakLevel, rmsLevel } from './wav-encoder';
 
 /** Gains appliqués aux fichiers audio du studio (linéaires). */
 const INSTRUMENTAL_GAIN = 0.7;
 const TAKE_GAIN = 1;
+/** Nombre maximal de prises sur la piste Voix (mémoire et lisibilité de la liste). */
+export const MAX_TAKES = 8;
+export const TAKE_NAME_MAX_LENGTH = 40;
+/** Rafraîchissement de l'indicateur de niveau : 10 fois par seconde suffit à l'œil. */
+const LEVEL_UPDATE_MS = 100;
+/** Crête au-delà de laquelle la prise risque d'être saturée. */
+const CLIPPING_PEAK = 0.98;
+/** Pas du décalage manuel d'une prise (correction de latence), en secondes. */
+export const TAKE_NUDGE_SECONDS = 0.01;
+/** Décalage manuel maximal dans un sens ou dans l'autre, en secondes. */
+const MAX_TAKE_SHIFT_SECONDS = 1;
 
 export type MicState = 'idle' | 'opening' | 'recording' | 'saving';
 export type TransportState = 'stopped' | 'playing' | 'paused';
@@ -28,11 +39,21 @@ export interface LoadedAudio {
 }
 
 export interface VocalTake {
+  /** Identifiant stable (clip du projet). */
+  readonly id: string;
+  /** Nom affiché, modifiable (« Prise 1 »…). */
+  readonly name: string;
+  /** Enregistrement original tel que capté, pour l'envoi au serveur et l'écoute seule. */
+  readonly blob: Blob;
+  /** Fichier de la bibliothèque serveur une fois envoyé, sinon `null`. */
+  readonly fileId: string | null;
   readonly buffer: AudioBuffer;
   /** ObjectURL de la prise originale (non modifiée), libéré au remplacement et à la fermeture. */
   readonly url: string;
   readonly mimeType: string;
   readonly startSeconds: number;
+  /** Position avant tout décalage manuel (borne du décalage). */
+  readonly recordedStartSeconds?: number;
   readonly latencyMs: number;
 }
 
@@ -42,6 +63,16 @@ export interface CorrectedTake {
   /** Style appliqué, pour l'affichage (« Trap », « Personnalisé (basé sur Raï) »…). */
   readonly styleLabel: string;
 }
+
+/** Niveau du micro pendant l'enregistrement (0 à 1, échelle linéaire). */
+export interface InputLevel {
+  readonly rms: number;
+  readonly peak: number;
+  /** Crête proche de 0 dBFS pendant la dernière seconde : risque de saturation. */
+  readonly clipping: boolean;
+}
+
+const SILENT_LEVEL: InputLevel = { rms: 0, peak: 0, clipping: false };
 
 export interface ExportReport {
   readonly seconds: number;
@@ -60,6 +91,10 @@ export class StudioSessionService implements OnDestroy {
   private transport: PatternTransport | null = null;
   private animationFrame = 0;
   private recorderStartedAt: number | null = null;
+  private levelTimer: ReturnType<typeof setInterval> | null = null;
+  private levelSource: MediaStreamAudioSourceNode | null = null;
+  private lastClipAt = 0;
+  private takeCounter = 0;
 
   /** BPM effectivement utilisé : une saisie invalide ne l'écrase jamais. */
   readonly bpm = signal(DEFAULT_BPM);
@@ -85,7 +120,15 @@ export class StudioSessionService implements OnDestroy {
 
   readonly micState = signal<MicState>('idle');
   readonly micError = signal<string | null>(null);
-  readonly take = signal<VocalTake | null>(null);
+  /** Prises de la piste Voix, dans l'ordre d'enregistrement. Une seule est jouée : la prise active. */
+  readonly takes = signal<VocalTake[]>([]);
+  readonly activeTakeId = signal<string | null>(null);
+  readonly take = computed(() => this.takes().find(take => take.id === this.activeTakeId()) ?? null);
+  readonly canRecordTake = computed(() => this.takes().length < MAX_TAKES);
+  readonly inputDevices = signal<InputDevice[]>([]);
+  /** Entrée choisie, ou `null` pour l'entrée par défaut du système. */
+  readonly selectedInputId = signal<string | null>(null);
+  readonly inputLevel = signal<InputLevel>(SILENT_LEVEL);
   readonly correctedTake = signal<CorrectedTake | null>(null);
   /** Lire la version corrigée sur la piste Voix (écoute et export) au lieu de l'originale. */
   readonly useCorrectedTake = signal(false);
@@ -119,8 +162,9 @@ export class StudioSessionService implements OnDestroy {
 
   ngOnDestroy(): void {
     this.stopPlayback();
+    this.stopLevelMeter();
     this.recorder.release();
-    this.revokeTakeUrl();
+    this.takes().forEach(take => URL.revokeObjectURL(take.url));
     void this.engine.suspend();
   }
 
@@ -215,11 +259,17 @@ export class StudioSessionService implements OnDestroy {
     if (this.micState() !== 'idle') {
       return;
     }
+    if (!this.canRecordTake()) {
+      this.micError.set(`${MAX_TAKES} prises maximum : supprimez une prise pour en enregistrer une nouvelle.`);
+      return;
+    }
     this.pausePlayback();
     this.micError.set(null);
     this.micState.set('opening');
     try {
-      await this.recorder.open();
+      await this.recorder.open(this.selectedInputId());
+      // Les noms des entrées ne sont connus qu'une fois le micro autorisé.
+      void this.refreshInputDevices();
     } catch (error) {
       console.error('[studio] micro indisponible', error);
       this.micError.set(error instanceof Error && !(error instanceof DOMException) ? error.message : describeMicrophoneError(error));
@@ -238,6 +288,7 @@ export class StudioSessionService implements OnDestroy {
       this.recorderStartedAt = this.transport ? this.engine.currentTime() : null;
     });
     this.micState.set('recording');
+    void this.startLevelMeter();
   }
 
   async stopRecording(): Promise<void> {
@@ -246,6 +297,7 @@ export class StudioSessionService implements OnDestroy {
     }
     const songStart = this.transport?.startTime ?? null;
     this.micState.set('saving');
+    this.stopLevelMeter();
     this.stopPlayback();
     try {
       const recorded = await this.recorder.stop();
@@ -255,17 +307,21 @@ export class StudioSessionService implements OnDestroy {
         songStart !== null && this.recorderStartedAt !== null
           ? takeStartSeconds(this.recorderStartedAt, songStart, latencySeconds)
           : 0;
-      this.revokeTakeUrl();
-      // Une nouvelle prise rend l'ancienne correction obsolète.
-      this.correctedTake.set(null);
-      this.useCorrectedTake.set(false);
-      this.take.set({
+      const take: VocalTake = {
+        id: `take-${crypto.randomUUID()}`,
+        name: `Prise ${++this.takeCounter}`,
+        blob: recorded.blob,
+        fileId: null,
         buffer,
         url: URL.createObjectURL(recorded.blob),
         mimeType: recorded.mimeType,
         startSeconds,
         latencyMs: Math.round(latencySeconds * 1000),
-      });
+      };
+      this.takes.update(takes => [...takes, take]);
+      // La nouvelle prise devient active ; l'ancienne correction ne la concerne pas.
+      this.setActiveTake(take.id);
+      this.lastRecordedTake.set(take);
       console.log('[studio] prise enregistrée', { durationSeconds: buffer.duration, startSeconds });
     } catch (error) {
       console.error('[studio] échec de la prise', error);
@@ -274,6 +330,160 @@ export class StudioSessionService implements OnDestroy {
       this.recorder.release();
       this.micState.set('idle');
     }
+  }
+
+  /** Dernière prise enregistrée dans cet onglet (le projet l'envoie au serveur). */
+  readonly lastRecordedTake = signal<VocalTake | null>(null);
+
+  /** Choisit la prise jouée sur la piste Voix. */
+  selectTake(id: string): void {
+    if (this.takes().some(take => take.id === id) && id !== this.activeTakeId()) {
+      if (this.transportState() !== 'stopped') {
+        this.stopPlayback();
+      }
+      this.setActiveTake(id);
+    }
+  }
+
+  /** Renomme une prise ; renvoie `false` si le nom est vide ou trop long. */
+  renameTake(id: string, name: string): boolean {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > TAKE_NAME_MAX_LENGTH) {
+      return false;
+    }
+    this.takes.update(takes => takes.map(take => (take.id === id ? { ...take, name: trimmed } : take)));
+    return true;
+  }
+
+  /** Supprime une prise de la session ; la précédente (ou la suivante) devient active. */
+  removeTake(id: string): void {
+    const takes = this.takes();
+    const index = takes.findIndex(take => take.id === id);
+    if (index < 0) {
+      return;
+    }
+    if (this.transportState() !== 'stopped') {
+      this.stopPlayback();
+    }
+    URL.revokeObjectURL(takes[index].url);
+    const remaining = takes.filter(take => take.id !== id);
+    this.takes.set(remaining);
+    if (this.activeTakeId() === id) {
+      this.setActiveTake(remaining[Math.min(index, remaining.length) - 1]?.id ?? remaining[0]?.id ?? null);
+    }
+  }
+
+  /**
+   * Décale une prise dans le morceau (correction manuelle de latence), dans la limite
+   * d'une seconde autour de la position estimée à l'enregistrement. Renvoie la nouvelle position.
+   */
+  shiftTake(id: string, deltaSeconds: number): number | null {
+    const current = this.takes().find(take => take.id === id);
+    if (!current || !Number.isFinite(deltaSeconds)) {
+      return null;
+    }
+    const origin = current.recordedStartSeconds ?? current.startSeconds;
+    const shifted = Math.round((current.startSeconds + deltaSeconds) * 1000) / 1000;
+    const startSeconds = Math.min(origin + MAX_TAKE_SHIFT_SECONDS, Math.max(origin - MAX_TAKE_SHIFT_SECONDS, shifted));
+    if (this.transportState() !== 'stopped') {
+      this.stopPlayback();
+    }
+    this.takes.update(takes => takes.map(take => (take.id === id ? { ...take, startSeconds, recordedStartSeconds: origin } : take)));
+    return startSeconds;
+  }
+
+  /** Associe une prise au fichier envoyé dans la bibliothèque. */
+  markTakeUploaded(id: string, fileId: string): void {
+    this.takes.update(takes => takes.map(take => (take.id === id ? { ...take, fileId } : take)));
+  }
+
+  /**
+   * Ajoute une prise récupérée depuis le serveur à l'ouverture d'un projet,
+   * en respectant l'ordre enregistré (`order` : identifiants des prises du projet).
+   */
+  restoreTake(take: VocalTake, order: readonly string[]): void {
+    const rank = (candidate: VocalTake) => {
+      const position = order.indexOf(candidate.id);
+      return position < 0 ? Number.MAX_SAFE_INTEGER : position;
+    };
+    this.takes.update(takes => [...takes.filter(existing => existing.id !== take.id), take].sort((a, b) => rank(a) - rank(b)));
+    // Les nouvelles prises continuent la numérotation (« Prise 4 » après trois prises).
+    this.takeCounter = Math.max(this.takeCounter, order.length);
+  }
+
+  /** Vide la piste Voix (ouverture d'un autre projet). */
+  clearTakes(activeTakeId: string | null = null): void {
+    this.takes().forEach(take => URL.revokeObjectURL(take.url));
+    this.takes.set([]);
+    this.takeCounter = 0;
+    this.setActiveTake(activeTakeId);
+  }
+
+  /** Liste les entrées audio ; les noms n'apparaissent qu'après l'autorisation du micro. */
+  async refreshInputDevices(): Promise<void> {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      return;
+    }
+    try {
+      const devices = toInputDevices(await navigator.mediaDevices.enumerateDevices());
+      this.inputDevices.set(devices);
+      const selected = this.selectedInputId();
+      if (selected && !devices.some(device => device.deviceId === selected)) {
+        // Micro débranché : retour à l'entrée par défaut, signalé à l'utilisateur.
+        this.selectedInputId.set(null);
+        this.micError.set('Le micro choisi n’est plus disponible : l’entrée par défaut sera utilisée.');
+      }
+    } catch (error) {
+      console.error('[studio] liste des micros indisponible', error);
+    }
+  }
+
+  private setActiveTake(id: string | null): void {
+    if (id !== this.activeTakeId()) {
+      // Une correction vocale appartient à une prise : elle ne suit pas le changement.
+      this.correctedTake.set(null);
+      this.useCorrectedTake.set(false);
+    }
+    this.activeTakeId.set(id);
+  }
+
+  /** Indicateur de niveau : analyse du flux micro, jamais reliée aux haut-parleurs (pas de larsen). */
+  private async startLevelMeter(): Promise<void> {
+    const stream = this.recorder.inputStream;
+    if (!stream) {
+      return;
+    }
+    try {
+      const { context } = await this.engine.start();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 2048;
+      this.levelSource = context.createMediaStreamSource(stream);
+      this.levelSource.connect(analyser);
+      const frame = new Float32Array(analyser.fftSize);
+      this.levelTimer = setInterval(() => {
+        analyser.getFloatTimeDomainData(frame);
+        const peak = peakLevel([frame]);
+        const now = Date.now();
+        if (peak >= CLIPPING_PEAK) {
+          this.lastClipAt = now;
+        }
+        this.inputLevel.set({ rms: rmsLevel(frame), peak, clipping: now - this.lastClipAt < 1000 });
+      }, LEVEL_UPDATE_MS);
+    } catch (error) {
+      // L'indicateur est un confort : son échec n'interrompt pas l'enregistrement.
+      console.error('[studio] indicateur de niveau indisponible', error);
+    }
+  }
+
+  private stopLevelMeter(): void {
+    if (this.levelTimer !== null) {
+      clearInterval(this.levelTimer);
+      this.levelTimer = null;
+    }
+    this.levelSource?.disconnect();
+    this.levelSource = null;
+    this.lastClipAt = 0;
+    this.inputLevel.set(SILENT_LEVEL);
   }
 
   /** Rendu hors temps réel du mix écouté (pistes non muettes) puis téléchargement en WAV. */
@@ -363,12 +573,6 @@ export class StudioSessionService implements OnDestroy {
     this.animationFrame = requestAnimationFrame(frame);
   }
 
-  private revokeTakeUrl(): void {
-    const take = this.take();
-    if (take) {
-      URL.revokeObjectURL(take.url);
-    }
-  }
 }
 
 export function downloadBlob(blob: Blob, fileName: string): void {

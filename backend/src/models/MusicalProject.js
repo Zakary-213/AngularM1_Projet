@@ -98,10 +98,18 @@ const trackSchema = new mongoose.Schema(
     mute: { type: Boolean, default: false },
     solo: { type: Boolean, default: false },
     eq: { type: eqSchema, default: () => ({}) },
+    // Prise jouée sur une piste qui en contient plusieurs (piste Voix) ; doit désigner un de ses clips.
+    activeClipId: { type: String, match: stableId.match },
     clips: { type: [clipSchema], default: [], validate: maxItems(L.maxClipsPerTrack) },
   },
   { _id: false },
 );
+
+trackSchema.pre("validate", function () {
+  if (this.activeClipId && !this.clips.some((clip) => clip.id === this.activeClipId)) {
+    this.invalidate("activeClipId", "La prise active doit être un clip de la piste");
+  }
+});
 
 const drumRowSchema = new mongoose.Schema(
   {

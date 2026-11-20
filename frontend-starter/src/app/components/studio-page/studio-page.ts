@@ -6,6 +6,7 @@ import { DrumRackPanelComponent } from '../drum-rack-panel/drum-rack-panel';
 import { ExportPanelComponent } from '../export-panel/export-panel';
 import { MixerPanelComponent } from '../mixer-panel/mixer-panel';
 import { PitchCorrectionPanelComponent } from '../pitch-correction-panel/pitch-correction-panel';
+import { TakesPanelComponent } from '../takes-panel/takes-panel';
 import { WaveformComponent } from '../waveform/waveform';
 import { AUDIO_FILE_ACCEPT } from '../../shared/audio/audio-file';
 import { DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../../shared/audio/music-time';
@@ -44,7 +45,7 @@ interface TimelineTrack extends StudioTrackInfo {
  */
 @Component({
   selector: 'app-studio-page',
-  imports: [RouterLink, ReactiveFormsModule, DrumRackPanelComponent, ExportPanelComponent, MixerPanelComponent, PitchCorrectionPanelComponent, WaveformComponent],
+  imports: [RouterLink, ReactiveFormsModule, DrumRackPanelComponent, ExportPanelComponent, MixerPanelComponent, PitchCorrectionPanelComponent, TakesPanelComponent, WaveformComponent],
   providers: [StudioSessionService, StudioProjectService],
   host: {
     '(window:beforeunload)': 'onBeforeUnload($event)',
@@ -110,7 +111,17 @@ export class StudioPageComponent implements LeaveConfirmation {
         };
       } else if (info.id === 'voice' && take) {
         const offset = percent(Math.max(0, take.startSeconds));
-        clip = offset < 100 ? { label: 'Prise voix · 01', offset, width: Math.max(1, Math.min(100 - offset, percent(take.buffer.duration))), pattern: 'wave' } : null;
+        const visibleTakeSeconds = Math.max(0, Math.min(take.buffer.duration, visibleSeconds - Math.max(0, take.startSeconds)));
+        clip =
+          offset < 100
+            ? {
+                label: take.name,
+                offset,
+                width: Math.max(1, Math.min(100 - offset, percent(take.buffer.duration))),
+                pattern: 'wave',
+                waveform: { buffer: take.buffer, toSeconds: Math.max(0.01, visibleTakeSeconds) },
+              }
+            : null;
       }
       return { ...info, clip, mix: mixer[info.id] };
     });
@@ -153,7 +164,8 @@ export class StudioPageComponent implements LeaveConfirmation {
   }
 
   toggleRecording(): void {
-    void (this.session.micState() === 'recording' ? this.session.stopRecording() : this.session.startRecording());
+    // L'arrêt passe par le projet : la nouvelle prise y est aussitôt envoyée.
+    void (this.session.micState() === 'recording' ? this.studioProject.stopRecording() : this.session.startRecording());
   }
 
   zoom(direction: 'in' | 'out'): void {
@@ -167,6 +179,13 @@ export class StudioPageComponent implements LeaveConfirmation {
     if (file) {
       void this.studioProject.importInstrumental(file);
     }
+  }
+
+  /** Niveau du micro en dBFS pour le lecteur d'écran (le compteur visuel est linéaire). */
+  levelText(): string {
+    const { rms, clipping } = this.session.inputLevel();
+    const db = rms > 0 ? Math.round(20 * Math.log10(rms)) : null;
+    return `${db === null ? 'silence' : `${db} dB`}${clipping ? ', saturation' : ''}`;
   }
 
   formatDuration(seconds: number): string {

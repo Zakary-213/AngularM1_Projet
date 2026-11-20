@@ -1,3 +1,4 @@
+import { DEFAULT_PATTERN_ID } from './drum-pattern';
 import { MAX_SONG_BARS } from './timeline-position';
 
 /**
@@ -10,6 +11,8 @@ export interface DrumClip {
   readonly id: string;
   readonly startBar: number;
   readonly lengthBars: number;
+  /** Pattern joué en boucle dans ce clip (M3). */
+  readonly patternId: string;
 }
 
 export const MAX_DRUM_CLIPS = 64;
@@ -17,7 +20,7 @@ export const MAX_DRUM_CLIP_BARS = 32;
 /** Longueur d'un clip ajouté à la main, en mesures. */
 export const NEW_DRUM_CLIP_BARS = 4;
 /** Arrangement par défaut : 8 mesures de batterie depuis le début. */
-export const DEFAULT_DRUM_CLIPS: readonly DrumClip[] = [{ id: 'drums-1', startBar: 0, lengthBars: 8 }];
+export const DEFAULT_DRUM_CLIPS: readonly DrumClip[] = [{ id: 'drums-1', startBar: 0, lengthBars: 8, patternId: DEFAULT_PATTERN_ID }];
 
 export function createDrumClipId(): string {
   return `drums-${crypto.randomUUID()}`;
@@ -33,7 +36,30 @@ function sorted(clips: readonly DrumClip[]): DrumClip[] {
 
 /** La batterie joue-t-elle à la mesure `bar` (0-indexée) ? */
 export function isDrumBarActive(clips: readonly DrumClip[], bar: number): boolean {
-  return clips.some(clip => bar >= clip.startBar && bar < clip.startBar + clip.lengthBars);
+  return patternIdAtBar(clips, bar) !== null;
+}
+
+/**
+ * Pattern joué à la mesure `bar`, ou `null` si aucun clip ne la couvre.
+ * Si des clips se chevauchent, le dernier commencé l'emporte (un seul pattern à la fois).
+ */
+export function patternIdAtBar(clips: readonly DrumClip[], bar: number): string | null {
+  let found: DrumClip | null = null;
+  for (const clip of clips) {
+    if (bar >= clip.startBar && bar < clip.startBar + clip.lengthBars && (!found || clip.startBar >= found.startBar)) {
+      found = clip;
+    }
+  }
+  return found?.patternId ?? null;
+}
+
+/** Nombre de clips qui jouent un pattern (pour empêcher la suppression d'un pattern utilisé). */
+export function clipsUsingPattern(clips: readonly DrumClip[], patternId: string): number {
+  return clips.filter(clip => clip.patternId === patternId).length;
+}
+
+export function setDrumClipPattern(clips: readonly DrumClip[], id: string, patternId: string): DrumClip[] {
+  return clips.map(clip => (clip.id === id ? { ...clip, patternId } : clip));
 }
 
 export function drumClipsEndBar(clips: readonly DrumClip[]): number {
@@ -61,14 +87,14 @@ export function duplicateDrumClip(clips: readonly DrumClip[], id: string, newId:
   if (!source || clips.length >= MAX_DRUM_CLIPS || source.startBar + 2 * source.lengthBars > MAX_SONG_BARS) {
     return null;
   }
-  return sorted([...clips, { id: newId, startBar: source.startBar + source.lengthBars, lengthBars: source.lengthBars }]);
+  return sorted([...clips, { id: newId, startBar: source.startBar + source.lengthBars, lengthBars: source.lengthBars, patternId: source.patternId }]);
 }
 
-export function addDrumClip(clips: readonly DrumClip[], startBar: number, newId: string): DrumClip[] | null {
+export function addDrumClip(clips: readonly DrumClip[], startBar: number, newId: string, patternId: string): DrumClip[] | null {
   if (clips.length >= MAX_DRUM_CLIPS) {
     return null;
   }
-  return sorted([...clips, { id: newId, startBar: clampStart(startBar, NEW_DRUM_CLIP_BARS), lengthBars: NEW_DRUM_CLIP_BARS }]);
+  return sorted([...clips, { id: newId, startBar: clampStart(startBar, NEW_DRUM_CLIP_BARS), lengthBars: NEW_DRUM_CLIP_BARS, patternId }]);
 }
 
 export function removeDrumClip(clips: readonly DrumClip[], id: string): DrumClip[] {

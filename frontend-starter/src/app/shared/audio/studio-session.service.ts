@@ -1,7 +1,21 @@
 import { Injectable, OnDestroy, computed, effect, inject, signal } from '@angular/core';
 import { AudioEngineService } from './audio-engine.service';
 import { validateAudioFile } from './audio-file';
-import { DrumPattern, DrumVoice, createDemoPattern, toggleStep } from './drum-pattern';
+import {
+  DEFAULT_PATTERN_ID,
+  DrumPattern,
+  DrumVoice,
+  MAX_PATTERNS,
+  PATTERN_NAME_MAX_LENGTH,
+  PatternEntry,
+  createDemoPattern,
+  createEmptyPattern,
+  createPatternId,
+  cycleStep,
+  nextPatternName,
+  shiftRow,
+  toggleStep,
+} from './drum-pattern';
 import { gainToDecibels } from './mix-graph';
 import { InputDevice, MicrophoneRecorder, describeMicrophoneError, takeStartSeconds, toInputDevices } from './microphone-recorder';
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm, stepDurationSeconds } from './music-time';
@@ -18,9 +32,11 @@ import {
   addDrumClip,
   createDrumClipId,
   drumClipsEndBar,
+  clipsUsingPattern,
   duplicateDrumClip,
-  isDrumBarActive,
   moveDrumClip,
+  patternIdAtBar,
+  setDrumClipPattern,
   removeDrumClip,
   resizeDrumClip,
 } from './arrangement';
@@ -121,7 +137,13 @@ export class StudioSessionService implements OnDestroy {
 
   /** BPM effectivement utilisé : une saisie invalide ne l'écrase jamais. */
   readonly bpm = signal(DEFAULT_BPM);
-  readonly pattern = signal<DrumPattern>(createDemoPattern());
+  /** Bibliothèque de patterns du projet (M3) ; chaque clip de batterie en joue un. */
+  readonly patterns = signal<readonly PatternEntry[]>([{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: createDemoPattern() }]);
+  /** Pattern affiché et modifié dans le Drum Rack. */
+  readonly editedPatternId = signal(DEFAULT_PATTERN_ID);
+  readonly editedPattern = computed(() => this.patterns().find(entry => entry.id === this.editedPatternId()) ?? this.patterns()[0]);
+  /** Grille du pattern édité. */
+  readonly pattern = computed<DrumPattern>(() => this.editedPattern().steps);
   readonly transportState = signal<TransportState>('stopped');
   readonly playing = computed(() => this.transportState() === 'playing');
   /** Pas absolu de la tête de lecture (0 = début du morceau), conservé pendant une pause. */
@@ -224,10 +246,97 @@ export class StudioSessionService implements OnDestroy {
     }
   }
 
+  /** Active ou retire une frappe (vélocité forte) dans le pattern édité. */
   toggleStep(voice: DrumVoice, step: number): void {
     if (step >= 0 && step < STEPS_PER_BAR) {
-      this.pattern.update(pattern => toggleStep(pattern, voice, step));
+      this.updateEditedPattern(steps => toggleStep(steps, voice, step));
     }
+  }
+
+  /** Clic dans le Drum Rack : éteinte → forte → moyenne → douce → éteinte. */
+  cycleStep(voice: DrumVoice, step: number): void {
+    if (step >= 0 && step < STEPS_PER_BAR) {
+      this.updateEditedPattern(steps => cycleStep(steps, voice, step));
+    }
+  }
+
+  /** Décale toutes les frappes d'un instrument d'un pas (déplacer des frappes). */
+  shiftRow(voice: DrumVoice, delta: number): void {
+    this.updateEditedPattern(steps => shiftRow(steps, voice, delta));
+  }
+
+  // ——— Bibliothèque de patterns (M3) ———
+
+  selectPattern(id: string): void {
+    if (this.patterns().some(entry => entry.id === id)) {
+      this.editedPatternId.set(id);
+    }
+  }
+
+  /** Crée un pattern vide et l'ouvre dans le Drum Rack ; `null` si la limite est atteinte. */
+  createPattern(): string | null {
+    return this.insertPattern(createEmptyPattern());
+  }
+
+  /** Copie d'un pattern, pour créer une variante (refrain, break…). */
+  duplicatePattern(id: string): string | null {
+    const source = this.patterns().find(entry => entry.id === id);
+    return source ? this.insertPattern(source.steps, `${source.name} (copie)`.slice(0, PATTERN_NAME_MAX_LENGTH)) : null;
+  }
+
+  renamePattern(id: string, name: string): boolean {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > PATTERN_NAME_MAX_LENGTH) {
+      return false;
+    }
+    this.patterns.update(patterns => patterns.map(entry => (entry.id === id ? { ...entry, name: trimmed } : entry)));
+    return true;
+  }
+
+  /** Supprime un pattern non utilisé. Renvoie un message si la suppression est refusée. */
+  deletePattern(id: string): string | null {
+    const patterns = this.patterns();
+    if (patterns.length <= 1) {
+      return 'Le projet garde au moins un pattern.';
+    }
+    const used = clipsUsingPattern(this.drumClips(), id);
+    if (used > 0) {
+      return `Ce pattern est joué par ${used} clip${used > 1 ? 's' : ''} : changez leur pattern ou supprimez-les d'abord.`;
+    }
+    const remaining = patterns.filter(entry => entry.id !== id);
+    this.patterns.set(remaining);
+    if (this.editedPatternId() === id) {
+      this.editedPatternId.set(remaining[0].id);
+    }
+    return null;
+  }
+
+  /** Remplace la bibliothèque de patterns (ouverture d'un projet). */
+  loadPatterns(patterns: readonly PatternEntry[]): void {
+    const safe = patterns.length > 0 ? patterns : [{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: createEmptyPattern() }];
+    this.patterns.set(safe);
+    this.editedPatternId.set(safe[0].id);
+  }
+
+  /** Pattern joué à un pas absolu, d'après les clips de batterie. */
+  patternAt(songStep: number): DrumPattern | null {
+    const id = patternIdAtBar(this.drumClips(), Math.floor(songStep / STEPS_PER_BAR));
+    return id ? (this.patterns().find(entry => entry.id === id)?.steps ?? null) : null;
+  }
+
+  private insertPattern(steps: DrumPattern, name = nextPatternName(this.patterns())): string | null {
+    if (this.patterns().length >= MAX_PATTERNS) {
+      return null;
+    }
+    const id = createPatternId();
+    this.patterns.update(patterns => [...patterns, { id, name, steps }]);
+    this.editedPatternId.set(id);
+    return id;
+  }
+
+  private updateEditedPattern(change: (steps: DrumPattern) => DrumPattern): void {
+    const id = this.editedPattern().id;
+    this.patterns.update(patterns => patterns.map(entry => (entry.id === id ? { ...entry, steps: change(entry.steps) } : entry)));
   }
 
   /** Lecture / pause : la pause garde la position, la lecture reprend au même pas. */
@@ -302,12 +411,19 @@ export class StudioSessionService implements OnDestroy {
   /** Ajoute un clip de batterie à la mesure de la tête de lecture ; renvoie son identifiant. */
   addDrumClipAtPlayhead(): string | null {
     const newId = createDrumClipId();
-    const next = addDrumClip(this.drumClips(), Math.floor(this.songStep() / STEPS_PER_BAR), newId);
+    const next = addDrumClip(this.drumClips(), Math.floor(this.songStep() / STEPS_PER_BAR), newId, this.editedPattern().id);
     if (!next) {
       return null;
     }
     this.changeArrangement(() => this.drumClips.set(next));
     return newId;
+  }
+
+  /** Change le pattern joué par un clip (annulable). */
+  setDrumClipPattern(id: string, patternId: string): void {
+    if (this.patterns().some(entry => entry.id === patternId)) {
+      this.changeArrangement(() => this.drumClips.update(clips => setDrumClipPattern(clips, id, patternId)));
+    }
   }
 
   removeDrumClip(id: string): void {
@@ -707,13 +823,11 @@ export class StudioSessionService implements OnDestroy {
         gain: clip.gain * gains[track],
         ...(track === 'instrumental' ? { eq: this.instrumentalEq() } : {}),
       }));
-      const drumClips = this.drumClips();
       const rendered = await renderMix({
-        pattern: this.pattern(),
+        patternAt: step => this.patternAt(step),
         bpm: this.bpm(),
         bars,
         drumsGain: gains.drums,
-        drumActive: step => isDrumBarActive(drumClips, Math.floor(step / STEPS_PER_BAR)),
         clips,
       });
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
@@ -735,10 +849,9 @@ export class StudioSessionService implements OnDestroy {
       this.transport ??= new PatternTransport(
         context,
         master,
-        () => this.pattern(),
+        songStep => this.patternAt(songStep),
         () => this.bpm(),
         () => this.metronome(),
-        songStep => isDrumBarActive(this.drumClips(), Math.floor(songStep / STEPS_PER_BAR)),
       );
       // Pas de boucle pendant une prise : la voix doit suivre le morceau de façon linéaire.
       const loop = includeTake ? this.loopRange() : null;

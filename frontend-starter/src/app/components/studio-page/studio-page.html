@@ -129,10 +129,17 @@
         <button type="button" (click)="moveClip(clip, -1)" [attr.aria-label]="clip.kind === 'drum' ? 'Plus tôt d’une mesure' : 'Plus tôt d’un temps'">◀</button>
         <button type="button" (click)="moveClip(clip, 1)" [attr.aria-label]="clip.kind === 'drum' ? 'Plus tard d’une mesure' : 'Plus tard d’un temps'">▶</button>
         @if (clip.kind === 'drum') {
+          <label class="clip-pattern">Pattern
+            <select (change)="onClipPatternChange($event)">
+              @for (entry of session.patterns(); track entry.id) {
+                <option [value]="entry.id" [selected]="entry.id === selectedDrumPatternId()">{{ entry.name }}</option>
+              }
+            </select>
+          </label>
           <button type="button" (click)="resizeSelected(-1)">− 1 mesure</button>
           <button type="button" (click)="resizeSelected(1)">+ 1 mesure</button>
-          <button type="button" (click)="duplicateSelected()" aria-keyshortcuts="Control+D Meta+D">Dupliquer</button>
-          <button type="button" class="danger" (click)="deleteSelected()" aria-keyshortcuts="Delete">Supprimer</button>
+          <button type="button" (click)="duplicateSelected()" aria-keyshortcuts="Control+D Meta+D" aria-label="Dupliquer le clip">Dupliquer</button>
+          <button type="button" class="danger" (click)="deleteSelected()" aria-keyshortcuts="Delete" aria-label="Supprimer le clip">Supprimer</button>
         }
         <button type="button" (click)="selectedClip.set(null)">Désélectionner</button>
       } @else {

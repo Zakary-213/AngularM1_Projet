@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDemoPattern, toggleStep } from './drum-pattern';
+import { createDemoPattern, cycleStep, toggleStep } from './drum-pattern';
 import { StudioState, contentFingerprint, createEmptyPattern, fromProject, secondsToBeats, takeClipPosition, takeStartFromClip, toProjectContent } from './project-mapping';
 import { FLAT_THREE_BAND_EQ } from './three-band-eq';
 import { createDefaultMixer, updateTrack } from './track-mix';
@@ -26,7 +26,10 @@ function project(overrides: Partial<MusicalProject> = {}): MusicalProject {
 const state: StudioState = {
   bpm: 140,
   key: { root: 2, scale: 'harmonicMinor' },
-  pattern: toggleStep(createDemoPattern(), 'snare', 0),
+  patterns: [
+    { id: 'pattern-1', name: 'Couplet', steps: toggleStep(createDemoPattern(), 'snare', 0) },
+    { id: 'pattern-refrain', name: 'Refrain', steps: cycleStep(cycleStep(createDemoPattern(), 'kick', 2), 'kick', 2) },
+  ],
   mixer: updateTrack(updateTrack(createDefaultMixer(), 'drums', { volumeDb: -6, solo: true }), 'voice', { muted: true }),
   instrumental: { fileId: '64b0000000000000000000aa', label: 'beat.mp3', durationBeats: 186.67 },
   instrumentalEq: { lowDb: 3, midDb: -2, highDb: 1 },
@@ -37,8 +40,8 @@ const state: StudioState = {
   ],
   activeTakeId: 'take-b',
   drumClips: [
-    { id: 'drums-intro', startBar: 0, lengthBars: 4 },
-    { id: 'drums-refrain', startBar: 8, lengthBars: 8 },
+    { id: 'drums-intro', startBar: 0, lengthBars: 4, patternId: 'pattern-1' },
+    { id: 'drums-refrain', startBar: 8, lengthBars: 8, patternId: 'pattern-refrain' },
   ],
   instrumentalStartBeat: 4,
 };
@@ -58,11 +61,16 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     ]);
     expect(content.tracks[0].clips).toEqual([
       { id: 'drums-intro', startBeat: 0, durationBeats: 16, patternId: 'pattern-1' },
-      { id: 'drums-refrain', startBeat: 32, durationBeats: 32, patternId: 'pattern-1' },
+      { id: 'drums-refrain', startBeat: 32, durationBeats: 32, patternId: 'pattern-refrain' },
     ]);
     expect(content.tracks[0].volumeDb).toBe(-6);
     expect(content.tracks[2].mute).toBe(true);
-    expect(content.patterns[0].drumRows.every(row => row.steps.length === 16)).toBe(true);
+    expect(content.patterns.map(pattern => pattern.name)).toEqual(['Couplet', 'Refrain']);
+    expect(content.patterns[0].drumRows.every(row => row.steps.length === 16 && row.velocities?.length === 16)).toBe(true);
+    // Kick du refrain, pas 3 : vélocité moyenne (deux clics), lisible aussi comme simple frappe.
+    const kick = content.patterns[1].drumRows.find(row => row.voice === 'kick')!;
+    expect(kick.velocities![2]).toBe(0.7);
+    expect(kick.steps[2]).toBe(true);
   });
 
   it('référence l’instrumentale par son fichier et porte son égaliseur, sans octets audio', () => {
@@ -101,10 +109,23 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(loaded.activeTakeId).toBe('take-b');
   });
 
+  it('M3 : un projet antérieur sans vélocités lit ses frappes comme fortes ; un pattern inconnu revient au premier', () => {
+    const steps = Array.from({ length: 16 }, (_, i) => i === 0);
+    const loaded = fromProject(
+      project({
+        patterns: [{ id: 'p-old', name: 'Ancien', drumRows: [{ voice: 'kick', steps }] }],
+        tracks: [{ id: 'drums', name: 'Batterie', type: 'drum', clips: [{ id: 'c1', startBeat: 0, durationBeats: 8, patternId: 'disparu' }] }],
+      }),
+    );
+    expect(loaded.patterns[0].steps.kick[0]).toBe(1);
+    expect(loaded.patterns[0].steps.kick[1]).toBe(0);
+    expect(loaded.drumClips[0].patternId).toBe('p-old');
+  });
+
   it('M5 : un ancien projet (pattern en boucle sans fin) reçoit l’arrangement par défaut', () => {
     const legacy = fromProject(project({ tracks: [{ id: 'drums', name: 'Batterie', type: 'drum', clips: [{ id: 'clip-drums', startBeat: 0, durationBeats: 4, patternId: 'pattern-1' }] }] }));
-    expect(legacy.drumClips).toEqual([{ id: 'drums-1', startBar: 0, lengthBars: 8 }]);
-    expect(fromProject(project()).drumClips).toEqual([{ id: 'drums-1', startBar: 0, lengthBars: 8 }]);
+    expect(legacy.drumClips).toEqual([{ id: 'drums-1', startBar: 0, lengthBars: 8, patternId: 'pattern-1' }]);
+    expect(fromProject(project()).drumClips).toEqual([{ id: 'drums-1', startBar: 0, lengthBars: 8, patternId: 'pattern-1' }]);
     const emptied = fromProject(project({ tracks: [{ id: 'drums', name: 'Batterie', type: 'drum', clips: [] }] }));
     expect(emptied.drumClips).toEqual([]);
   });
@@ -116,8 +137,8 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
   });
 
   it('nouveau projet : rythme de départ pour « Créer », grille vide pour « Importer »', () => {
-    expect(fromProject(project({ origin: 'create' })).pattern).toEqual(createDemoPattern());
-    expect(fromProject(project({ origin: 'import' })).pattern).toEqual(createEmptyPattern());
+    expect(fromProject(project({ origin: 'create' })).patterns).toEqual([{ id: 'pattern-1', name: 'Pattern 01', steps: createDemoPattern() }]);
+    expect(fromProject(project({ origin: 'import' })).patterns[0].steps).toEqual(createEmptyPattern());
   });
 
   it('remplace les valeurs invalides par les valeurs par défaut', () => {
@@ -132,7 +153,7 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(loaded.bpm).toBe(200);
     expect(loaded.key).toEqual({ root: 9, scale: 'minor' });
     expect(loaded.mixer.drums.volumeDb).toBe(6);
-    expect(loaded.pattern).toEqual(createEmptyPattern());
+    expect(loaded.patterns[0].steps).toEqual(createEmptyPattern());
     expect(loaded.instrumental).toBeNull();
     expect(loaded.instrumentalEq).toEqual(FLAT_THREE_BAND_EQ);
     expect(loaded.takes).toEqual([]);
@@ -141,8 +162,9 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
 
   it('l’empreinte change avec une modification et revient à l’identique après annulation', () => {
     const before = contentFingerprint(state);
-    const changed = { ...state, pattern: toggleStep(state.pattern, 'kick', 3) };
+    const withKick = (steps: StudioState['patterns'][number]['steps']) => [{ ...state.patterns[0], steps }, state.patterns[1]];
+    const changed = { ...state, patterns: withKick(toggleStep(state.patterns[0].steps, 'kick', 3)) };
     expect(contentFingerprint(changed)).not.toBe(before);
-    expect(contentFingerprint({ ...changed, pattern: toggleStep(changed.pattern, 'kick', 3) })).toBe(before);
+    expect(contentFingerprint({ ...changed, patterns: withKick(toggleStep(changed.patterns[0].steps, 'kick', 3)) })).toBe(before);
   });
 });

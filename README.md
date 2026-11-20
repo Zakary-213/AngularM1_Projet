@@ -84,7 +84,8 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Timeline | Se placer (clic, clavier), boucle, clips de batterie (déplacer, dupliquer, raccourcir, supprimer), instrumentale et prises déplaçables, Annuler / Rétablir, positions sauvegardées | ✅ Fonctionnel (M5) |
-| Composition | Drum Rack multi-patterns, Piano Roll, instruments | ⏳ À faire (M3, M4) |
+| Batterie | Drum Rack 16 pas avec vélocité (forte / moyenne / douce), bibliothèque de patterns (créer, dupliquer, renommer, supprimer), un pattern par clip de batterie, décalage des frappes | ✅ Fonctionnel (M3, partie 1) |
+| Composition | Nouveaux sons (clap, percussions, 808), préécoute, Piano Roll | ⏳ À faire (M3, M4) |
 | Import | Instrumentale MP3 / WAV envoyée dans vos fichiers audio, forme d'onde, égaliseur 3 bandes, retrouvée à la réouverture du projet | ✅ Fonctionnel (M6) |
 | Mix | Volume, mute et solo par piste (écoute et export) faits ; pan, EQ, réverbération, delay | ⏳ À faire (M7) |
 | Voix | Prise micro (bouton ●) et onglet « Correction vocale » : 6 styles (Naturel, Rap, Trap, Drill, Raï, Robot) + dose d'effet, mode personnalisé (gamme, notes, humanisation, transposition, égaliseur), courbe de hauteur, calcul dans un Web Worker, version corrigée utilisable sur la piste Voix | 🚧 Partiel (M9) |
@@ -267,7 +268,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **202 / 202 tests frontend** et **31 / 31 tests backend** réussis, build OK (20 novembre 2026).
+Dernier résultat connu : **215 / 215 tests frontend** et **32 / 32 tests backend** réussis, build OK (20 novembre 2026).
 
 ---
 
@@ -309,7 +310,7 @@ Schéma : `backend/src/models/MusicalProject.js` ; routes : `backend/src/routes/
 
 `ProjectSummary` : `id`, `title`, `origin`, `bpm`, `key`, `trackCount`, `formatVersion`, `createdAt`, `updatedAt`.
 
-`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `activeClipId` facultatif (prise jouée, doit désigner un clip de la piste), `clips[]`), `patterns[]` (64 max. ; `drumRows` de 16 pas, `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Sur la piste Batterie, chaque clip joue le pattern en boucle de `startBeat` à `startBeat + durationBeats` (M5) ; une piste Batterie sans clip est silencieuse. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `eq` {`lowDb`, `midDb`, `highDb`} −12 à +12 dB, `activeClipId` facultatif (prise jouée, doit désigner un clip de la piste), `clips[]`), `patterns[]` (64 max. ; `id`, `name`, `drumRows` : `voice`, `steps` (16 booléens) et `velocities` facultatives (16 valeurs de 0 à 1, M3), `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Sur la piste Batterie, chaque clip joue le pattern en boucle de `startBeat` à `startBeat + durationBeats` (M5) ; une piste Batterie sans clip est silencieuse. Un clip a un `id` stable, un `label` facultatif (nom affiché, 120 caractères max.), `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
 
 Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`, `tracks`, `patterns` et `master` sont copiés à la sauvegarde (liste blanche : `ownerId`, `origin`, `formatVersion`, `revision` envoyés sont ignorés) ; le document complet est validé avant écriture. Un `audioFileId` doit désigner un fichier `Track` de l'utilisateur authentifié, sinon la sauvegarde est refusée (`400 « Fichier audio inconnu ou non autorisé »`) : un projet ne peut pas servir à lire le fichier d'un autre compte. Erreurs : `400` validation, révision absente, fichier audio d'un autre compte ou JSON invalide ; `401` sans JWT ; `404` projet absent, identifiant mal formé **ou** projet d'un autre utilisateur ; `409 {message, revision}` si la révision envoyée n'est plus la révision actuelle (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `413` corps JSON au-delà de 1 Mo ; `422` si le projet stocké a un `formatVersion` non pris en charge (il n'est pas réécrit).
 
@@ -341,6 +342,17 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 20 novembre 2026 — M3, partie 1 : patterns et vélocité (#9)
+
+- **Vélocité** : chaque pas porte la force de la frappe (0 à 1). Un clic fait passer une case de vide à forte (1), moyenne (0,7), douce (0,4) puis vide ; la hauteur de la barre et le nom accessible (« Kick, pas 5, frappe moyen ») indiquent le niveau, pas seulement la couleur. La vélocité règle un gain par frappe dans le synthé : même rendu à l'écoute et à l'export. Le rythme de départ a des hi-hats plus doux en contretemps.
+- **Déplacer des frappes** : ◀ ▶ par instrument décalent toute la ligne d'un pas (les frappes qui sortent reviennent de l'autre côté de la mesure).
+- **Bibliothèque de patterns** : choisir le pattern affiché, en créer un vide, le dupliquer (variante de refrain), le renommer, le supprimer. Un pattern joué par un clip, ou le dernier pattern, ne peut pas être supprimé (message explicatif). 64 patterns au plus (limite du format).
+- **Arrangement** : chaque clip de batterie joue son propre pattern (`patternId`), choisi dans la barre d'édition du clip (changement annulable) ; le nom du pattern s'affiche sur le clip. Un nouveau clip prend le pattern affiché dans le Drum Rack. En cas de chevauchement, le clip commencé le plus tard l'emporte.
+- **Sauvegarde** : tous les patterns sont sauvegardés, avec `steps` (booléens, lisibles par les versions antérieures) et `velocities` (nouveau champ facultatif validé par le serveur : 16 valeurs de 0 à 1). Un projet antérieur sans vélocités lit ses frappes comme fortes ; un clip qui référence un pattern disparu joue le premier pattern.
+- **Limites** : la modification des cases n'est pas annulable (seul l'arrangement l'est) ; toujours trois instruments (clap, percussions et 808 dans la partie 2).
+
+**Vérifications** : backend `npm test` 32/32 (vélocités facultatives et bornées) ; frontend `npm test` 215/215 (cycle de vélocité, bornes, décalage circulaire, frappes avec leur force, noms des patterns ; bibliothèque dans la session : création, édition du seul pattern affiché, duplication, renommage, suppressions refusées, pattern par clip et annulation, limite de 64 ; conversion du format avec plusieurs patterns, projets antérieurs, pattern disparu) ; `npm run build` réussi. Navigateur (Chromium, `npm start` + vrai backend Express avec stockage en mémoire) : pattern « Refrain » créé et renommé, frappes forte / moyenne / douce, ligne de kick décalée, clip dupliqué jouant « Refrain », suppression d'un pattern utilisé refusée avec message, lecture, sauvegarde puis rechargement (patterns, vélocités et pattern de chaque clip retrouvés), 360 px sans débordement, console sans erreur. Deux boutons portaient le même nom « Dupliquer » (pattern et clip) : noms accessibles distincts ajoutés. **Non vérifié** : la différence de force à l'oreille.
 
 ### 20 novembre 2026 — M5, partie 2 : clips et arrangement (#11)
 

@@ -5,17 +5,20 @@ import {
   MAX_DRUM_CLIP_BARS,
   UndoHistory,
   addDrumClip,
+  clipsUsingPattern,
   drumClipsEndBar,
   duplicateDrumClip,
   isDrumBarActive,
   moveDrumClip,
+  patternIdAtBar,
   removeDrumClip,
   resizeDrumClip,
+  setDrumClipPattern,
 } from './arrangement';
 import { MAX_SONG_BARS } from './timeline-position';
 
-const intro: DrumClip = { id: 'a', startBar: 0, lengthBars: 4 };
-const chorus: DrumClip = { id: 'b', startBar: 8, lengthBars: 8 };
+const intro: DrumClip = { id: 'a', startBar: 0, lengthBars: 4, patternId: 'p1' };
+const chorus: DrumClip = { id: 'b', startBar: 8, lengthBars: 8, patternId: 'p2' };
 
 describe('clips de batterie', () => {
   it('la batterie joue seulement à l’intérieur des clips', () => {
@@ -39,15 +42,25 @@ describe('clips de batterie', () => {
   });
 
   it('duplique un clip juste après l’original', () => {
-    expect(duplicateDrumClip([intro], 'a', 'c')).toEqual([intro, { id: 'c', startBar: 4, lengthBars: 4 }]);
-    expect(duplicateDrumClip([{ id: 'z', startBar: MAX_SONG_BARS - 4, lengthBars: 4 }], 'z', 'c')).toBeNull();
+    expect(duplicateDrumClip([intro], 'a', 'c')).toEqual([intro, { id: 'c', startBar: 4, lengthBars: 4, patternId: 'p1' }]);
+    expect(duplicateDrumClip([{ id: 'z', startBar: MAX_SONG_BARS - 4, lengthBars: 4, patternId: 'p1' }], 'z', 'c')).toBeNull();
     expect(duplicateDrumClip([intro], 'inconnu', 'c')).toBeNull();
   });
 
+  it('M3 : chaque clip joue son pattern ; le dernier commencé l’emporte en cas de chevauchement', () => {
+    expect(patternIdAtBar([intro, chorus], 2)).toBe('p1');
+    expect(patternIdAtBar([intro, chorus], 9)).toBe('p2');
+    expect(patternIdAtBar([intro, chorus], 5)).toBeNull();
+    const overlap: DrumClip = { id: 'c', startBar: 2, lengthBars: 4, patternId: 'p3' };
+    expect(patternIdAtBar([intro, overlap], 3)).toBe('p3');
+    expect(clipsUsingPattern([intro, chorus, { ...intro, id: 'd' }], 'p1')).toBe(2);
+    expect(setDrumClipPattern([intro], 'a', 'p9')[0].patternId).toBe('p9');
+  });
+
   it('ajoute et supprime des clips', () => {
-    expect(addDrumClip([], 6, 'n')).toEqual([{ id: 'n', startBar: 6, lengthBars: 4 }]);
+    expect(addDrumClip([], 6, 'n', 'p2')).toEqual([{ id: 'n', startBar: 6, lengthBars: 4, patternId: 'p2' }]);
     expect(removeDrumClip([intro, chorus], 'a')).toEqual([chorus]);
-    expect(DEFAULT_DRUM_CLIPS).toEqual([{ id: 'drums-1', startBar: 0, lengthBars: 8 }]);
+    expect(DEFAULT_DRUM_CLIPS).toEqual([{ id: 'drums-1', startBar: 0, lengthBars: 8, patternId: 'pattern-1' }]);
   });
 });
 

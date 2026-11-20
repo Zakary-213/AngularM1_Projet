@@ -121,6 +121,17 @@ const drumRowSchema = new mongoose.Schema(
         message: `Une ligne de batterie contient exactement ${L.stepsPerPattern} pas`,
       },
     },
+    // Vélocité de chaque pas, de 0 (silence) à 1 (frappe forte) ; facultative (projets antérieurs à la M3).
+    velocities: {
+      type: [Number],
+      default: undefined,
+      validate: {
+        validator: (values) =>
+          values === undefined ||
+          (values.length === L.stepsPerPattern && values.every((value) => Number.isFinite(value) && value >= 0 && value <= 1)),
+        message: `La vélocité comporte ${L.stepsPerPattern} valeurs entre 0 et 1`,
+      },
+    },
   },
   { _id: false },
 );

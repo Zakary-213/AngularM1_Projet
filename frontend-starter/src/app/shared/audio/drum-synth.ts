@@ -70,17 +70,23 @@ function playSnare(context: BaseAudioContext, output: AudioNode, time: number): 
   body.stop(time + 0.1);
 }
 
-/** Déclenche une frappe à la date `time` (secondes, horloge du contexte). */
-export function playDrumHit(context: BaseAudioContext, output: AudioNode, voice: DrumVoice, time: number): void {
+/**
+ * Déclenche une frappe à la date `time` (secondes, horloge du contexte).
+ * `velocity` (0 à 1) règle la force de la frappe par un gain linéaire.
+ */
+export function playDrumHit(context: BaseAudioContext, output: AudioNode, voice: DrumVoice, time: number, velocity = 1): void {
+  const hit = context.createGain();
+  hit.gain.value = Math.min(1, Math.max(0, velocity));
+  hit.connect(output);
   switch (voice) {
     case 'kick':
-      playKick(context, output, time);
+      playKick(context, hit, time);
       break;
     case 'snare':
-      playSnare(context, output, time);
+      playSnare(context, hit, time);
       break;
     case 'hihat':
-      playNoise(context, output, time, 7000, 0.22, 0.05);
+      playNoise(context, hit, time, 7000, 0.22, 0.05);
       break;
   }
 }

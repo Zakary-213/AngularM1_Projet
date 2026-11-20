@@ -150,11 +150,13 @@ export class StudioPageComponent implements LeaveConfirmation {
     return STUDIO_TRACKS.map(info => {
       const clips: TimelineClip[] = [];
       if (info.id === 'drums') {
+        const names = new Map(this.session.patterns().map(entry => [entry.id, entry.name]));
         for (const clip of this.session.drumClips()) {
           const box = layoutClip(clip.startBar * barSeconds, clip.lengthBars * barSeconds, visibleSeconds);
           if (box) {
             const range = clip.lengthBars > 1 ? `mesures ${clip.startBar + 1} à ${clip.startBar + clip.lengthBars}` : `mesure ${clip.startBar + 1}`;
-            clips.push({ kind: 'drum', id: clip.id, label: `Pattern 01 · ${clip.lengthBars} mes.`, ariaLabel: `Clip de batterie, ${range}`, ...box, pattern: 'note' });
+            const name = names.get(clip.patternId) ?? 'Pattern';
+            clips.push({ kind: 'drum', id: clip.id, label: `${name} · ${clip.lengthBars} mes.`, ariaLabel: `Clip de batterie ${name}, ${range}`, ...box, pattern: 'note' });
           }
         }
       } else if (info.id === 'instrumental' && instrumental) {
@@ -294,6 +296,19 @@ export class StudioPageComponent implements LeaveConfirmation {
       if (copy) {
         this.selectedClip.set({ kind: 'drum', id: copy });
       }
+    }
+  }
+
+  /** Pattern joué par le clip de batterie sélectionné. */
+  readonly selectedDrumPatternId = computed(() => {
+    const selected = this.selectedClip();
+    return selected?.kind === 'drum' ? (this.session.drumClips().find(clip => clip.id === selected.id)?.patternId ?? null) : null;
+  });
+
+  onClipPatternChange(event: Event): void {
+    const clip = this.selection();
+    if (clip?.kind === 'drum') {
+      this.session.setDrumClipPattern(clip.id, (event.target as HTMLSelectElement).value);
     }
   }
 

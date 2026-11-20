@@ -94,3 +94,5 @@ button:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-
 .clip-toolbar button { min-height: 36px; padding: 4px 10px; font-size: 11px; }
 .clip-toolbar button.danger { background: #b3261e; border-color: #b3261e; color: #ffffff; }
 .clip-selection { margin-left: 8px; }
+.clip-pattern { display: inline-flex; align-items: center; gap: 6px; }
+.clip-pattern select { min-height: 36px; padding: 4px 6px; border-radius: 5px; border: 1px solid #404040; background: #0d0d0d; color: inherit; font-size: 11px; }

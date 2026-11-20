@@ -38,10 +38,22 @@
   background: #262626;
 }
 
+.step {
+  position: relative;
+  overflow: hidden;
+}
+
 .step.on {
-  background: var(--accent);
   border-color: var(--accent);
-  color: #111111;
+}
+
+/* Barre de vélocité : sa hauteur indique la force de la frappe. */
+.velocity {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--accent);
 }
 
 /* La tête de lecture ne repose pas que sur la couleur : bordure épaisse en plus. */
@@ -63,3 +75,15 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+.patterns { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin-bottom: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label, .inline-form label { font-size: 12px; font-weight: 650; }
+select, input[type='text'] { min-height: 40px; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid #404040; background: #0d0d0d; color: inherit; }
+.patterns button, .inline-form button { min-height: 40px; padding: 6px 12px; font-size: 12px; }
+.inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+button.danger { background: #b3261e; border-color: #b3261e; color: #ffffff; }
+.error { color: #ff8a80; font-size: 12px; }
+.shift { white-space: nowrap; padding-right: 6px; }
+.shift-button { width: 28px; min-height: 44px; padding: 0; font-size: 11px; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 2px; }

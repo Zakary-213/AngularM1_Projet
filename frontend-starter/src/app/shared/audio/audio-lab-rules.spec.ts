@@ -8,9 +8,9 @@ describe('pattern de batterie', () => {
   it('active puis désactive une frappe sans modifier le pattern d’origine', () => {
     const original = createDemoPattern();
     const toggled = toggleStep(original, 'snare', 0);
-    expect(toggled.snare[0]).toBe(true);
-    expect(original.snare[0]).toBe(false);
-    expect(toggleStep(toggled, 'snare', 0).snare[0]).toBe(false);
+    expect(toggled.snare[0]).toBe(1);
+    expect(original.snare[0]).toBe(0);
+    expect(toggleStep(toggled, 'snare', 0).snare[0]).toBe(0);
   });
 
   it('refuse un pas hors de la mesure', () => {

@@ -1,4 +1,6 @@
-import { DRUM_VOICES, DrumPattern, DrumVoice, createDemoPattern } from './drum-pattern';
+import { DEFAULT_PATTERN_ID, DRUM_VOICES, DrumPattern, DrumVoice, PatternEntry, createDemoPattern, createEmptyPattern } from './drum-pattern';
+
+export { createEmptyPattern } from './drum-pattern';
 import { BEATS_PER_BAR, DEFAULT_BPM, STEPS_PER_BAR, clampBpm } from './music-time';
 import { SCALE_NAMES, ScaleName } from './pitch/musical-scale';
 import { ProjectKey } from './pitch/vocal-styles';
@@ -37,7 +39,8 @@ export interface TakeRef {
 export interface StudioState {
   readonly bpm: number;
   readonly key: ProjectKey;
-  readonly pattern: DrumPattern;
+  /** Bibliothèque de patterns (M3). */
+  readonly patterns: readonly PatternEntry[];
   readonly mixer: MixerState;
   readonly instrumental: InstrumentalRef | null;
   readonly instrumentalEq: ThreeBandEq;
@@ -76,30 +79,20 @@ export function secondsToBeats(seconds: number, bpm: number): number {
 }
 
 const DEFAULT_KEY: ProjectKey = { root: 9, scale: 'minor' };
-const MAIN_PATTERN_ID = 'pattern-1';
 const DRUMS_CLIP_ID = 'clip-drums';
 const INSTRUMENTAL_CLIP_ID = 'clip-instrumental';
 const TRACK_TYPES: Readonly<Record<TrackId, ProjectTrackType>> = { drums: 'drum', instrumental: 'audio', voice: 'vocal' };
-
-function emptyRow(): boolean[] {
-  return Array.from({ length: STEPS_PER_BAR }, () => false);
-}
-
-export function createEmptyPattern(): DrumPattern {
-  return { kick: emptyRow(), snare: emptyRow(), hihat: emptyRow() };
-}
 
 export function toProjectContent(state: StudioState): ProjectContent {
   return {
     bpm: state.bpm,
     key: { root: state.key.root, scale: state.key.scale },
-    patterns: [
-      {
-        id: MAIN_PATTERN_ID,
-        name: 'Pattern 01',
-        drumRows: DRUM_VOICES.map(voice => ({ voice, steps: [...state.pattern[voice]] })),
-      },
-    ],
+    // `steps` reste lisible par les versions antérieures ; `velocities` porte la force des frappes.
+    patterns: state.patterns.map(pattern => ({
+      id: pattern.id,
+      name: pattern.name,
+      drumRows: DRUM_VOICES.map(voice => ({ voice, steps: pattern.steps[voice].map(velocity => velocity > 0), velocities: [...pattern.steps[voice]] })),
+    })),
     tracks: STUDIO_TRACKS.map(info => {
       const mix = state.mixer[info.id];
       const instrumental = info.id === 'instrumental' ? state.instrumental : null;
@@ -116,7 +109,7 @@ export function toProjectContent(state: StudioState): ProjectContent {
         // Le pattern d'une mesure joue en boucle sur la batterie ; l'instrumentale démarre au début du morceau.
         clips:
           info.id === 'drums'
-            ? state.drumClips.map(clip => ({ id: clip.id, startBeat: clip.startBar * BEATS_PER_BAR, durationBeats: clip.lengthBars * BEATS_PER_BAR, patternId: MAIN_PATTERN_ID }))
+            ? state.drumClips.map(clip => ({ id: clip.id, startBeat: clip.startBar * BEATS_PER_BAR, durationBeats: clip.lengthBars * BEATS_PER_BAR, patternId: clip.patternId }))
             : instrumental
               ? [{ id: INSTRUMENTAL_CLIP_ID, startBeat: state.instrumentalStartBeat, durationBeats: instrumental.durationBeats, offsetSeconds: 0, audioFileId: instrumental.fileId, label: instrumental.label.slice(0, CLIP_LABEL_MAX_LENGTH) }]
               : info.id === 'voice'
@@ -142,19 +135,29 @@ function readKey(project: MusicalProject): ProjectKey {
   return Number.isInteger(root) && root >= 0 && root <= 11 && isScale(scale) ? { root, scale } : DEFAULT_KEY;
 }
 
-function readPattern(project: MusicalProject): DrumPattern {
-  const stored = project.patterns?.find(pattern => pattern.id === MAIN_PATTERN_ID) ?? project.patterns?.[0];
-  if (!stored) {
+function readRow(row: { steps?: readonly boolean[]; velocities?: readonly number[] }): number[] | null {
+  if (row.velocities?.length === STEPS_PER_BAR) {
+    return row.velocities.map(velocity => (Number.isFinite(velocity) ? Math.min(1, Math.max(0, velocity)) : 0));
+  }
+  // Projets antérieurs à la M3 : frappe = vélocité forte.
+  return row.steps?.length === STEPS_PER_BAR ? row.steps.map(active => (active ? 1 : 0)) : null;
+}
+
+function readPatterns(project: MusicalProject): PatternEntry[] {
+  if (!project.patterns?.length) {
     // Nouveau projet : rythme de départ pour « Créer une prod », grille vide pour « Importer une prod ».
-    return project.origin === 'import' ? createEmptyPattern() : createDemoPattern();
+    return [{ id: DEFAULT_PATTERN_ID, name: 'Pattern 01', steps: project.origin === 'import' ? createEmptyPattern() : createDemoPattern() }];
   }
-  const pattern = createEmptyPattern() as Record<DrumVoice, boolean[]>;
-  for (const row of stored.drumRows ?? []) {
-    if (DRUM_VOICES.includes(row.voice as DrumVoice) && row.steps?.length === STEPS_PER_BAR) {
-      pattern[row.voice as DrumVoice] = row.steps.map(Boolean);
+  return project.patterns.map(stored => {
+    const steps = createEmptyPattern() as Record<DrumVoice, readonly number[]>;
+    for (const row of stored.drumRows ?? []) {
+      const values = DRUM_VOICES.includes(row.voice as DrumVoice) ? readRow(row) : null;
+      if (values) {
+        steps[row.voice as DrumVoice] = values;
+      }
     }
-  }
-  return pattern;
+    return { id: stored.id, name: stored.name || 'Pattern', steps };
+  });
 }
 
 function readMixer(project: MusicalProject): MixerState {
@@ -173,21 +176,24 @@ function readMixer(project: MusicalProject): MixerState {
  * d'une mesure qui signifiait « le pattern boucle sans fin » : il devient
  * l'arrangement par défaut. Une piste Batterie vide reste vide (choix de l'utilisateur).
  */
-function readDrumClips(project: MusicalProject): readonly DrumClip[] {
+function readDrumClips(project: MusicalProject, patterns: readonly PatternEntry[]): readonly DrumClip[] {
   const track = project.tracks?.find(candidate => candidate.id === 'drums');
+  const fallbackPattern = patterns[0].id;
   if (!track) {
-    return DEFAULT_DRUM_CLIPS;
+    return DEFAULT_DRUM_CLIPS.map(clip => ({ ...clip, patternId: fallbackPattern }));
   }
   const clips = track.clips.filter(clip => clip.patternId);
   const legacyLoop = clips.length === 1 && clips[0].id === DRUMS_CLIP_ID && clips[0].startBeat === 0 && clips[0].durationBeats === BEATS_PER_BAR;
   if (legacyLoop) {
-    return DEFAULT_DRUM_CLIPS;
+    return DEFAULT_DRUM_CLIPS.map(clip => ({ ...clip, patternId: fallbackPattern }));
   }
   return clips
     .map(clip => ({
       id: clip.id,
       startBar: Math.max(0, Math.round(clip.startBeat / BEATS_PER_BAR)),
       lengthBars: Math.max(1, Math.round(clip.durationBeats / BEATS_PER_BAR)),
+      // Pattern inconnu (supprimé, données abîmées) : le premier pattern du projet.
+      patternId: patterns.some(pattern => pattern.id === clip.patternId) ? clip.patternId! : fallbackPattern,
     }))
     .sort((a, b) => a.startBar - b.startBar);
 }
@@ -220,16 +226,17 @@ function readTakes(project: MusicalProject, bpm: number): { takes: TakeRef[]; ac
 export function fromProject(project: MusicalProject): StudioState {
   const bpm = Number.isFinite(project.bpm) ? clampBpm(project.bpm) : DEFAULT_BPM;
   const { takes, activeTakeId } = readTakes(project, bpm);
+  const patterns = readPatterns(project);
   return {
     bpm,
     key: readKey(project),
-    pattern: readPattern(project),
+    patterns,
     mixer: readMixer(project),
     instrumental: readInstrumental(project).ref,
     instrumentalEq: readInstrumental(project).eq,
     takes,
     activeTakeId,
-    drumClips: readDrumClips(project),
+    drumClips: readDrumClips(project, patterns),
     instrumentalStartBeat: readInstrumental(project).startBeat,
   };
 }

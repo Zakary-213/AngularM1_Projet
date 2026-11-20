@@ -72,7 +72,7 @@ export class StudioProjectService {
     return {
       bpm,
       key: this.session.projectKey(),
-      pattern: this.session.pattern(),
+      patterns: this.session.patterns(),
       mixer: this.session.mixer(),
       // Durée recalculée depuis le fichier quand il est chargé : elle suit le tempo courant.
       instrumental: ref && loaded?.fileId === ref.fileId ? { ...ref, durationBeats: secondsToBeats(loaded.buffer.duration, bpm) } : ref,
@@ -404,7 +404,7 @@ export class StudioProjectService {
     const state = fromProject(project);
     this.session.setBpm(state.bpm);
     this.session.projectKey.set(state.key);
-    this.session.pattern.set(state.pattern);
+    this.session.loadPatterns(state.patterns);
     this.session.mixer.set(state.mixer);
     this.session.instrumentalEq.set(state.instrumentalEq);
     this.session.loadArrangement(state.drumClips, state.instrumentalStartBeat);

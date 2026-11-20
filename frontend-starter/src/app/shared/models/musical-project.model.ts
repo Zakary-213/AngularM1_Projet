@@ -45,6 +45,8 @@ export interface ProjectTrack {
 export interface ProjectDrumRow {
   readonly voice: string;
   readonly steps: readonly boolean[];
+  /** Vélocité de chaque pas (0 à 1), depuis la M3 ; absente dans les projets plus anciens. */
+  readonly velocities?: readonly number[];
 }
 
 export interface ProjectPattern {

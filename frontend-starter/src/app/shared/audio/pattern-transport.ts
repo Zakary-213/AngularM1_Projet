@@ -1,4 +1,4 @@
-import { DrumPattern, voicesAtStep } from './drum-pattern';
+import { DrumPattern, hitsAtStep } from './drum-pattern';
 import { playDrumHit } from './drum-synth';
 import { playMetronomeClick } from './metronome';
 import { AudioClip, scheduleClip } from './mix-graph';
@@ -56,11 +56,10 @@ export class PatternTransport {
   constructor(
     private readonly context: AudioContext,
     private readonly output: AudioNode,
-    pattern: () => DrumPattern,
+    /** Pattern joué à ce pas absolu (clips de la piste Batterie), ou `null` : batterie silencieuse. */
+    patternAt: (songStep: number) => DrumPattern | null,
     bpm: () => number,
     metronome: () => boolean,
-    /** La batterie joue-t-elle à ce pas absolu ? (clips de la piste Batterie). Par défaut : toujours. */
-    drumActive: (songStep: number) => boolean = () => true,
   ) {
     this.scheduler = new StepScheduler(
       () => context.currentTime,
@@ -71,8 +70,9 @@ export class PatternTransport {
           this.scheduleLoopPass(cursor.time);
         }
         const drums = this.trackGains.drums;
-        if (drums && drumActive(cursor.songStep)) {
-          voicesAtStep(pattern(), cursor.step).forEach(voice => playDrumHit(context, drums, voice, cursor.time));
+        const pattern = drums ? patternAt(cursor.songStep) : null;
+        if (drums && pattern) {
+          hitsAtStep(pattern, cursor.step).forEach(hit => playDrumHit(context, drums, hit.voice, cursor.time, hit.velocity));
         }
         // Le métronome contourne les pistes : il n'est ni mixé, ni exporté.
         if (this.bus && metronome() && cursor.step % STEPS_PER_BEAT === 0) {

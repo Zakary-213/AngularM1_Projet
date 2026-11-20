@@ -98,3 +98,12 @@ test("refuse les identifiants non stables et les types inconnus", async () => {
   assert.ok(errors.includes("tracks.0.id"));
   assert.ok(errors.includes("tracks.0.type"));
 });
+
+test("M3 : vélocités facultatives, 16 valeurs entre 0 et 1", async () => {
+  const row = (velocities) => [{ id: "pat-1", name: "X", drumRows: [{ voice: "kick", steps: steps([0]), ...(velocities ? { velocities } : {}) }] }];
+  const valid = Array.from({ length: 16 }, (_, i) => (i === 0 ? 0.7 : 0));
+  assert.deepEqual(await errorsOf(validProject({ patterns: row(valid) })), []);
+  assert.deepEqual(await errorsOf(validProject({ patterns: row() })), [], "projet antérieur sans vélocités");
+  assert.ok((await errorsOf(validProject({ patterns: row([1, 0.5]) }))).some((path) => path.endsWith("velocities")));
+  assert.ok((await errorsOf(validProject({ patterns: row(valid.map((v, i) => (i === 3 ? 2 : v))) }))).some((path) => path.endsWith("velocities")));
+});

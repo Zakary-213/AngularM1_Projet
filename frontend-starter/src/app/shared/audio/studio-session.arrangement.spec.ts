@@ -11,18 +11,18 @@ describe('StudioSessionService — arrangement et annulation', () => {
       providers: [StudioSessionService, { provide: AudioEngineService, useValue: { suspend: async () => undefined, currentTime: () => 0 } }],
     });
     session = TestBed.inject(StudioSessionService);
-    session.loadArrangement([{ id: 'intro', startBar: 0, lengthBars: 4 }], 0);
+    session.loadArrangement([{ id: 'intro', startBar: 0, lengthBars: 4, patternId: 'pattern-1' }], 0);
   });
 
   it('chaque modification est annulable puis rétablissable', () => {
     expect(session.canUndo()).toBe(false);
     session.moveDrumClip('intro', 2);
     session.resizeDrumClip('intro', 4);
-    expect(session.drumClips()).toEqual([{ id: 'intro', startBar: 2, lengthBars: 8 }]);
+    expect(session.drumClips()).toEqual([{ id: 'intro', startBar: 2, lengthBars: 8, patternId: 'pattern-1' }]);
     session.undo();
-    expect(session.drumClips()).toEqual([{ id: 'intro', startBar: 2, lengthBars: 4 }]);
+    expect(session.drumClips()).toEqual([{ id: 'intro', startBar: 2, lengthBars: 4, patternId: 'pattern-1' }]);
     session.undo();
-    expect(session.drumClips()).toEqual([{ id: 'intro', startBar: 0, lengthBars: 4 }]);
+    expect(session.drumClips()).toEqual([{ id: 'intro', startBar: 0, lengthBars: 4, patternId: 'pattern-1' }]);
     expect(session.canUndo()).toBe(false);
     session.redo();
     expect(session.drumClips()[0].startBar).toBe(2);

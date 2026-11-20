@@ -1,21 +1,61 @@
-<p class="muted">Batterie synthétisée, sans sample. Cliquez une case pour ajouter ou retirer une frappe ; la boucle d'une mesure se modifie aussi pendant la lecture.</p>
+<div class="patterns" role="group" aria-label="Patterns du projet">
+  <div class="field">
+    <label for="pattern-select">Pattern affiché</label>
+    <select id="pattern-select" (change)="onPatternChange($event)">
+      @for (entry of session.patterns(); track entry.id) {
+        <option [value]="entry.id" [selected]="entry.id === session.editedPatternId()">{{ entry.name }}</option>
+      }
+    </select>
+  </div>
+  <button type="button" (click)="create()" [disabled]="session.patterns().length >= maxPatterns" aria-label="Nouveau pattern">＋ Nouveau</button>
+  <button type="button" (click)="duplicate()" [disabled]="session.patterns().length >= maxPatterns" aria-label="Dupliquer le pattern">Dupliquer</button>
+  <button type="button" (click)="startRename()" aria-label="Renommer le pattern">Renommer</button>
+  <button type="button" (click)="askDelete()" [disabled]="session.patterns().length <= 1" aria-label="Supprimer le pattern">Supprimer</button>
+  <small class="muted" role="status">
+    {{ session.patterns().length }} pattern{{ session.patterns().length > 1 ? 's' : '' }} · celui-ci est joué par {{ usage() }} clip{{ usage() > 1 ? 's' : '' }}
+  </small>
+</div>
+@if (renaming()) {
+  <form class="inline-form" [formGroup]="renameForm" (ngSubmit)="rename()">
+    <label for="pattern-name">Nom du pattern</label>
+    <input id="pattern-name" type="text" formControlName="name" [maxlength]="nameMaxLength" />
+    <button type="submit" class="button primary">Enregistrer</button>
+    <button type="button" (click)="renaming.set(false)">Annuler</button>
+  </form>
+}
+@if (confirmDelete()) {
+  <div class="inline-form" role="group" aria-label="Confirmer la suppression du pattern">
+    <span>Supprimer « {{ session.editedPattern().name }} » ?</span>
+    <button type="button" class="danger" (click)="delete()">Confirmer la suppression</button>
+    <button type="button" (click)="confirmDelete.set(false)">Annuler</button>
+  </div>
+}
+@if (patternMessage(); as message) { <p class="error" role="alert">{{ message }}</p> }
+
+<p class="muted">Batterie synthétisée, sans sample. Cliquez une case pour la faire passer de vide à <b>forte</b>, <b>moyenne</b>, <b>douce</b> puis vide. ◀ ▶ décalent toutes les frappes d'un instrument d'un pas. Les modifications s'entendent pendant la lecture.</p>
 <div class="sequencer-scroll">
   <table class="sequencer">
-    <caption class="visually-hidden">Pattern d'une mesure ; chaque bouton active ou désactive une frappe.</caption>
+    <caption class="visually-hidden">{{ session.editedPattern().name }} : une mesure de 16 pas ; chaque bouton règle la force d'une frappe.</caption>
     <tbody>
       @for (voice of voices; track voice) {
         <tr>
           <th scope="row">{{ voiceLabels[voice] }}</th>
+          <td class="shift">
+            <button type="button" class="shift-button" (click)="session.shiftRow(voice, -1)" [attr.aria-label]="'Décaler les frappes de ' + voiceLabels[voice] + ' d’un pas plus tôt'">◀</button>
+            <button type="button" class="shift-button" (click)="session.shiftRow(voice, 1)" [attr.aria-label]="'Décaler les frappes de ' + voiceLabels[voice] + ' d’un pas plus tard'">▶</button>
+          </td>
           @for (step of steps; track step) {
+            @let velocity = velocityAt(voice, step);
             <td>
               <button type="button" class="step"
-                [class.on]="session.pattern()[voice][step]"
+                [class.on]="velocity > 0"
                 [class.beat]="step % stepsPerBeat === 0"
                 [class.current]="session.currentStep() === step"
-                [attr.aria-pressed]="session.pattern()[voice][step]"
+                [attr.aria-pressed]="velocity > 0"
                 [attr.aria-label]="stepLabel(voice, step)"
-                (click)="session.toggleStep(voice, step)">
-                <span aria-hidden="true">{{ session.pattern()[voice][step] ? '●' : '' }}</span>
+                (click)="session.cycleStep(voice, step)">
+                <!-- Hauteur de la barre = force de la frappe (pas seulement la couleur). -->
+                <span class="velocity" [style.height.%]="velocity * 100" aria-hidden="true"></span>
               </button>
             </td>
           }

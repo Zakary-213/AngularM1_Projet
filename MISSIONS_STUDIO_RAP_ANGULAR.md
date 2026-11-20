@@ -186,12 +186,12 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 - [ ] Intégrer une première bibliothèque **autorisée** de kick, snare, clap, hi-hat et percussions.
 - [ ] Ajouter des samples **808 / basses** et des sons de préécoute.
-- [ ] Créer un **séquenceur de 16 pas** avec instruments par ligne.
-- [ ] Programmer, désactiver et déplacer des frappes.
-- [ ] Gérer la vélocité élémentaire et le BPM.
-- [ ] Mettre un pattern en **boucle avec lecture immédiate**.
-- [ ] Créer, dupliquer, modifier et supprimer des patterns.
-- [ ] Sauvegarder les patterns dans le projet.
+- [x] Créer un **séquenceur de 16 pas** avec instruments par ligne.
+- [x] Programmer, désactiver et déplacer des frappes.
+- [x] Gérer la vélocité élémentaire et le BPM.
+- [x] Mettre un pattern en **boucle avec lecture immédiate**.
+- [x] Créer, dupliquer, modifier et supprimer des patterns.
+- [x] Sauvegarder les patterns dans le projet.
 
 **Livrable :** Drum Rack opérationnel avec plusieurs kits/samples.
 

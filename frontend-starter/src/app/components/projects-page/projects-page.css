@@ -1,1 +1,49 @@
 :host { display: block; min-width: 0; }
+
+h1 span { color: var(--accent); }
+h2 { font-size: 18px; margin-top: 0; }
+
+.new-project-form { margin-bottom: 24px; }
+.new-project-form form { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+
+.field { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 480px; }
+.field label, .rename label { font-size: 12px; font-weight: 650; }
+input[type='text'] {
+  min-height: 44px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #404040;
+  background: #0d0d0d;
+  color: inherit;
+}
+
+.origins { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; width: 100%; min-width: 0; border: 0; padding: 0; margin: 0; }
+.origins legend { font-size: 12px; font-weight: 650; margin-bottom: 8px; }
+.origin { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.origin:has(input:checked) { border-color: var(--accent); }
+.origin input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--accent); }
+.origin span { display: flex; flex-direction: column; gap: 4px; }
+.origin small { color: var(--muted); font-size: 12px; }
+
+.error { color: #ff8a80; margin: 0; }
+
+.project-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.project-item { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.project-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.project-head h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+.project-head a:hover { text-decoration: underline; }
+.meta { margin: 0; font-size: 13px; }
+.project-item .muted { margin: 0; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 8px; }
+.rename { display: flex; flex-direction: column; gap: 8px; }
+.confirm p { margin: 0 0 4px; font-size: 13px; }
+button.danger { background: #b3261e; border-color: #b3261e; color: #ffffff; }
+
+.list-error, .empty { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.list-error p { margin: 0; }
+
+.pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 20px; font-size: 13px; }
+
+a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 2px; }

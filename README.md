@@ -79,7 +79,8 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Comptes | Inscription, connexion JWT, profil, photo de profil, déconnexion depuis l’en-tête | ✅ Fonctionnel |
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Visite 3D d'un studio au défilement : la caméra avance jusqu'au bureau (synthé, enceintes, écran) | ✅ Fonctionnel |
-| Interface | Pages Projets, Studio, Bibliothèque, Collaborations, Publications | 🎨 Maquette |
+| Projets | Mes projets (créer « Créer / Importer une prod », ouvrir, renommer, supprimer, pagination), sauvegarde du studio avec état visible et conflits détectés | ✅ Fonctionnel (M1) |
+| Interface | Pages Bibliothèque, Collaborations, Publications | 🎨 Maquette |
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Composition | Drum Rack, Piano Roll, instruments, timeline | ⏳ À faire (M3 → M5) |
@@ -265,7 +266,7 @@ Compte de démonstration : `demo@example.com` / `Demo1234!`.
 - **Avant chaque fusion** : `npm test` dans chaque partie modifiée, `npm run build` après un changement frontend, vérification au navigateur (console, onglet Network, largeurs 360 px / tablette / bureau).
 - **Accessibilité** : HTML sémantique, focus visible, noms accessibles, respect de `prefers-reduced-motion`.
 
-Dernier résultat connu : **81 / 81 tests frontend** et **15 / 15 tests backend** réussis, build OK (16 novembre 2026).
+Dernier résultat connu : **141 / 141 tests frontend** et **26 / 26 tests backend** réussis, build OK (20 novembre 2026).
 
 ---
 
@@ -292,22 +293,24 @@ Base : `/api`. Sauf inscription et connexion, envoyer `Authorization: Bearer <to
 
 `Page<Track>` contient `items`, `page`, `limit`, `total` et `pages`. Formats audio acceptés : MP3, WAV, OGG et M4A, 25 Mo maximum. Erreurs courantes : `400` validation, `401` authentification, `404` ressource absente ou non autorisée, `409` email déjà utilisé.
 
-### Projets musicaux — format v1 et routes prévues (M1, non implémentées)
+### Projets musicaux (format v1, M1 #7)
 
-Définis en M0 (#5) pour l'issue #7. Le schéma est `backend/src/models/MusicalProject.js` (validé par `backend/test/musical-project.test.js`) ; les routes ci-dessous ne répondent pas encore.
+Schéma : `backend/src/models/MusicalProject.js` ; routes : `backend/src/routes/projects.js`. Toutes les routes exigent le JWT.
 
 | Méthode | Route | Requête | Réponse principale |
 |---|---|---|---|
-| GET | `/projects?page=1&limit=10` | JWT | `200 Page<ProjectSummary>` (id, title, origin, bpm, updatedAt) |
-| POST | `/projects` | `{title, origin: "create"\|"import", bpm?}` + JWT | `201 Project` |
+| GET | `/projects?page=1&limit=12` | JWT (`limit` 1 à 50, défaut 12) | `200 Page<ProjectSummary>`, du plus récemment modifié au plus ancien |
+| POST | `/projects` | `{title, origin: "create"\|"import", bpm?, key?}` + JWT | `201 Project` (révision 0) |
 | GET | `/projects/:id` | JWT (propriétaire) | `200 Project` |
-| PUT | `/projects/:id` | `{revision, title, bpm, key, tracks, patterns, master}` + JWT | `200 Project` (révision + 1) |
-| PATCH | `/projects/:id` | `{title}` + JWT | `200 Project` (renommage) |
-| DELETE | `/projects/:id` | JWT (propriétaire) | `204` |
+| PUT | `/projects/:id` | `{revision, title?, bpm?, key?, tracks?, patterns?, master?}` + JWT | `200 Project` (révision + 1) |
+| PATCH | `/projects/:id` | `{title}` + JWT | `200 Project` (renommage, révision + 1) |
+| DELETE | `/projects/:id` | JWT (propriétaire) | `204` (les fichiers `Track` référencés sont conservés) |
 
-`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`), `tracks[]` (16 max. ; `id` stable, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `volume` 0 à 1, `pan` −1 à 1, `mute`, `solo`, `clips[]`), `patterns[]` (64 max. ; lignes de batterie de 16 pas, notes MIDI), `master.volume`, `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+`ProjectSummary` : `id`, `title`, `origin`, `bpm`, `key`, `trackCount`, `formatVersion`, `createdAt`, `updatedAt`.
 
-Règles prévues : `ownerId` vient du JWT, jamais du corps ; seuls les champs listés sont copiés (liste blanche) ; `404` pour un projet absent **ou** d'un autre utilisateur ; `400` validation ; `409` si `revision` ne correspond plus (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `422` si `formatVersion` n'est pas pris en charge (le projet n'est pas réécrit).
+`Project` : `id`, `ownerId`, `formatVersion` (1), `title` (1 à 80 caractères), `origin`, `bpm` (60 à 200), `timeSignature` (4/4 seulement en V1), `key` (`root` 0 à 11 depuis do, `scale` `major`\|`minor`\|`harmonicMinor`\|`phrygianDominant`), `tracks[]` (16 max. ; `id` stable, `name`, `type` `drum`\|`instrument`\|`audio`\|`vocal`, `color`, `volumeDb` −36 à +6, `pan` −1 à 1, `mute`, `solo`, `clips[]`), `patterns[]` (64 max. ; `drumRows` de 16 pas, `notes` MIDI), `master.volume` (0 à 1), `revision`, `createdAt`, `updatedAt`. Un clip a un `id` stable, `startBeat` et `durationBeats` (en temps, pour suivre les changements de BPM), `offsetSeconds` et **soit** `patternId`, **soit** `audioFileId` (référence d'une piste `Track`, jamais d'octets audio), plus `pitchCorrection` facultatif (`enabled`, `strength` 0 à 1, `retuneMs` 0 à 500).
+
+Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`, `tracks`, `patterns` et `master` sont copiés à la sauvegarde (liste blanche : `ownerId`, `origin`, `formatVersion`, `revision` envoyés sont ignorés) ; le document complet est validé avant écriture. Erreurs : `400` validation, révision absente ou JSON invalide ; `401` sans JWT ; `404` projet absent, identifiant mal formé **ou** projet d'un autre utilisateur ; `409 {message, revision}` si la révision envoyée n'est plus la révision actuelle (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `413` corps JSON au-delà de 1 Mo ; `422` si le projet stocké a un `formatVersion` non pris en charge (il n'est pas réécrit).
 
 ---
 
@@ -337,6 +340,21 @@ Règles prévues : `ownerId` vient du JWT, jamais du corps ; seuls les champs li
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 20 novembre 2026 — M1 : bibliothèque de projets persistants (#7)
+
+- **Backend** : routes `/api/projects` (liste paginée, création, ouverture, sauvegarde, renommage, suppression) dans `backend/src/routes/projects.js`, montées derrière le middleware JWT. Chaque requête filtre sur `ownerId` = utilisateur du token ; un projet d'un autre utilisateur répond `404` comme un projet inexistant. Sauvegarde par liste blanche, validation complète du document, puis écriture conditionnée à la révision (`findOneAndUpdate` sur `{_id, ownerId, revision}`) : deux onglets ne peuvent pas s'écraser (`409`). Projet d'un format futur : `422` sans réécriture. Corps JSON limité à 1 Mo (`413`), JSON invalide en `400`.
+- **Format v1 ajusté avant toute donnée réelle** : volume de piste en dB (`volumeDb`, comme le fader du studio) et quatre gammes (`harmonicMinor` et `phrygianDominant` ajoutées en M9).
+- **Mes projets** (`/projects`, connexion requise) : formulaire « Créer une prod » / « Importer une prod » qui ouvre le studio, liste paginée (12 par page) avec tempo, tonalité, pistes et date, renommage sur place, suppression avec confirmation, états chargement / vide / erreur avec « Réessayer », double envoi bloqué. Les projets de démonstration restent seulement sur l'accueil et les publications.
+- **Studio d'un projet** (`/studio/:id`) : `StudioProjectService` charge le projet dans la session (tempo, tonalité, pattern de batterie, mixeur), affiche *Sauvegardé · révision n* / *Modifications non sauvegardées* / *Sauvegarde en cours* / *Échec* / *Conflit*, sauvegarde par bouton ou **Ctrl+S / Cmd+S**, confirmation avant de quitter avec des modifications (navigation interne et fermeture d'onglet). En cas de conflit, rien n'est envoyé : l'utilisateur recharge la version du serveur. `/studio` sans identifiant reste une session libre non sauvegardée.
+- **Correction** : `<base href="/">` manquait dans `index.html` ; le rechargement d'une URL à deux niveaux (`/studio/:id`) ne trouvait plus les fichiers de l'application.
+- **Limites** : l'instrumentale et les prises vocales ne sont pas encore envoyées au serveur (M6, M8) — le studio l'indique ; pas de sauvegarde automatique (prévue en M10) ; une modification faite dans le studio libre `/studio` n'est pas récupérable dans un projet.
+
+**Vérifications**
+
+- Backend `npm test` : 26/26, dont 11 tests HTTP des routes projets (401 sans JWT, ownerId du corps ignoré, validations, **isolation entre deux utilisateurs** sur les cinq opérations, pagination, liste blanche, révision, 409, 422, renommage, suppression, JSON invalide). MongoDB y est remplacé par un stockage en mémoire branché sur les méthodes du modèle ; la validation Mongoose est la vraie. **Aucun test contre un vrai MongoDB** : aucune base n'était disponible dans l'environnement de développement.
+- Frontend `npm test` : 141/141, dont la conversion studio ↔ format (aller-retour exact, valeurs invalides), le contrat HTTP, le chargement / la sauvegarde / le conflit / l'erreur réseau / le format futur, et la page Mes projets (liste, vide, erreur et nouvel essai, création, double clic, titre vide, renommage par vraie soumission, suppression confirmée). `npm run build` réussi.
+- Navigateur (Chromium via Playwright, `npm start` + vrai backend Express avec le stockage en mémoire, deux comptes par JWT) : création → studio, modification → « non sauvegardées », Ctrl+S → révision 1, rechargement → tempo conservé, conflit entre deux onglets → message et rechargement, confirmation avant de quitter, second compte : liste vide et projet du premier refusé, renommage, suppression puis lien mort → « Projet introuvable ». Pas de débordement à 360 px.
 
 ### 16 novembre 2026 — Style Raï renforcé : réverbération et écho (M9, #15)
 

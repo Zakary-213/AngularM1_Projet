@@ -56,7 +56,7 @@ test("projet valide : valeurs par défaut et version du format", async () => {
   assert.equal(project.title, "Minuit sur la ville");
   assert.deepEqual({ ...project.key.toObject() }, { root: 9, scale: "minor" });
   assert.equal(project.revision, 0);
-  assert.equal(project.tracks[0].volume, 0.8);
+  assert.equal(project.tracks[0].volumeDb, 0);
 });
 
 test("toPublic expose id et ownerId en texte, sans _id ni __v", () => {

@@ -1,7 +1,7 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { DrumRackPanelComponent } from '../drum-rack-panel/drum-rack-panel';
 import { ExportPanelComponent } from '../export-panel/export-panel';
 import { MixerPanelComponent } from '../mixer-panel/mixer-panel';
@@ -11,6 +11,8 @@ import { DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
 import { STUDIO_TRACKS, StudioTrackInfo } from '../../shared/audio/studio-tracks';
 import { TrackMix } from '../../shared/audio/track-mix';
+import { StudioProjectService } from '../../shared/services/studio-project.service';
+import { LeaveConfirmation } from '../../shared/guards/unsaved-changes.guard';
 
 /** Niveaux de zoom de la timeline, en mesures visibles (du plus proche au plus large). */
 const ZOOM_LEVELS = [4, 8, 16, 32] as const;
@@ -29,17 +31,25 @@ interface TimelineTrack extends StudioTrackInfo {
 /**
  * Page Studio : assemble le transport, la timeline et les panneaux d'édition.
  * L'état audio vit dans `StudioSessionService`, fourni ici pour qu'il soit libéré
- * (micro, sources, ObjectURL) à la sortie du studio.
+ * (micro, sources, ObjectURL) à la sortie du studio. Avec un identifiant dans l'URL
+ * (`/studio/:id`), `StudioProjectService` charge et sauvegarde le projet.
  */
 @Component({
   selector: 'app-studio-page',
   imports: [RouterLink, ReactiveFormsModule, DrumRackPanelComponent, ExportPanelComponent, MixerPanelComponent, PitchCorrectionPanelComponent],
-  providers: [StudioSessionService],
+  providers: [StudioSessionService, StudioProjectService],
+  host: {
+    '(window:beforeunload)': 'onBeforeUnload($event)',
+    '(window:keydown)': 'onKeydown($event)',
+  },
   templateUrl: './studio-page.html',
   styleUrl: './studio-page.css',
 })
-export class StudioPageComponent {
+export class StudioPageComponent implements LeaveConfirmation {
   readonly session = inject(StudioSessionService);
+  readonly studioProject = inject(StudioProjectService);
+  /** Identifiant du projet ouvert, ou `null` pour la session libre de `/studio`. */
+  readonly projectId = inject(ActivatedRoute).snapshot.paramMap.get('id');
 
   readonly editorTabs: readonly EditorTab[] = ['Batterie', 'Correction vocale', 'Mixeur', 'Export'];
   readonly activeTab = signal<EditorTab>('Batterie');
@@ -94,6 +104,35 @@ export class StudioPageComponent {
 
   constructor() {
     this.bpmControl.valueChanges.pipe(takeUntilDestroyed()).subscribe(value => this.session.setBpm(value));
+    if (this.projectId) {
+      this.studioProject.load(this.projectId);
+    }
+    // Le champ BPM reflète le tempo chargé depuis le projet, sans renvoyer d'événement.
+    effect(() => {
+      const bpm = this.session.bpm();
+      if (this.bpmControl.value !== bpm && this.bpmControl.valid) {
+        this.bpmControl.setValue(bpm, { emitEvent: false });
+      }
+    });
+  }
+
+  /** Utilisé par `unsavedChangesGuard` avant de quitter le studio. */
+  canLeave(): boolean {
+    return !this.studioProject.hasUnsavedChanges() || confirm('Des modifications ne sont pas sauvegardées. Quitter quand même ?');
+  }
+
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (this.studioProject.hasUnsavedChanges()) {
+      event.preventDefault();
+    }
+  }
+
+  /** Ctrl+S / Cmd+S sauvegarde le projet, y compris depuis un champ (le raccourci n'y écrit rien). */
+  onKeydown(event: KeyboardEvent): void {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && this.studioProject.project()) {
+      event.preventDefault();
+      this.studioProject.save();
+    }
   }
 
   toggleRecording(): void {

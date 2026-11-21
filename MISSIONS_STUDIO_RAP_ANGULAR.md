@@ -265,14 +265,14 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **But :** travailler le son de la prod et des voix avec des réglages indépendants.
 
-- [ ] Volume distinct pour chaque piste et volume **Master**.
-- [ ] **Mute** et **Solo** indépendants.
-- [ ] Réglage de **panoramique** gauche/droite.
-- [ ] Égaliseur simple (graves, médiums, aigus) par piste.
-- [ ] Ajouter **réverbération** et **delay** activables.
-- [ ] Afficher un indicateur de niveau et signaler les saturations manifestes.
-- [ ] Conserver les paramètres de mixage après sauvegarde.
-- [ ] Assurer que les effets entendus sont pris en compte dans l'export.
+- [x] Volume distinct pour chaque piste et volume **Master**.
+- [x] **Mute** et **Solo** indépendants.
+- [x] Réglage de **panoramique** gauche/droite.
+- [x] Égaliseur simple (graves, médiums, aigus) par piste.
+- [x] Ajouter **réverbération** et **delay** activables.
+- [x] Afficher un indicateur de niveau et signaler les saturations manifestes.
+- [x] Conserver les paramètres de mixage après sauvegarde.
+- [x] Assurer que les effets entendus sont pris en compte dans l'export.
 
 **Livrable :** panneau Mixer fonctionnel.
 

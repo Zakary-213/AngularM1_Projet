@@ -25,6 +25,12 @@ export interface ProjectClip {
   readonly label?: string;
 }
 
+/** Envoi d'une piste vers un effet partagé : activé ou non, quantité de 0 à 1. */
+export interface ProjectFxSend {
+  readonly enabled: boolean;
+  readonly amount: number;
+}
+
 export interface ProjectTrack {
   readonly id: string;
   readonly name: string;
@@ -32,11 +38,14 @@ export interface ProjectTrack {
   readonly color?: string;
   /** Volume du fader en dB (-36 à +6). */
   readonly volumeDb?: number;
+  /** Panoramique de -1 (gauche) à 1 (droite). */
   readonly pan?: number;
   readonly mute?: boolean;
   readonly solo?: boolean;
   /** Égaliseur 3 bandes en dB (graves, médiums, aigus). */
   readonly eq?: { readonly lowDb: number; readonly midDb: number; readonly highDb: number };
+  /** Envois vers la réverbération et le delay partagés du mixeur (M7) ; absents avant la M7. */
+  readonly fx?: { readonly reverb?: ProjectFxSend; readonly delay?: ProjectFxSend };
   /** Prise jouée parmi les clips de la piste (piste Voix). */
   readonly activeClipId?: string;
   readonly clips: readonly ProjectClip[];
@@ -81,6 +90,8 @@ export interface ProjectContent {
   readonly key: ProjectKeySignature;
   readonly tracks: readonly ProjectTrack[];
   readonly patterns: readonly ProjectPattern[];
+  /** Volume Master linéaire (0 à 1, 0,8 par défaut). */
+  readonly master?: { readonly volume: number };
 }
 
 export interface MusicalProject extends ProjectContent {

@@ -4,27 +4,60 @@
     <section class="channel" [attr.aria-labelledby]="'mix-' + track.id">
       <span class="color" [style.background]="track.color" aria-hidden="true"></span>
       <h3 [id]="'mix-' + track.id">{{ track.name }}</h3>
+
+      <div class="meter-row">
+        <div class="meter" aria-hidden="true"><span class="meter-bar" [attr.data-meter]="track.id"></span></div>
+        <span class="clip-slot" role="status">@if (clipping().has(track.id)) {<strong class="clip">Saturation</strong>}</span>
+      </div>
+
       <label [for]="'vol-' + track.id">Volume : <b>{{ formatDb(mix.volumeDb) }}</b></label>
       <input [id]="'vol-' + track.id" type="range" [min]="minDb" [max]="maxDb" step="1" [value]="mix.volumeDb" (input)="onVolume(track, $event)" [attr.aria-label]="'Volume : ' + track.name" [attr.aria-valuetext]="formatDb(mix.volumeDb)" />
+
+      <label [for]="'pan-' + track.id">Panoramique : <b>{{ shortPan(mix.pan) }}</b></label>
+      <input [id]="'pan-' + track.id" type="range" min="-100" max="100" step="5" [value]="mix.pan * 100" (input)="onPan(track, $event)" (dblclick)="session.setTrack(track.id, { pan: 0 })" [attr.aria-label]="'Panoramique : ' + track.name" [attr.aria-valuetext]="formatPan(mix.pan)" />
+
       <div class="buttons">
         <button type="button" [class.on]="mix.muted" [attr.aria-pressed]="mix.muted" (click)="session.setTrack(track.id, { muted: !mix.muted })" [attr.aria-label]="'Muet : ' + track.name">M</button>
         <button type="button" [class.on]="mix.solo" [attr.aria-pressed]="mix.solo" (click)="session.setTrack(track.id, { solo: !mix.solo })" [attr.aria-label]="'Solo : ' + track.name">S</button>
       </div>
-      @if (track.id === 'instrumental') {
-        @let eq = session.instrumentalEq();
-        <fieldset class="eq">
-          <legend>Égaliseur</legend>
-          @for (item of eqBands; track item.band) {
-            <label class="eq-label" [for]="'eq-' + item.band"><span>{{ item.label }} <span class="hint">({{ item.hint }})</span></span><b>{{ formatDb(eq[item.band]) }}</b></label>
-            <input [id]="'eq-' + item.band" type="range" [min]="-maxBandDb" [max]="maxBandDb" step="1" [value]="eq[item.band]" (input)="onEq(item.band, $event)" [attr.aria-valuetext]="formatDb(eq[item.band])" />
+
+      <details class="section">
+        <summary>Égaliseur{{ isFlat(track) ? '' : ' · actif' }}</summary>
+        @for (item of eqBands; track item.band) {
+          <label class="row-label" [for]="'eq-' + track.id + '-' + item.band"><span>{{ item.label }} <span class="hint">({{ item.hint }})</span></span><b>{{ formatDb(mix.eq[item.band]) }}</b></label>
+          <input [id]="'eq-' + track.id + '-' + item.band" type="range" [min]="-maxBandDb" [max]="maxBandDb" step="1" [value]="mix.eq[item.band]" (input)="onEq(track, item.band, $event)" [attr.aria-label]="item.label + ' : ' + track.name" [attr.aria-valuetext]="formatDb(mix.eq[item.band])" />
+        }
+        <button type="button" class="small" (click)="resetEq(track)" [disabled]="isFlat(track)" [attr.aria-label]="'Remettre à plat l’égaliseur : ' + track.name">Remettre à plat</button>
+      </details>
+
+      <fieldset class="section">
+        <legend>Effets</legend>
+        @for (fx of effects; track fx.kind) {
+          @let send = mix[fx.kind];
+          <label class="check"><input type="checkbox" [checked]="send.enabled" (change)="toggleFx(track, fx.kind, $event)" [attr.aria-label]="fx.label + ' : ' + track.name" /> {{ fx.label }}</label>
+          @if (send.enabled) {
+            <label class="row-label" [for]="fx.kind + '-' + track.id"><span>Quantité</span><b>{{ percent(send) }} %</b></label>
+            <input [id]="fx.kind + '-' + track.id" type="range" min="0" max="100" step="5" [value]="percent(send)" (input)="onFxAmount(track, fx.kind, $event)" [attr.aria-label]="fx.label + ' : quantité, ' + track.name" [attr.aria-valuetext]="percent(send) + ' %'" />
           }
-          <button type="button" class="eq-reset" (click)="resetEq()" [disabled]="eq.lowDb === 0 && eq.midDb === 0 && eq.highDb === 0">Remettre à plat</button>
-        </fieldset>
-      }
+        }
+      </fieldset>
+
       <small class="state">
         @if (mix.muted) { Muette } @else if (silencedBySolo().has(track.id)) { Coupée par un solo } @else if (mix.solo) { En solo } @else { Active }
       </small>
     </section>
   }
+
+  <section class="channel master" aria-labelledby="mix-master">
+    <span class="color master-color" aria-hidden="true"></span>
+    <h3 id="mix-master">Master</h3>
+    <div class="meter-row">
+      <div class="meter" aria-hidden="true"><span class="meter-bar" data-meter="master"></span></div>
+      <span class="clip-slot" role="status">@if (clipping().has('master')) {<strong class="clip">Saturation</strong>}</span>
+    </div>
+    <label for="vol-master">Volume : <b>{{ formatMasterDb(masterDb()) }}</b></label>
+    <input id="vol-master" type="range" [min]="minMasterDb" [max]="maxMasterDb" step="0.5" [value]="masterDb()" (input)="onMaster($event)" aria-label="Volume Master" [attr.aria-valuetext]="formatMasterDb(masterDb())" />
+    <small class="state">Limiteur de sécurité après le volume. « Saturation » signale un niveau qui dépasserait 0 dBFS sans lui : baissez le Master ou les pistes concernées.</small>
+  </section>
 </div>
-<p class="note">Le volume, le mute, le solo et l'égaliseur de l'instrumentale s'appliquent pendant la lecture et dans l'export WAV. Le métronome n'est jamais exporté.</p>
+<p class="note">Tous ces réglages (volume, mute, solo, panoramique, égaliseur, réverbération, delay, Master) s'appliquent pendant la lecture et dans l'export WAV, et sont conservés à la sauvegarde. Les fichiers d'origine ne sont jamais modifiés. Le delay suit le tempo (croche pointée) ; la réverbération et le delay sont partagés par toutes les pistes. Le métronome n'est jamais exporté.</p>

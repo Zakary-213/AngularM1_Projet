@@ -54,11 +54,11 @@ import {
 import { InputDevice, MicrophoneRecorder, describeMicrophoneError, takeStartSeconds, toInputDevices } from './microphone-recorder';
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm, stepDurationSeconds } from './music-time';
 import { renderMix } from './offline-render';
+import { MixLevels } from './mixer-graph';
 import { PatternTransport, TrackClip } from './pattern-transport';
 import { NOTE_NAMES, SCALE_LABELS, midiToFrequency } from './pitch/musical-scale';
 import { DrumSound, playDrumHit } from './drum-synth';
 import { ProjectKey } from './pitch/vocal-styles';
-import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
 import { DEFAULT_LOOP_BARS, LoopBars, MAX_SONG_BARS, clampSongStep, loopStepRange, validateLoopBars } from './timeline-position';
 import {
   DEFAULT_DRUM_CLIPS,
@@ -76,7 +76,7 @@ import {
   resizeDrumClip,
 } from './arrangement';
 import { LoopRange } from './step-scheduler';
-import { MixerState, TrackId, TrackMix, clampTrackDb, createDefaultMixer, effectiveTrackGains, updateTrack } from './track-mix';
+import { DEFAULT_MASTER_VOLUME, MixerState, TrackId, TrackMix, clampMasterVolume, createDefaultMixer, updateTrack } from './track-mix';
 import { encodeWav, peakLevel, rmsLevel } from './wav-encoder';
 
 /** Gains appliqués aux fichiers audio du studio (linéaires). */
@@ -245,12 +245,13 @@ export class StudioSessionService implements OnDestroy {
   /** Tonalité du projet (la mineur par défaut) : reprise par la correction vocale. */
   readonly projectKey = signal<ProjectKey>({ root: 9, scale: 'minor' });
   readonly projectKeyLabel = computed(() => `${NOTE_NAMES[this.projectKey().root]} ${SCALE_LABELS[this.projectKey().scale]}`);
+  /** Réglages du mixeur par piste (M7) : volume, mute, solo, pan, égaliseur, envois d'effets. */
   readonly mixer = signal<MixerState>(createDefaultMixer());
+  /** Volume Master linéaire (0 à 1), appliqué avant le limiteur de sécurité. */
+  readonly masterVolume = signal(DEFAULT_MASTER_VOLUME);
   readonly engineError = signal<string | null>(null);
 
   readonly instrumental = signal<LoadedAudio | null>(null);
-  /** Égaliseur 3 bandes de la piste instrumentale (dB), appliqué à l'écoute et à l'export. */
-  readonly instrumentalEq = signal<ThreeBandEq>(FLAT_THREE_BAND_EQ);
   readonly importing = signal(false);
   readonly importError = signal<string | null>(null);
 
@@ -285,14 +286,16 @@ export class StudioSessionService implements OnDestroy {
   });
 
   constructor() {
-    // Volume, mute et solo s'appliquent pendant la lecture, sans la relancer.
+    // Les réglages du mixeur s'appliquent pendant la lecture, sans la relancer.
     effect(() => {
-      const gains = effectiveTrackGains(this.mixer());
-      this.transport?.setTrackGains(gains);
+      const mixer = this.mixer();
+      const masterVolume = this.masterVolume();
+      this.transport?.applyMix(mixer, masterVolume);
     });
+    // Le delay du mixeur reste calé sur le tempo.
     effect(() => {
-      const eq = this.instrumentalEq();
-      this.transport?.setInstrumentalEq(eq);
+      const bpm = this.bpm();
+      this.transport?.setTempo(bpm);
     });
   }
 
@@ -819,9 +822,18 @@ export class StudioSessionService implements OnDestroy {
     this.songStep.set(0);
   }
 
+  /** Modifie les réglages d'une piste ; les valeurs hors bornes sont ramenées dans les bornes. */
   setTrack(track: TrackId, change: Partial<TrackMix>): void {
-    const safe = change.volumeDb === undefined ? change : { ...change, volumeDb: clampTrackDb(change.volumeDb) };
-    this.mixer.update(mixer => updateTrack(mixer, track, safe));
+    this.mixer.update(mixer => updateTrack(mixer, track, change));
+  }
+
+  setMasterVolume(volume: number): void {
+    this.masterVolume.set(clampMasterVolume(volume));
+  }
+
+  /** Crêtes actuelles des pistes et du Master pour les vumètres, ou `null` hors lecture. */
+  readLevels(): MixLevels | null {
+    return this.playing() ? (this.transport?.readLevels() ?? null) : null;
   }
 
   /** Décode un MP3/WAV local et l'installe sur la piste instrumentale. Renvoie `true` si le fichier est utilisable. */
@@ -860,10 +872,6 @@ export class StudioSessionService implements OnDestroy {
     if (current?.buffer === buffer) {
       this.instrumental.set({ ...current, fileId });
     }
-  }
-
-  setInstrumentalEq(change: Partial<ThreeBandEq>): void {
-    this.instrumentalEq.update(eq => clampEq({ ...eq, ...change }));
   }
 
   /**
@@ -1125,22 +1133,15 @@ export class StudioSessionService implements OnDestroy {
     this.exportError.set(null);
     this.exportReport.set(null);
     try {
-      const gains = effectiveTrackGains(this.mixer());
-      // À l'export, l'égaliseur de l'instrumentale est porté par son clip (même réglage qu'à l'écoute).
-      const clips = this.trackClips(true).map(({ track, clip }) => ({
-        ...clip,
-        gain: clip.gain * gains[track],
-        ...(track === 'instrumental' ? { eq: this.instrumentalEq() } : {}),
-      }));
       const rendered = await renderMix({
         drumsAt: step => this.drumsAt(step),
         bpm: this.bpm(),
         bars,
-        drumsGain: gains.drums,
         // L'export suit l'arrangement : l'écoute seule d'un pattern n'y figure pas.
         notesAt: step => notesAtSongStep(this.instrumentClips(), this.melodicPatterns(), step),
-        instrumentGains: { melody: gains.melody, bass: gains.bass },
-        clips,
+        clips: this.trackClips(true),
+        mixer: this.mixer(),
+        masterVolume: this.masterVolume(),
       });
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
       const wav = new Blob([encodeWav(channels, rendered.sampleRate)], { type: 'audio/wav' });
@@ -1175,7 +1176,7 @@ export class StudioSessionService implements OnDestroy {
         fromSongStep = loop.startStep;
       }
       this.transport.play(
-        { clips: this.trackClips(includeTake), gains: effectiveTrackGains(this.mixer()), fromSongStep, instrumentalEq: this.instrumentalEq(), loop },
+        { clips: this.trackClips(includeTake), mixer: this.mixer(), masterVolume: this.masterVolume(), fromSongStep, loop },
         this.bpm(),
       );
       this.engineError.set(null);

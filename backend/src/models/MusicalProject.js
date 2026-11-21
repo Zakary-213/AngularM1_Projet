@@ -7,7 +7,8 @@ import mongoose from "mongoose";
  * Unités : positions et durées des clips en temps (beats), pour qu'un
  * changement de BPM conserve l'arrangement ; décalage dans un fichier audio
  * en secondes ; volume de piste en dB (fader du studio, -36 à +6) ; volume
- * Master linéaire de 0 à 1 ; panoramique de -1 (gauche) à 1.
+ * Master linéaire de 0 à 1 ; panoramique de -1 (gauche) à 1 ; quantité d'envoi
+ * vers un effet de 0 à 1.
  * Les octets audio ne sont jamais stockés ici : un clip audio référence un
  * document Track (audioFileId) dont le fichier reste sur le disque.
  */
@@ -73,6 +74,23 @@ const pitchCorrectionSchema = new mongoose.Schema(
 const eqBand = { type: Number, default: 0, min: -L.maxEqDb, max: L.maxEqDb };
 const eqSchema = new mongoose.Schema({ lowDb: eqBand, midDb: eqBand, highDb: eqBand }, { _id: false });
 
+// Envoi d'une piste vers la réverbération ou le delay partagés du mixeur (M7).
+// La quantité est conservée quand l'effet est désactivé, pour le retrouver tel quel.
+const fxSendSchema = new mongoose.Schema(
+  {
+    enabled: { type: Boolean, default: false },
+    amount: { type: Number, default: 0.3, min: 0, max: 1 },
+  },
+  { _id: false },
+);
+const fxSchema = new mongoose.Schema(
+  {
+    reverb: { type: fxSendSchema, default: () => ({}) },
+    delay: { type: fxSendSchema, default: () => ({}) },
+  },
+  { _id: false },
+);
+
 const clipSchema = new mongoose.Schema(
   {
     id: stableId,
@@ -106,6 +124,8 @@ const trackSchema = new mongoose.Schema(
     mute: { type: Boolean, default: false },
     solo: { type: Boolean, default: false },
     eq: { type: eqSchema, default: () => ({}) },
+    // Absents des projets antérieurs à la M7 : effets désactivés.
+    fx: { type: fxSchema, default: () => ({}) },
     // Prise jouée sur une piste qui en contient plusieurs (piste Voix) ; doit désigner un de ses clips.
     activeClipId: { type: String, match: stableId.match },
     clips: { type: [clipSchema], default: [], validate: maxItems(L.maxClipsPerTrack) },

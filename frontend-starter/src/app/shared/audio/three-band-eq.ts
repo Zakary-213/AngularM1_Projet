@@ -56,6 +56,8 @@ export function eqFilterSpecs(eq: ThreeBandEq): readonly EqFilterSpec[] {
 export interface EqChain {
   readonly input: AudioNode;
   readonly output: AudioNode;
+  /** Filtres de la chaîne, pour la déconnecter. */
+  readonly nodes: readonly AudioNode[];
   /** Applique de nouveaux gains, lissés si le contexte joue. */
   apply(eq: ThreeBandEq): void;
 }
@@ -77,6 +79,7 @@ export function createEqChain(context: BaseAudioContext, eq: ThreeBandEq): EqCha
   return {
     input: filters[0],
     output: filters[filters.length - 1],
+    nodes: filters,
     apply(next: ThreeBandEq) {
       eqFilterSpecs(next).forEach((spec, index) => filters[index].gain.setTargetAtTime(spec.gain, context.currentTime, EQ_SMOOTHING_SECONDS));
     },

@@ -148,3 +148,30 @@ test("M4 : pistes d'instruments dont les clips jouent un pattern", async () => {
   ];
   assert.deepEqual(await errorsOf(validProject({ tracks })), []);
 });
+
+test("M7 : pan, égaliseur et envois d'effets par piste, volume Master ; défauts neutres", async () => {
+  const project = new MusicalProject(validProject());
+  await project.validate();
+  assert.deepEqual(project.tracks[0].toObject().fx, { reverb: { enabled: false, amount: 0.3 }, delay: { enabled: false, amount: 0.3 } });
+  assert.equal(project.tracks[0].pan, 0);
+  assert.equal(project.master.volume, 0.8);
+
+  const mixed = validProject();
+  mixed.tracks[1] = {
+    ...mixed.tracks[1],
+    pan: -0.5,
+    eq: { lowDb: 3, midDb: -2, highDb: 6 },
+    fx: { reverb: { enabled: true, amount: 0.45 }, delay: { enabled: true, amount: 0.2 } },
+  };
+  assert.deepEqual(await errorsOf({ ...mixed, master: { volume: 0.6 } }), []);
+});
+
+test("M7 : refuse un pan, un envoi d'effet ou un Master hors bornes", async () => {
+  const bad = validProject();
+  bad.tracks[0] = { ...bad.tracks[0], pan: 2, fx: { reverb: { enabled: true, amount: 1.5 }, delay: { amount: -0.1 } } };
+  const errors = await errorsOf({ ...bad, master: { volume: 1.2 } });
+  assert.ok(errors.includes("tracks.0.pan"));
+  assert.ok(errors.includes("tracks.0.fx.reverb.amount"));
+  assert.ok(errors.includes("tracks.0.fx.delay.amount"));
+  assert.ok(errors.includes("master.volume"));
+});

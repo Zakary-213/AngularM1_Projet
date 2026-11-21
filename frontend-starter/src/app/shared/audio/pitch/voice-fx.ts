@@ -87,6 +87,44 @@ export function createReverbImpulse(sampleRate: number, seconds: number): Float3
   return impulse;
 }
 
+/** Réverbération synthétique prête à l'emploi (voix corrigée, envoi partagé du mixeur). */
+export function createReverbConvolver(context: BaseAudioContext, seconds: number): ConvolverNode {
+  const impulse = createReverbImpulse(context.sampleRate, seconds);
+  const buffer = context.createBuffer(1, impulse.length, context.sampleRate);
+  buffer.copyToChannel(impulse, 0);
+  const convolver = context.createConvolver();
+  // Énergie déjà normalisée par createReverbImpulse : pas de seconde normalisation.
+  convolver.normalize = false;
+  convolver.buffer = buffer;
+  return convolver;
+}
+
+export interface EchoLoop {
+  /** Entrée du delay. */
+  readonly input: AudioNode;
+  /** Répétitions (signal retardé seulement, sans le direct). */
+  readonly output: AudioNode;
+  readonly delay: DelayNode;
+  readonly feedback: GainNode;
+}
+
+/**
+ * Écho à répétitions : delay, passe-bas, puis réinjection d'une part `feedback`
+ * dans le delay. Temps en ms, borné à FX_LIMITS.
+ */
+export function createEchoLoop(context: BaseAudioContext, delayMs: number, feedback: number): EchoLoop {
+  const delay = context.createDelay(FX_LIMITS.maxDelayMs / 1000);
+  delay.delayTime.value = clamp(delayMs, FX_LIMITS.minDelayMs, FX_LIMITS.maxDelayMs, DRY_FX.delayMs) / 1000;
+  const damping = context.createBiquadFilter();
+  damping.type = 'lowpass';
+  damping.frequency.value = Math.min(DELAY_DAMPING_HZ, context.sampleRate / 2 - 1);
+  const loop = context.createGain();
+  loop.gain.value = clamp(feedback, 0, FX_LIMITS.maxFeedback, DRY_FX.feedback);
+  delay.connect(damping);
+  damping.connect(loop).connect(delay);
+  return { input: delay, output: damping, delay, feedback: loop };
+}
+
 /** Baisse le signal si sa crête dépasse MAX_PEAK ; renvoie le gain appliqué. */
 export function limitPeak(samples: Float32Array): number {
   let peak = 0;
@@ -133,31 +171,17 @@ export async function applyVoiceChain(samples: Float32Array<ArrayBuffer>, sample
   voice.connect(context.destination);
 
   if (safeFx.reverbMix > 0) {
-    const convolver = context.createConvolver();
-    convolver.normalize = false;
-    const impulse = createReverbImpulse(sampleRate, safeFx.reverbSeconds);
-    const impulseBuffer = context.createBuffer(1, impulse.length, sampleRate);
-    impulseBuffer.copyToChannel(impulse, 0);
-    convolver.buffer = impulseBuffer;
     const send = context.createGain();
     send.gain.value = safeFx.reverbMix;
-    voice.connect(convolver).connect(send).connect(context.destination);
+    voice.connect(createReverbConvolver(context, safeFx.reverbSeconds)).connect(send).connect(context.destination);
   }
 
   if (safeFx.delayMix > 0) {
-    const delay = context.createDelay(FX_LIMITS.maxDelayMs / 1000);
-    delay.delayTime.value = safeFx.delayMs / 1000;
-    const damping = context.createBiquadFilter();
-    damping.type = 'lowpass';
-    damping.frequency.value = Math.min(DELAY_DAMPING_HZ, sampleRate / 2 - 1);
-    const feedback = context.createGain();
-    feedback.gain.value = safeFx.feedback;
+    const echo = createEchoLoop(context, safeFx.delayMs, safeFx.feedback);
     const send = context.createGain();
     send.gain.value = safeFx.delayMix;
-    voice.connect(delay);
-    delay.connect(damping);
-    damping.connect(feedback).connect(delay);
-    damping.connect(send).connect(context.destination);
+    voice.connect(echo.input);
+    echo.output.connect(send).connect(context.destination);
   }
 
   source.start();

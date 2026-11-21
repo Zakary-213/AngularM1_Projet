@@ -5,8 +5,9 @@
 
 .mixer-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
+  align-items: start;
 }
 
 .channel {
@@ -16,12 +17,21 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
+}
+
+.master {
+  border-color: #f5a623;
 }
 
 .color {
   display: block;
   height: 3px;
   border-radius: 2px;
+}
+
+.master-color {
+  background: #f5a623;
 }
 
 h3 {
@@ -33,10 +43,53 @@ label {
   font-size: 12px;
 }
 
+/* Nom du réglage et valeur sur une ligne (le style global empile les labels). */
+.channel > label {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+
 input[type='range'] {
   width: 100%;
   min-height: 32px;
   accent-color: #f5a623;
+}
+
+.meter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+}
+
+.meter {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+/* Barre redimensionnée par requestAnimationFrame (transform : pas de recalcul de mise en page). */
+.meter-bar {
+  position: absolute;
+  inset: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  background: linear-gradient(90deg, #8bc8dd 0%, #c1ed75 70%, #f5a623 88%, #ff5c5c 100%);
+}
+
+.clip {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #ff5c5c;
+  color: #111111;
+  font-size: 11px;
 }
 
 .buttons {
@@ -57,6 +110,66 @@ input[type='range'] {
   color: #111111;
 }
 
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.section summary {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+details.section[open] summary {
+  margin-bottom: 4px;
+}
+
+.section legend {
+  font-size: 12px;
+  font-weight: 650;
+  padding: 0 4px;
+}
+
+.row-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.hint {
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.check input {
+  width: 18px;
+  height: 18px;
+  accent-color: #f5a623;
+}
+
+.small {
+  min-height: 36px;
+  font-size: 11px;
+}
+
 .state {
   font-size: 11px;
   color: var(--muted);
@@ -69,14 +182,14 @@ input[type='range'] {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+summary:focus-visible {
   outline: 3px solid #8bc8dd;
   outline-offset: 2px;
 }
 
-.eq { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 8px 0 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; width: 100%; }
-.eq legend { font-size: 11px; font-weight: 650; padding: 0 4px; }
-.eq .eq-label { display: flex; flex-direction: row; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 11px; }
-.eq .hint { color: var(--muted); }
-.eq input { width: 100%; accent-color: var(--accent); }
-.eq-reset { min-height: 36px; font-size: 11px; }
+@media (max-width: 480px) {
+  :host {
+    padding: 12px;
+  }
+}

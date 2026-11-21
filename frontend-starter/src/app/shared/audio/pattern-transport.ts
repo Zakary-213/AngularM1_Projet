@@ -3,32 +3,26 @@ import { DrumSound } from './drum-synth';
 import { playDrumHit } from './drum-synth';
 import { playInstrumentNote } from './instrument-synth';
 import { playMetronomeClick } from './metronome';
-import { AudioClip, scheduleClip } from './mix-graph';
+import { TrackClip, scheduleClip } from './mix-graph';
+import { MixLevels, MixerGraph } from './mixer-graph';
 import { STEPS_PER_BEAT, stepDurationSeconds } from './music-time';
 import { ScheduledNote } from './note-scheduling';
 import { LoopRange, StepCursor, StepScheduler } from './step-scheduler';
-import { EqChain, FLAT_THREE_BAND_EQ, ThreeBandEq, createEqChain } from './three-band-eq';
-import { TRACK_IDS, TrackId } from './track-mix';
+import { MixerState } from './track-mix';
 
 /** Délai entre le clic et la première frappe : laisse le temps de tout programmer. */
 export const START_DELAY_SECONDS = 0.1;
-/** Constante de temps des changements de volume : évite les claquements sans retard audible. */
-const GAIN_SMOOTHING_SECONDS = 0.015;
 
-/** Fichier audio rattaché à une piste du studio (sa piste porte le volume, le mute et le solo). */
-export interface TrackClip {
-  readonly track: 'instrumental' | 'voice';
-  readonly clip: AudioClip;
-}
+export type { TrackClip } from './mix-graph';
 
 export interface PlayOptions {
   readonly clips: readonly TrackClip[];
-  /** Gains linéaires effectifs de chaque piste au démarrage. */
-  readonly gains: Readonly<Record<TrackId, number>>;
+  /** Réglages du mixeur au démarrage (modifiables ensuite avec `applyMix`). */
+  readonly mixer: MixerState;
+  /** Volume Master linéaire (0 à 1). */
+  readonly masterVolume: number;
   /** Pas absolu de départ : 0 au début du morceau, sinon reprise après une pause. */
   readonly fromSongStep?: number;
-  /** Égaliseur de la piste instrumentale au démarrage (neutre par défaut). */
-  readonly instrumentalEq?: ThreeBandEq;
   /** Plage jouée en boucle ; le départ doit se trouver dans la plage. */
   readonly loop?: LoopRange | null;
 }
@@ -37,15 +31,15 @@ export interface PlayOptions {
  * Lecture synchronisée des patterns (batterie et instruments du Piano Roll) et de fichiers audio.
  * Toutes les sources sont datées sur l'horloge du même AudioContext à partir de
  * la date de démarrage : c'est ce qui les garde alignées, pas les timers de l'interface.
- * Chaque piste passe par son propre gain, réglable pendant la lecture.
+ * Chaque piste passe par sa tranche du mixeur (`MixerGraph`), réglable pendant la lecture ;
+ * le métronome, lui, contourne le mixeur et sort par `output` (préécoutes).
  */
 export class PatternTransport {
   private readonly scheduler: StepScheduler;
+  /** Bus du métronome pour cette lecture : le déconnecter coupe aussi les clics déjà programmés. */
   private bus: GainNode | null = null;
-  private trackGains: Partial<Record<TrackId, GainNode>> = {};
-  /** Entrée de chaque piste : son gain, ou l'égaliseur placé avant lui (instrumentale). */
-  private trackInputs: Partial<Record<TrackId, AudioNode>> = {};
-  private instrumentalEq: EqChain | null = null;
+  /** Mixeur de la lecture en cours (recréé à chaque lecture, comme les sources). */
+  private graph: MixerGraph | null = null;
   private sources: AudioBufferSourceNode[] = [];
   /** Clips et boucle de la lecture en cours, pour reprogrammer les fichiers à chaque tour. */
   private playingClips: readonly TrackClip[] = [];
@@ -74,14 +68,14 @@ export class PatternTransport {
         if (cursor.wrapped && this.loop) {
           this.scheduleLoopPass(cursor.time);
         }
-        const drums = this.trackGains.drums;
+        const drums = this.graph?.trackInputs.drums;
         const playing = drums ? drumsAt(cursor.songStep) : null;
         if (drums && playing) {
           hitsAtStep(playing.pattern, cursor.step).forEach(hit => playDrumHit(context, drums, hit.voice, cursor.time, hit.velocity, playing.sound));
         }
         const stepSeconds = stepDurationSeconds(bpm());
         for (const note of notesAt(cursor.songStep)) {
-          const output = this.trackGains[note.track];
+          const output = this.graph?.trackInputs[note.track];
           if (output) {
             playInstrumentNote(context, output, note.instrument, note.pitch, cursor.time, note.durationSteps * stepSeconds, note.velocity, note.params);
           }
@@ -114,21 +108,12 @@ export class PatternTransport {
     return this.shownSongStep;
   }
 
-  play({ clips, gains, fromSongStep = 0, instrumentalEq = FLAT_THREE_BAND_EQ, loop = null }: PlayOptions, bpm: number): number {
+  play({ clips, mixer, masterVolume, fromSongStep = 0, loop = null }: PlayOptions, bpm: number): number {
     this.stop();
-    // Bus dédié à cette lecture : le déconnecter coupe aussi les frappes déjà programmées.
     this.bus = this.context.createGain();
     this.bus.connect(this.output);
-    for (const id of TRACK_IDS) {
-      const gain = this.context.createGain();
-      gain.gain.value = gains[id];
-      gain.connect(this.bus);
-      this.trackGains[id] = gain;
-      this.trackInputs[id] = gain;
-    }
-    this.instrumentalEq = createEqChain(this.context, instrumentalEq);
-    this.instrumentalEq.output.connect(this.trackGains.instrumental!);
-    this.trackInputs.instrumental = this.instrumentalEq.input;
+    // Même graphe que l'export ; sa déconnexion à l'arrêt coupe les frappes déjà programmées.
+    this.graph = new MixerGraph(this.context, this.context.destination, { mixer, masterVolume, bpm }, true);
     const startTime = this.context.currentTime + START_DELAY_SECONDS;
     // Les clips sont placés en secondes : la position de reprise est convertie au tempo courant.
     const fromSeconds = fromSongStep * stepDurationSeconds(bpm);
@@ -142,16 +127,19 @@ export class PatternTransport {
     return startTime;
   }
 
-  /** Applique de nouveaux gains de piste pendant la lecture, avec un lissage court. */
-  setTrackGains(gains: Readonly<Record<TrackId, number>>): void {
-    for (const id of TRACK_IDS) {
-      this.trackGains[id]?.gain.setTargetAtTime(gains[id], this.context.currentTime, GAIN_SMOOTHING_SECONDS);
-    }
+  /** Applique de nouveaux réglages du mixeur pendant la lecture, sans la relancer. */
+  applyMix(mixer: MixerState, masterVolume: number): void {
+    this.graph?.apply(mixer, masterVolume);
   }
 
-  /** Applique un nouvel égaliseur à l'instrumentale pendant la lecture. */
-  setInstrumentalEq(eq: ThreeBandEq): void {
-    this.instrumentalEq?.apply(eq);
+  /** Recale le delay du mixeur après un changement de BPM. */
+  setTempo(bpm: number): void {
+    this.graph?.setTempo(bpm);
+  }
+
+  /** Crêtes des pistes et du Master pour les vumètres, ou `null` à l'arrêt. */
+  readLevels(): MixLevels | null {
+    return this.graph?.readLevels() ?? null;
   }
 
   /**
@@ -162,7 +150,7 @@ export class PatternTransport {
     const loopEndSeconds = this.loop ? this.loop.endStep * stepDurationSeconds(this.playBpm) : null;
     return this.playingClips
       .map(({ track, clip }) => {
-        const source = scheduleClip(this.context, this.trackInputs[track]!, clip, when, fromSeconds);
+        const source = scheduleClip(this.context, this.graph!.trackInputs[track], clip, when, fromSeconds);
         if (source && loopEndSeconds !== null) {
           source.stop(when + Math.max(0, loopEndSeconds - fromSeconds));
         }
@@ -194,9 +182,8 @@ export class PatternTransport {
     this.loop = null;
     this.bus?.disconnect();
     this.bus = null;
-    this.trackGains = {};
-    this.trackInputs = {};
-    this.instrumentalEq = null;
+    this.graph?.disconnect();
+    this.graph = null;
     this.songStart = null;
     this.pendingSteps = [];
     this.shownSongStep = -1;

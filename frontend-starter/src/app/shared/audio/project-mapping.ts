@@ -20,12 +20,12 @@ import {
   createDefaultMelodicPatterns,
 } from './melodic-pattern';
 import { InstrumentClips } from './note-scheduling';
-import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
-import { MixerState, TRACK_IDS, TrackId, TrackMix, clampTrackDb, createDefaultMixer } from './track-mix';
+import { MixerState, TRACK_IDS, TrackId, TrackMix, clampMasterVolume, createDefaultMixer, sanitizeTrackMix } from './track-mix';
 import { MusicalProject, ProjectClip, ProjectContent, ProjectPattern, ProjectTrackType } from '../models/musical-project.model';
 
 /**
- * Conversion entre l'état sérialisable du studio et le format de sauvegarde v1.
+ * Conversion entre l'état sérialisable du studio et le format de sauvegarde v1
+ * (réglages du mixeur M7 inclus : pan, égaliseur et envois d'effets par piste, Master).
  * Les objets audio (buffers, nœuds, prises) n'y figurent jamais : l'instrumentale
  * et les prises vocales sont référencées par l'identifiant de leur fichier dans
  * la bibliothèque (M6, M8).
@@ -56,8 +56,9 @@ export interface StudioState {
   /** Bibliothèque de patterns (M3). */
   readonly patterns: readonly PatternEntry[];
   readonly mixer: MixerState;
+  /** Volume Master linéaire (0 à 1). */
+  readonly masterVolume: number;
   readonly instrumental: InstrumentalRef | null;
-  readonly instrumentalEq: ThreeBandEq;
   readonly takes: readonly TakeRef[];
   /** Prise jouée sur la piste Voix, parmi `takes`, ou `null`. */
   readonly activeTakeId: string | null;
@@ -143,7 +144,9 @@ export function toProjectContent(state: StudioState): ProjectContent {
         volumeDb: mix.volumeDb,
         mute: mix.muted,
         solo: mix.solo,
-        ...(info.id === 'instrumental' ? { eq: { ...state.instrumentalEq } } : {}),
+        pan: mix.pan,
+        eq: { ...mix.eq },
+        fx: { reverb: { ...mix.reverb }, delay: { ...mix.delay } },
         ...(info.id === 'voice' && state.activeTakeId && state.takes.some(take => take.id === state.activeTakeId) ? { activeClipId: state.activeTakeId } : {}),
         // Le pattern d'une mesure joue en boucle sur la batterie ; l'instrumentale démarre au début du morceau.
         clips:
@@ -164,6 +167,7 @@ export function toProjectContent(state: StudioState): ProjectContent {
                 : [],
       };
     }),
+    master: { volume: state.masterVolume },
   };
 }
 
@@ -255,12 +259,21 @@ function readInstrumentClips(project: MusicalProject, patterns: readonly Melodic
   return { melody: readTrack('melody'), bass: readTrack('bass') };
 }
 
+/** Réglages du mixeur ; un projet antérieur à la M7 (sans pan, égaliseur ni effets) reste neutre sur ces réglages. */
 function readMixer(project: MusicalProject): MixerState {
   const mixer: Record<TrackId, TrackMix> = { ...createDefaultMixer() };
   for (const id of TRACK_IDS) {
     const track = project.tracks?.find(candidate => candidate.id === id);
     if (track) {
-      mixer[id] = { volumeDb: clampTrackDb(track.volumeDb ?? 0), muted: Boolean(track.mute), solo: Boolean(track.solo) };
+      mixer[id] = sanitizeTrackMix({
+        volumeDb: track.volumeDb,
+        muted: track.mute,
+        solo: track.solo,
+        pan: track.pan,
+        eq: track.eq,
+        reverb: track.fx?.reverb,
+        delay: track.fx?.delay,
+      });
     }
   }
   return mixer;
@@ -293,13 +306,13 @@ function readDrumClips(project: MusicalProject, patterns: readonly PatternEntry[
     .sort((a, b) => a.startBar - b.startBar);
 }
 
-function readInstrumental(project: MusicalProject): { ref: InstrumentalRef | null; eq: ThreeBandEq; startBeat: number } {
+function readInstrumental(project: MusicalProject): { ref: InstrumentalRef | null; startBeat: number } {
   const track = project.tracks?.find(candidate => candidate.id === 'instrumental');
   const clip = track?.clips?.find(candidate => typeof candidate.audioFileId === 'string' && candidate.audioFileId.length > 0);
   const ref = clip
     ? { fileId: clip.audioFileId!, label: clip.label || 'Instrumentale', durationBeats: Math.max(MIN_CLIP_BEATS, clip.durationBeats) }
     : null;
-  return { ref, eq: track?.eq ? clampEq(track.eq) : FLAT_THREE_BAND_EQ, startBeat: Math.max(0, Math.round(clip?.startBeat ?? 0)) };
+  return { ref, startBeat: Math.max(0, Math.round(clip?.startBeat ?? 0)) };
 }
 
 function readTakes(project: MusicalProject, bpm: number): { takes: TakeRef[]; activeTakeId: string | null } {
@@ -328,8 +341,8 @@ export function fromProject(project: MusicalProject): StudioState {
     key: readKey(project),
     patterns,
     mixer: readMixer(project),
+    masterVolume: clampMasterVolume(Number(project.master?.volume)),
     instrumental: readInstrumental(project).ref,
-    instrumentalEq: readInstrumental(project).eq,
     takes,
     activeTakeId,
     drumClips: readDrumClips(project, patterns),

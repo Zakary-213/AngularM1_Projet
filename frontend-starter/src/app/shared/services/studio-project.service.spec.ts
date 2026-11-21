@@ -200,7 +200,7 @@ describe('StudioProjectService', () => {
       expect(tracksApi.audio).toHaveBeenCalledWith(FILE_ID);
       await vi.waitFor(() => expect(session.instrumental()?.fileId).toBe(FILE_ID));
       expect(session.instrumental()?.name).toBe('beat.mp3');
-      expect(session.instrumentalEq()).toEqual({ lowDb: 5, midDb: 0, highDb: -3 });
+      expect(session.mixer().instrumental.eq).toEqual({ lowDb: 5, midDb: 0, highDb: -3 });
       expect(service.saveState()).toBe('saved');
     });
 

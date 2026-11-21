@@ -31,9 +31,17 @@ const state: StudioState = {
     { id: 'pattern-1', name: 'Couplet', steps: toggleStep(createDemoPattern(), 'snare', 0), kit: 'boomBap' },
     { id: 'pattern-refrain', name: 'Refrain', steps: cycleStep(cycleStep(createDemoPattern(), 'bass808', 2), 'bass808', 2), kit: 'trap' },
   ],
-  mixer: updateTrack(updateTrack(createDefaultMixer(), 'drums', { volumeDb: -6, solo: true }), 'voice', { muted: true }),
+  mixer: updateTrack(
+    updateTrack(
+      updateTrack(createDefaultMixer(), 'drums', { volumeDb: -6, solo: true, pan: -0.25 }),
+      'voice',
+      { muted: true, reverb: { enabled: true, amount: 0.4 }, delay: { enabled: true, amount: 0.2 } },
+    ),
+    'instrumental',
+    { eq: { lowDb: 3, midDb: -2, highDb: 1 } },
+  ),
+  masterVolume: 0.7,
   instrumental: { fileId: '64b0000000000000000000aa', label: 'beat.mp3', durationBeats: 186.67 },
-  instrumentalEq: { lowDb: 3, midDb: -2, highDb: 1 },
   takes: [
     // Début négatif : la compensation de latence fait commencer la prise juste avant le morceau.
     { id: 'take-a', fileId: '64b0000000000000000000b1', label: 'Prise 1', startSeconds: -0.09, durationSeconds: 12 },
@@ -234,9 +242,53 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(loaded.mixer.drums.volumeDb).toBe(6);
     expect(loaded.patterns[0].steps).toEqual(createEmptyPattern());
     expect(loaded.instrumental).toBeNull();
-    expect(loaded.instrumentalEq).toEqual(FLAT_THREE_BAND_EQ);
+    expect(loaded.mixer.drums.eq).toEqual(FLAT_THREE_BAND_EQ);
+    expect(loaded.masterVolume).toBe(0.8);
     expect(loaded.takes).toEqual([]);
     expect(loaded.activeTakeId).toBeNull();
+  });
+
+  it('M7 : sauvegarde pan, égaliseur et effets de chaque piste, et le volume Master', () => {
+    const content = toProjectContent(state);
+    const voice = content.tracks.find(track => track.id === 'voice')!;
+    expect(voice.fx).toEqual({ reverb: { enabled: true, amount: 0.4 }, delay: { enabled: true, amount: 0.2 } });
+    expect(content.tracks.find(track => track.id === 'drums')!.pan).toBe(-0.25);
+    expect(content.tracks.every(track => track.eq !== undefined)).toBe(true);
+    expect(content.master).toEqual({ volume: 0.7 });
+  });
+
+  it('M7 : un projet antérieur (sans pan, effets ni Master) s’ouvre avec un mix neutre', () => {
+    const loaded = fromProject(
+      project({
+        tracks: [{ id: 'voice', name: 'Voix', type: 'vocal', volumeDb: -3, mute: true, clips: [] }],
+      }),
+    );
+    expect(loaded.mixer.voice).toEqual({ ...createDefaultMixer().voice, volumeDb: -3, muted: true });
+    expect(loaded.masterVolume).toBe(0.8);
+  });
+
+  it('M7 : borne les réglages de mixage abîmés à la lecture', () => {
+    const loaded = fromProject(
+      project({
+        tracks: [
+          {
+            id: 'bass',
+            name: 'Basse',
+            type: 'instrument',
+            pan: 7,
+            eq: { lowDb: 40, midDb: Number.NaN, highDb: -3 },
+            fx: { reverb: { enabled: 'oui' as never, amount: 4 }, delay: { enabled: true, amount: Number.NaN } },
+            clips: [],
+          },
+        ],
+        master: { volume: 3 },
+      }),
+    );
+    expect(loaded.mixer.bass.pan).toBe(1);
+    expect(loaded.mixer.bass.eq).toEqual({ lowDb: 12, midDb: 0, highDb: -3 });
+    expect(loaded.mixer.bass.reverb).toEqual({ enabled: false, amount: 1 });
+    expect(loaded.mixer.bass.delay).toEqual({ enabled: true, amount: 0.3 });
+    expect(loaded.masterVolume).toBe(1);
   });
 
   it('l’empreinte change avec une modification et revient à l’identique après annulation', () => {

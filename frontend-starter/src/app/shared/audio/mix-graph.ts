@@ -1,5 +1,3 @@
-import { ThreeBandEq, createEqChain, isFlatEq } from './three-band-eq';
-
 /**
  * Éléments du graphe de mixage partagés par l'écoute et l'export.
  * Gains linéaires (0 à 1) sauf mention contraire ; niveaux affichés en dBFS.
@@ -13,17 +11,25 @@ const LIMITER_RATIO = 20;
 const LIMITER_ATTACK_SECONDS = 0.003;
 const LIMITER_RELEASE_SECONDS = 0.1;
 
-/** Crée l'entrée du Master (gain puis limiteur) reliée à la sortie du contexte. */
-export function createMasterChain(context: BaseAudioContext): GainNode {
-  const input = context.createGain();
-  input.gain.value = MASTER_GAIN;
+/** Limiteur de sécurité placé juste avant la sortie (Master du mixeur, préécoutes). */
+export function createLimiter(context: BaseAudioContext): DynamicsCompressorNode {
   const limiter = context.createDynamicsCompressor();
   limiter.threshold.value = LIMITER_THRESHOLD_DB;
   limiter.ratio.value = LIMITER_RATIO;
   limiter.knee.value = 0;
   limiter.attack.value = LIMITER_ATTACK_SECONDS;
   limiter.release.value = LIMITER_RELEASE_SECONDS;
-  input.connect(limiter).connect(context.destination);
+  return limiter;
+}
+
+/**
+ * Sortie des préécoutes (sons du Drum Rack, notes du Piano Roll) et du métronome :
+ * gain fixe puis limiteur. Le morceau, lui, passe par le Master du mixeur (`mixer-graph.ts`).
+ */
+export function createMasterChain(context: BaseAudioContext): GainNode {
+  const input = context.createGain();
+  input.gain.value = MASTER_GAIN;
+  input.connect(createLimiter(context)).connect(context.destination);
   return input;
 }
 
@@ -33,11 +39,12 @@ export interface AudioClip {
   /** Position du début du fichier par rapport au début du morceau, en secondes (peut être négative). */
   readonly startSeconds: number;
   readonly gain: number;
-  /**
-   * Égaliseur propre au clip, pour l'export hors ligne. À l'écoute, l'égaliseur
-   * est porté par la piste (réglable pendant la lecture) et ce champ reste vide.
-   */
-  readonly eq?: ThreeBandEq;
+}
+
+/** Fichier audio rattaché à une piste du studio (sa piste porte volume, égaliseur, pan et effets). */
+export interface TrackClip {
+  readonly track: 'instrumental' | 'voice';
+  readonly clip: AudioClip;
 }
 
 /**
@@ -67,14 +74,7 @@ export function scheduleClip(
   source.buffer = clip.buffer;
   const gain = context.createGain();
   gain.gain.value = clip.gain;
-  source.connect(gain);
-  if (clip.eq && !isFlatEq(clip.eq)) {
-    const chain = createEqChain(context, clip.eq);
-    gain.connect(chain.input);
-    chain.output.connect(output);
-  } else {
-    gain.connect(output);
-  }
+  source.connect(gain).connect(output);
   source.start(when, offset);
   return source;
 }

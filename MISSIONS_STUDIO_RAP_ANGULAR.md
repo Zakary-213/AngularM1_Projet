@@ -171,7 +171,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [x] Afficher des pistes avec titre, couleur, mute/solo et volume.
 - [ ] Permettre l'ajout, la sélection, le renommage et la suppression d'une piste.
 - [ ] Ajouter zoom horizontal, défilement, règles de mesures et sélection de position.
-- [ ] Prévoir le passage entre **Drum Rack, Piano Roll et Mixer**.
+- [x] Prévoir le passage entre **Drum Rack, Piano Roll et Mixer**. *(onglets Batterie, Piano Roll, Mixeur sous la timeline)*
 - [ ] Afficher l'état de sauvegarde et le bouton Export.
 
 **Livrable :** éditeur utilisable avec transport et pistes, même avant l'implémentation complète des outils.
@@ -203,13 +203,15 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 **But :** ajouter des mélodies et des lignes de basse, pas seulement des drums.
 
-- [ ] Ajouter au moins un **piano**, un **synthétiseur** et une **basse 808 jouable par notes**.
-- [ ] Créer le **Piano Roll** : hauteur des notes en vertical, temps en horizontal.
-- [ ] Ajouter des notes ; les déplacer, redimensionner et supprimer.
-- [ ] Pouvoir jouer plusieurs notes en même temps sur un instrument polyphonique.
-- [ ] Permettre la lecture immédiate et en boucle de la mélodie.
-- [ ] Associer chaque pattern à son instrument, son son et ses paramètres.
-- [ ] Enregistrer les notes, durées et vélocités (données de type MIDI).
+- [x] Ajouter au moins un **piano**, un **synthétiseur** et une **basse 808 jouable par notes**. *(synthétisés en Web Audio, sans sample ; même code à l'écoute et à l'export)*
+- [x] Créer le **Piano Roll** : hauteur des notes en vertical, temps en horizontal.
+- [x] Ajouter des notes ; les déplacer, redimensionner et supprimer. *(souris, et alternative clavier)*
+- [x] Pouvoir jouer plusieurs notes en même temps sur un instrument polyphonique.
+- [x] Permettre la lecture immédiate et en boucle de la mélodie. *(note entendue à la pose, « Écouter en boucle », modifications entendues pendant la lecture)*
+- [x] Associer chaque pattern à son instrument, son son et ses paramètres. *(instrument, brillance, relâchement, longueur de 1, 2 ou 4 mesures)*
+- [x] Enregistrer les notes, durées et vélocités (données de type MIDI). *(sauvegardées avec le projet et validées par le serveur)*
+
+> Vérifié par les tests, l'analyse de l'export WAV et la programmation des notes dans le navigateur ; la qualité sonore et la synchronisation **à l'oreille** restent à confirmer par l'équipe.
 
 **Livrable :** composition d'une mélodie et d'une basse par édition de notes.
 

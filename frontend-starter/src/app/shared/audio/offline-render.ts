@@ -1,6 +1,9 @@
 import { DrumPattern, hitsAtStep } from './drum-pattern';
 import { DrumSound } from './drum-synth';
 import { playDrumHit } from './drum-synth';
+import { playInstrumentNote } from './instrument-synth';
+import { INSTRUMENT_TRACK_IDS, InstrumentTrackId } from './melodic-pattern';
+import { ScheduledNote } from './note-scheduling';
 import { AudioClip, createMasterChain, scheduleClip } from './mix-graph';
 import { STEPS_PER_BAR, barsToSeconds, stepDurationSeconds } from './music-time';
 
@@ -16,13 +19,17 @@ export interface MixDescription {
   readonly bars: number;
   /** Gain linéaire de la piste batterie (volume, mute et solo déjà appliqués). Défaut : 1. */
   readonly drumsGain?: number;
+  /** Notes des pistes d'instruments qui commencent à ce pas absolu (M4). */
+  readonly notesAt?: (songStep: number) => readonly ScheduledNote[];
+  /** Gains linéaires des pistes Mélodie et Basse (volume, mute et solo appliqués). Défaut : 1. */
+  readonly instrumentGains?: Readonly<Record<InstrumentTrackId, number>>;
   /** Clips audio, avec le gain de leur piste déjà multiplié dans `gain`. */
   readonly clips: readonly AudioClip[];
 }
 
 /**
  * Rend le mix plus vite que le temps réel avec un OfflineAudioContext. Le graphe
- * (synthé de batterie, clips, Master) est construit avec les mêmes fonctions que
+ * (synthés de batterie et d'instruments, clips, Master) est construit avec les mêmes fonctions que
  * l'écoute : le fichier correspond au mix entendu.
  */
 export function renderMix(mix: MixDescription, sampleRate = EXPORT_SAMPLE_RATE): Promise<AudioBuffer> {
@@ -41,6 +48,16 @@ export function renderMix(mix: MixDescription, sampleRate = EXPORT_SAMPLE_RATE):
     const playing = mix.drumsAt(step);
     if (playing) {
       hitsAtStep(playing.pattern, step).forEach(hit => playDrumHit(context, drums, hit.voice, step * stepSeconds, hit.velocity, playing.sound));
+    }
+  }
+  const instruments: Record<InstrumentTrackId, GainNode> = { melody: context.createGain(), bass: context.createGain() };
+  for (const track of INSTRUMENT_TRACK_IDS) {
+    instruments[track].gain.value = mix.instrumentGains?.[track] ?? 1;
+    instruments[track].connect(master);
+  }
+  for (let step = 0; step < mix.bars * STEPS_PER_BAR; step++) {
+    for (const note of mix.notesAt?.(step) ?? []) {
+      playInstrumentNote(context, instruments[note.track], note.instrument, note.pitch, step * stepSeconds, note.durationSteps * stepSeconds, note.velocity, note.params);
     }
   }
   mix.clips.forEach(clip => scheduleClip(context, master, clip, 0));

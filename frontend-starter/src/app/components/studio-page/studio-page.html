@@ -31,7 +31,7 @@
           @default { Sauvegardé · révision {{ project.revision }} }
         }
       </p>
-      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie, mixeur, instrumentale et prises vocales (envoyées dans vos fichiers audio). La version corrigée d'une prise n'est pas encore sauvegardée (M10).</p>
+      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie, Piano Roll (notes et instruments), mixeur, instrumentale et prises vocales (envoyées dans vos fichiers audio). La version corrigée d'une prise n'est pas encore sauvegardée (M10).</p>
     } @else {
       <p class="eyebrow">STUDIO / SESSION DE DÉMONSTRATION</p>
       <h1>Session libre<span>.</span></h1>
@@ -126,13 +126,13 @@
       <button type="button" (click)="addDrumClip()">＋ Clip de batterie</button>
       @if (selection(); as clip) {
         <span class="clip-selection" role="status">Sélection : <b>{{ clip.ariaLabel }}</b></span>
-        <button type="button" (click)="moveClip(clip, -1)" [attr.aria-label]="clip.kind === 'drum' ? 'Plus tôt d’une mesure' : 'Plus tôt d’un temps'">◀</button>
-        <button type="button" (click)="moveClip(clip, 1)" [attr.aria-label]="clip.kind === 'drum' ? 'Plus tard d’une mesure' : 'Plus tard d’un temps'">▶</button>
-        @if (clip.kind === 'drum') {
+        <button type="button" (click)="moveClip(clip, -1)" [attr.aria-label]="isPatternClip(clip) ? 'Plus tôt d’une mesure' : 'Plus tôt d’un temps'">◀</button>
+        <button type="button" (click)="moveClip(clip, 1)" [attr.aria-label]="isPatternClip(clip) ? 'Plus tard d’une mesure' : 'Plus tard d’un temps'">▶</button>
+        @if (isPatternClip(clip)) {
           <label class="clip-pattern">Pattern
             <select (change)="onClipPatternChange($event)">
-              @for (entry of session.patterns(); track entry.id) {
-                <option [value]="entry.id" [selected]="entry.id === selectedDrumPatternId()">{{ entry.name }}</option>
+              @for (entry of selectablePatterns(); track entry.id) {
+                <option [value]="entry.id" [selected]="entry.id === selectedPatternId()">{{ entry.name }}</option>
               }
             </select>
           </label>
@@ -146,7 +146,7 @@
         <span class="clip-selection muted">Cliquez sur un clip pour le modifier.</span>
       }
     </div>
-    <p id="clip-help" class="visually-hidden">Glissez le clip pour le déplacer. Au clavier : flèches pour déplacer (Maj : d’une mesure pour l’audio), Suppr pour supprimer un clip de batterie, Ctrl + D pour le dupliquer, Échap pour désélectionner. Ctrl + Z annule, Ctrl + Maj + Z rétablit.</p>
+    <p id="clip-help" class="visually-hidden">Glissez le clip pour le déplacer. Au clavier : flèches pour déplacer (Maj : d’une mesure pour l’audio), Suppr pour supprimer un clip de batterie, de mélodie ou de basse, Ctrl + D pour le dupliquer, Échap pour désélectionner. Ctrl + Z annule, Ctrl + Maj + Z rétablit.</p>
     <div class="timeline-scroll">
       <div class="timeline-inner">
         <div class="timeline-ruler" role="slider" tabindex="0" aria-label="Position de lecture" aria-describedby="ruler-help"
@@ -182,7 +182,9 @@
                   }
                 </button>
               }
-              @if (track.id === 'drums' && session.drumClips().length === 0) {
+              @if ((track.id === 'melody' || track.id === 'bass') && session.instrumentClips()[track.id].length === 0) {
+                <p class="lane-hint">Aucun clip : composez dans l’onglet Piano Roll puis « Placer sur la piste ».</p>
+              } @else if (track.id === 'drums' && session.drumClips().length === 0) {
                 <p class="lane-hint">Aucun clip de batterie : placez la tête de lecture puis « ＋ Clip de batterie ».</p>
               } @else if (track.id === 'instrumental' && !session.instrumental()) {
                 <div class="lane-action">
@@ -260,6 +262,14 @@
         <div class="editor-body"><app-pitch-correction-panel /></div>
       } @loading {
         <p class="editor-body muted">Chargement de la correction vocale…</p>
+      }
+    }
+    @case ('Piano Roll') {
+      <!-- Instruments et Piano Roll chargés à la première ouverture de l'onglet. -->
+      @defer (on immediate) {
+        <app-piano-roll-panel />
+      } @loading {
+        <p class="editor-body muted">Chargement du Piano Roll…</p>
       }
     }
     @case ('Mixeur') { <app-mixer-panel /> }

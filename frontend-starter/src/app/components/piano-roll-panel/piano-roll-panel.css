@@ -1,0 +1,134 @@
+:host {
+  display: block;
+  padding: 18px 20px;
+  min-width: 0;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 0;
+}
+
+.roll-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; margin-bottom: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field.narrow input { width: 72px; }
+.field label, .inline-form label, .velocity-field { margin: 0; font-size: 12px; font-weight: 650; }
+.slider input { width: 150px; max-width: 100%; }
+select, input[type='text'], input[type='number'] { min-height: 40px; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid #404040; background: #0d0d0d; color: inherit; }
+.roll-toolbar button, .inline-form button { min-height: 40px; padding: 6px 12px; font-size: 12px; }
+.inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 13px; }
+.note-tools { align-items: center; font-size: 12px; }
+.velocity-field { display: inline-flex; align-items: center; gap: 6px; }
+button.danger { background: #b3261e; border-color: #b3261e; color: #ffffff; }
+.audition.on { border-color: var(--accent); color: var(--accent); }
+.error { color: #ff8a80; font-size: 12px; }
+.help { max-width: 72ch; }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 2px; }
+
+/* La grille défile dans son cadre, dans les deux sens, sans élargir la page. */
+.roll-scroll {
+  max-width: 100%;
+  max-height: 440px;
+  overflow: auto;
+  border: 1px solid #333333;
+  border-radius: 8px;
+  background: #101010;
+}
+
+.roll { display: flex; width: max-content; }
+
+/* Clavier figé à gauche pendant le défilement horizontal. */
+.keys {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  width: 58px;
+  flex: none;
+  background: #101010;
+  border-right: 1px solid #3a3a3a;
+}
+
+.key {
+  height: var(--row-height);
+  min-height: 0;
+  padding: 0 6px;
+  border-radius: 0;
+  border: 0;
+  border-bottom: 1px solid #2a2a2a;
+  background: #e8e8e8;
+  color: #111111;
+  font-size: 10px;
+  text-align: right;
+}
+
+.key.black { background: #222222; color: #d0d0d0; }
+.key.c-key { font-weight: 800; }
+.key:focus-visible { outline-offset: -3px; }
+
+.note-grid {
+  position: relative;
+  flex: none;
+  cursor: crosshair;
+  /* Lignes verticales : pas fin, temps moyen, mesure épaisse. */
+  background-image:
+    repeating-linear-gradient(90deg, #5a5a5a 0 2px, transparent 2px calc(var(--step-width) * 16)),
+    repeating-linear-gradient(90deg, #3c3c3c 0 1px, transparent 1px calc(var(--step-width) * 4)),
+    repeating-linear-gradient(90deg, #262626 0 1px, transparent 1px var(--step-width));
+}
+
+.pitch-row { height: var(--row-height); border-bottom: 1px solid #1f1f1f; }
+.pitch-row.black { background: rgba(255, 255, 255, 0.025); }
+
+.note {
+  position: absolute;
+  z-index: 1;
+  height: calc(var(--row-height) - 2px);
+  min-height: 0;
+  margin-top: 1px;
+  padding: 0 10px 0 4px;
+  overflow: hidden;
+  border-radius: 4px;
+  border: 1px solid #ffd2a8;
+  background: #f0a07a;
+  color: #1a0f08;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+  cursor: grab;
+  touch-action: none;
+}
+
+/* La sélection ne repose pas que sur la couleur : bordure épaisse claire. */
+.note.selected { outline: 3px solid #ffffff; outline-offset: 0; z-index: 2; }
+.note.dragging { cursor: grabbing; }
+.note:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 1px; }
+.note-name { pointer-events: none; }
+
+/* Poignée de redimensionnement : bord droit de la note. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  cursor: ew-resize;
+}
+
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--step-width);
+  background: rgba(255, 255, 255, 0.12);
+  border-left: 2px solid #f7f7f7;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .note { transition: none; }
+}

@@ -49,12 +49,30 @@ export interface ProjectDrumRow {
   readonly velocities?: readonly number[];
 }
 
+/** Note de type MIDI d'un pattern mélodique (M4). */
+export interface ProjectNote {
+  /** Numéro MIDI (0 à 127 ; 60 = do4). */
+  readonly pitch: number;
+  /** Début et durée en pas (doubles-croches) depuis le début du pattern. */
+  readonly startStep: number;
+  readonly durationSteps: number;
+  /** De 0 à 1. */
+  readonly velocity: number;
+}
+
 export interface ProjectPattern {
   readonly id: string;
   readonly name: string;
   /** Kit de sons (`boomBap` ou `trap`), depuis la M3 ; absent dans les projets plus anciens. */
   readonly kit?: string;
   readonly drumRows: readonly ProjectDrumRow[];
+  /** Instrument d'un pattern mélodique (`piano`, `synth`, `bass808`, M4) ; absent pour un pattern de batterie. */
+  readonly instrument?: string;
+  /** Réglages de l'instrument : brillance (0 à 1) et relâchement (0,02 à 2 s). */
+  readonly params?: { readonly tone: number; readonly releaseSeconds: number };
+  /** Longueur du pattern mélodique en mesures (1, 2 ou 4). */
+  readonly bars?: number;
+  readonly notes?: readonly ProjectNote[];
 }
 
 /** Champs qu'une sauvegarde peut modifier (le serveur ignore tous les autres). */

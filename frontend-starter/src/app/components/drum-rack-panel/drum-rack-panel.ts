@@ -66,14 +66,14 @@ export class DrumRackPanelComponent {
   create(): void {
     this.resetPanels();
     if (!this.session.createPattern()) {
-      this.patternMessage.set(`${MAX_PATTERNS} patterns maximum.`);
+      this.patternMessage.set(`${MAX_PATTERNS} patterns maximum (batterie et instruments).`);
     }
   }
 
   duplicate(): void {
     this.resetPanels();
     if (!this.session.duplicatePattern(this.session.editedPatternId())) {
-      this.patternMessage.set(`${MAX_PATTERNS} patterns maximum.`);
+      this.patternMessage.set(`${MAX_PATTERNS} patterns maximum (batterie et instruments).`);
     }
   }
 

@@ -116,3 +116,35 @@ test("M3 : nouveaux instruments et kit du pattern", async () => {
   const unknownVoice = [{ id: "pat-1", name: "X", drumRows: [{ voice: "cowbell", steps: steps([0]) }] }];
   assert.ok((await errorsOf(validProject({ patterns: unknownVoice }))).some((path) => path.endsWith("voice")));
 });
+
+test("M4 : pattern mélodique avec instrument, réglages, longueur et notes MIDI", async () => {
+  const melodic = (extra = {}, notes = [{ pitch: 60, startStep: 0, durationSteps: 8, velocity: 0.8 }]) => [
+    { id: "mel-1", name: "Accords", instrument: "piano", params: { tone: 0.6, releaseSeconds: 0.3 }, bars: 2, drumRows: [], notes, ...extra },
+  ];
+  assert.deepEqual(await errorsOf(validProject({ patterns: melodic() })), []);
+  assert.ok((await errorsOf(validProject({ patterns: melodic({ instrument: "theremin" }) }))).some((path) => path.endsWith("instrument")));
+  assert.ok((await errorsOf(validProject({ patterns: melodic({ bars: 3 }) }))).some((path) => path.endsWith("bars")));
+  assert.ok((await errorsOf(validProject({ patterns: melodic({ params: { tone: 2, releaseSeconds: 0.3 } }) }))).some((path) => path.endsWith("tone")));
+  assert.ok((await errorsOf(validProject({ patterns: melodic({ params: { tone: 0.5, releaseSeconds: 5 } }) }))).some((path) => path.endsWith("releaseSeconds")));
+});
+
+test("M4 : refuse les notes invalides, hors du pattern ou sans instrument", async () => {
+  const withNotes = (notes, extra = {}) => [{ id: "mel-1", name: "M", instrument: "bass808", bars: 1, drumRows: [], notes, ...extra }];
+  const note = (overrides) => ({ pitch: 33, startStep: 0, durationSteps: 4, velocity: 0.9, ...overrides });
+  for (const bad of [note({ pitch: 128 }), note({ pitch: 33.5 }), note({ startStep: 1.5 }), note({ durationSteps: 0 }), note({ velocity: 1.2 })]) {
+    assert.ok((await errorsOf(validProject({ patterns: withNotes([bad]) }))).length > 0, JSON.stringify(bad));
+  }
+  assert.ok((await errorsOf(validProject({ patterns: withNotes([note({ startStep: 14, durationSteps: 4 })]) }))).includes("patterns.0.notes"));
+  assert.deepEqual(await errorsOf(validProject({ patterns: withNotes([note({ startStep: 14, durationSteps: 4 })], { bars: 2 }) })), []);
+  assert.ok((await errorsOf(validProject({ patterns: withNotes([note({})], { instrument: undefined }) }))).includes("patterns.0.notes"));
+  const tooMany = Array.from({ length: PROJECT_LIMITS.maxNotesPerPattern + 1 }, (_, i) => note({ pitch: i % 128, startStep: Math.floor(i / 128) * 4, durationSteps: 1 }));
+  assert.ok((await errorsOf(validProject({ patterns: withNotes(tooMany, { bars: 4 }) }))).includes("patterns.0.notes"));
+});
+
+test("M4 : pistes d'instruments dont les clips jouent un pattern", async () => {
+  const tracks = [
+    { id: "melody", name: "Mélodie", type: "instrument", clips: [{ id: "melody-a", startBeat: 16, durationBeats: 32, patternId: "mel-1" }] },
+    { id: "bass", name: "Basse", type: "instrument", clips: [{ id: "bass-a", startBeat: 0, durationBeats: 16, patternId: "bass-1" }] },
+  ];
+  assert.deepEqual(await errorsOf(validProject({ tracks })), []);
+});

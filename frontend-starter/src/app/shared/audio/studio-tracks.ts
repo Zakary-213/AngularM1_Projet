@@ -11,6 +11,8 @@ export interface StudioTrackInfo {
 
 export const STUDIO_TRACKS: readonly StudioTrackInfo[] = [
   { id: 'drums', name: 'Batterie', type: 'Drum Rack', color: '#c1ed75', className: 'clip-lime' },
+  { id: 'melody', name: 'Mélodie', type: 'Piano Roll', color: '#f0a07a', className: 'clip-peach' },
+  { id: 'bass', name: 'Basse', type: 'Piano Roll · 808', color: '#e58fb0', className: 'clip-rose' },
   { id: 'instrumental', name: 'Instrumentale', type: 'Audio importé', color: '#bda4fa', className: 'clip-purple' },
   { id: 'voice', name: 'Voix principale', type: 'Prise micro', color: '#8bc8dd', className: 'clip-blue' },
 ];

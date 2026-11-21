@@ -57,7 +57,7 @@ function noiseBuffer(context: BaseAudioContext): AudioBuffer {
 }
 
 /** Saturation douce (tanh) : ajoute des harmoniques pour que la 808 s'entende sur de petites enceintes. */
-function saturationCurve(context: BaseAudioContext): Float32Array<ArrayBuffer> {
+export function saturationCurve(context: BaseAudioContext): Float32Array<ArrayBuffer> {
   let curve = saturationCurves.get(context);
   if (!curve) {
     const size = 1024;

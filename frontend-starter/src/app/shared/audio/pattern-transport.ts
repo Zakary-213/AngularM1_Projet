@@ -1,9 +1,11 @@
 import { DrumPattern, hitsAtStep } from './drum-pattern';
 import { DrumSound } from './drum-synth';
 import { playDrumHit } from './drum-synth';
+import { playInstrumentNote } from './instrument-synth';
 import { playMetronomeClick } from './metronome';
 import { AudioClip, scheduleClip } from './mix-graph';
 import { STEPS_PER_BEAT, stepDurationSeconds } from './music-time';
+import { ScheduledNote } from './note-scheduling';
 import { LoopRange, StepCursor, StepScheduler } from './step-scheduler';
 import { EqChain, FLAT_THREE_BAND_EQ, ThreeBandEq, createEqChain } from './three-band-eq';
 import { TRACK_IDS, TrackId } from './track-mix';
@@ -15,7 +17,7 @@ const GAIN_SMOOTHING_SECONDS = 0.015;
 
 /** Fichier audio rattaché à une piste du studio (sa piste porte le volume, le mute et le solo). */
 export interface TrackClip {
-  readonly track: Exclude<TrackId, 'drums'>;
+  readonly track: 'instrumental' | 'voice';
   readonly clip: AudioClip;
 }
 
@@ -32,7 +34,7 @@ export interface PlayOptions {
 }
 
 /**
- * Lecture synchronisée d'un pattern en boucle et de fichiers audio.
+ * Lecture synchronisée des patterns (batterie et instruments du Piano Roll) et de fichiers audio.
  * Toutes les sources sont datées sur l'horloge du même AudioContext à partir de
  * la date de démarrage : c'est ce qui les garde alignées, pas les timers de l'interface.
  * Chaque piste passe par son propre gain, réglable pendant la lecture.
@@ -61,6 +63,8 @@ export class PatternTransport {
     drumsAt: (songStep: number) => { readonly pattern: DrumPattern; readonly sound: DrumSound } | null,
     bpm: () => number,
     metronome: () => boolean,
+    /** Notes des pistes Mélodie et Basse qui commencent à ce pas absolu (M4). */
+    notesAt: (songStep: number) => readonly ScheduledNote[] = () => [],
   ) {
     this.scheduler = new StepScheduler(
       () => context.currentTime,
@@ -74,6 +78,13 @@ export class PatternTransport {
         const playing = drums ? drumsAt(cursor.songStep) : null;
         if (drums && playing) {
           hitsAtStep(playing.pattern, cursor.step).forEach(hit => playDrumHit(context, drums, hit.voice, cursor.time, hit.velocity, playing.sound));
+        }
+        const stepSeconds = stepDurationSeconds(bpm());
+        for (const note of notesAt(cursor.songStep)) {
+          const output = this.trackGains[note.track];
+          if (output) {
+            playInstrumentNote(context, output, note.instrument, note.pitch, cursor.time, note.durationSteps * stepSeconds, note.velocity, note.params);
+          }
         }
         // Le métronome contourne les pistes : il n'est ni mixé, ni exporté.
         if (this.bus && metronome() && cursor.step % STEPS_PER_BEAT === 0) {

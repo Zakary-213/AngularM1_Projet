@@ -3,9 +3,9 @@
  * Données sérialisables ; les nœuds audio correspondants vivent dans le transport.
  */
 
-export type TrackId = 'drums' | 'instrumental' | 'voice';
+export type TrackId = 'drums' | 'melody' | 'bass' | 'instrumental' | 'voice';
 
-export const TRACK_IDS: readonly TrackId[] = ['drums', 'instrumental', 'voice'];
+export const TRACK_IDS: readonly TrackId[] = ['drums', 'melody', 'bass', 'instrumental', 'voice'];
 
 /** Bornes du fader de piste, en dB relatifs au niveau d'origine de la piste. */
 export const MIN_TRACK_DB = -36;
@@ -22,7 +22,7 @@ export type MixerState = Readonly<Record<TrackId, TrackMix>>;
 
 export function createDefaultMixer(): MixerState {
   const neutral: TrackMix = { volumeDb: DEFAULT_TRACK_DB, muted: false, solo: false };
-  return { drums: neutral, instrumental: neutral, voice: neutral };
+  return { drums: neutral, melody: neutral, bass: neutral, instrumental: neutral, voice: neutral };
 }
 
 export function decibelsToGain(decibels: number): number {

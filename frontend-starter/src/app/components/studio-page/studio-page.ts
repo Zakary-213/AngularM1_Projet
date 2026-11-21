@@ -5,11 +5,13 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { DrumRackPanelComponent } from '../drum-rack-panel/drum-rack-panel';
 import { ExportPanelComponent } from '../export-panel/export-panel';
 import { MixerPanelComponent } from '../mixer-panel/mixer-panel';
+import { PianoRollPanelComponent } from '../piano-roll-panel/piano-roll-panel';
 import { PitchCorrectionPanelComponent } from '../pitch-correction-panel/pitch-correction-panel';
 import { TakesPanelComponent } from '../takes-panel/takes-panel';
 import { WaveformComponent } from '../waveform/waveform';
 import { AUDIO_FILE_ACCEPT } from '../../shared/audio/audio-file';
 import { BEATS_PER_BAR, DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../../shared/audio/music-time';
+import { InstrumentTrackId } from '../../shared/audio/melodic-pattern';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
 import { STUDIO_TRACKS, StudioTrackInfo } from '../../shared/audio/studio-tracks';
 import { TrackMix } from '../../shared/audio/track-mix';
@@ -26,9 +28,14 @@ const RULER_MARKS = 8;
 /** Largeur de la colonne des noms de pistes (styles.css : .track-label, .timeline-ruler). */
 const TRACK_LABEL_WIDTH_PX = 150;
 
-type EditorTab = 'Batterie' | 'Correction vocale' | 'Mixeur' | 'Export';
+type EditorTab = 'Batterie' | 'Piano Roll' | 'Correction vocale' | 'Mixeur' | 'Export';
 
-type ClipKind = 'drum' | 'instrumental' | 'take';
+type ClipKind = 'drum' | InstrumentTrackId | 'instrumental' | 'take';
+
+/** Clips qui jouent un pattern en boucle : placés, allongés et dupliqués par mesure. */
+function isPatternKind(kind: ClipKind): kind is 'drum' | InstrumentTrackId {
+  return kind === 'drum' || kind === 'melody' || kind === 'bass';
+}
 
 /** Clip affiché sur la timeline (position en % de la fenêtre visible). */
 interface TimelineClip {
@@ -68,7 +75,17 @@ const DRAG_THRESHOLD_PX = 4;
  */
 @Component({
   selector: 'app-studio-page',
-  imports: [RouterLink, ReactiveFormsModule, DrumRackPanelComponent, ExportPanelComponent, MixerPanelComponent, PitchCorrectionPanelComponent, TakesPanelComponent, WaveformComponent],
+  imports: [
+    RouterLink,
+    ReactiveFormsModule,
+    DrumRackPanelComponent,
+    ExportPanelComponent,
+    MixerPanelComponent,
+    PianoRollPanelComponent,
+    PitchCorrectionPanelComponent,
+    TakesPanelComponent,
+    WaveformComponent,
+  ],
   providers: [StudioSessionService, StudioProjectService],
   host: {
     '(window:beforeunload)': 'onBeforeUnload($event)',
@@ -83,12 +100,18 @@ export class StudioPageComponent implements LeaveConfirmation {
   /** Identifiant du projet ouvert, ou `null` pour la session libre de `/studio`. */
   readonly projectId = inject(ActivatedRoute).snapshot.paramMap.get('id');
 
-  readonly editorTabs: readonly EditorTab[] = ['Batterie', 'Correction vocale', 'Mixeur', 'Export'];
+  readonly editorTabs: readonly EditorTab[] = ['Batterie', 'Piano Roll', 'Correction vocale', 'Mixeur', 'Export'];
   readonly activeTab = signal<EditorTab>('Batterie');
   readonly audioAccept = AUDIO_FILE_ACCEPT;
   readonly minBpm = MIN_BPM;
   readonly maxBpm = MAX_BPM;
-  readonly instruments = [{ name: 'Drum machine', type: 'Rythme & percussions', icon: '▦' }, { name: '808 Bass', type: 'Basse & sub', icon: '≋' }, { name: 'Soft keys', type: 'Piano & claviers', icon: '♬' }, { name: 'Microphone', type: 'Voix & prises', icon: '♩' }];
+  readonly instruments = [
+    { name: 'Drum machine', type: 'Rythme & percussions', icon: '▦' },
+    { name: 'Piano', type: 'Piano Roll · accords et mélodies', icon: '♬' },
+    { name: 'Synthé', type: 'Piano Roll · nappes et leads', icon: '∿' },
+    { name: 'Basse 808', type: 'Piano Roll · basse jouée par notes', icon: '≋' },
+    { name: 'Microphone', type: 'Voix & prises', icon: '♩' },
+  ];
 
   readonly maxSongBars = MAX_SONG_BARS;
   readonly loopFrom = new FormControl(DEFAULT_LOOP_BARS.fromBar, { nonNullable: true });
@@ -149,7 +172,17 @@ export class StudioPageComponent implements LeaveConfirmation {
     const mixer = this.session.mixer();
     return STUDIO_TRACKS.map(info => {
       const clips: TimelineClip[] = [];
-      if (info.id === 'drums') {
+      if (info.id === 'melody' || info.id === 'bass') {
+        const names = new Map(this.session.melodicPatterns().map(entry => [entry.id, entry.name]));
+        for (const clip of this.session.instrumentClips()[info.id]) {
+          const box = layoutClip(clip.startBar * barSeconds, clip.lengthBars * barSeconds, visibleSeconds);
+          if (box) {
+            const range = clip.lengthBars > 1 ? `mesures ${clip.startBar + 1} à ${clip.startBar + clip.lengthBars}` : `mesure ${clip.startBar + 1}`;
+            const name = names.get(clip.patternId) ?? 'Pattern';
+            clips.push({ kind: info.id, id: clip.id, label: `${name} · ${clip.lengthBars} mes.`, ariaLabel: `Clip ${info.name} ${name}, ${range}`, ...box, pattern: 'note' });
+          }
+        }
+      } else if (info.id === 'drums') {
         const names = new Map(this.session.patterns().map(entry => [entry.id, entry.name]));
         for (const clip of this.session.drumClips()) {
           const box = layoutClip(clip.startBar * barSeconds, clip.lengthBars * barSeconds, visibleSeconds);
@@ -282,6 +315,8 @@ export class StudioPageComponent implements LeaveConfirmation {
     }
     if (clip.kind === 'drum') {
       this.session.moveDrumClip(clip.id, units);
+    } else if (clip.kind === 'melody' || clip.kind === 'bass') {
+      this.session.moveInstrumentClip(clip.kind, clip.id, units);
     } else if (clip.kind === 'instrumental') {
       this.session.moveInstrumental(units);
     } else {
@@ -289,26 +324,42 @@ export class StudioPageComponent implements LeaveConfirmation {
     }
   }
 
+  readonly isPatternClip = (clip: TimelineClip) => isPatternKind(clip.kind);
+
   duplicateSelected(): void {
     const clip = this.selection();
-    if (clip?.kind === 'drum') {
-      const copy = this.session.duplicateDrumClip(clip.id);
-      if (copy) {
-        this.selectedClip.set({ kind: 'drum', id: copy });
-      }
+    if (!clip || !isPatternKind(clip.kind)) {
+      return;
+    }
+    const copy = clip.kind === 'drum' ? this.session.duplicateDrumClip(clip.id) : this.session.duplicateInstrumentClip(clip.kind, clip.id);
+    if (copy) {
+      this.selectedClip.set({ kind: clip.kind, id: copy });
     }
   }
 
-  /** Pattern joué par le clip de batterie sélectionné. */
-  readonly selectedDrumPatternId = computed(() => {
+  /** Pattern joué par le clip sélectionné (batterie, mélodie ou basse). */
+  readonly selectedPatternId = computed(() => {
     const selected = this.selectedClip();
-    return selected?.kind === 'drum' ? (this.session.drumClips().find(clip => clip.id === selected.id)?.patternId ?? null) : null;
+    if (!selected || !isPatternKind(selected.kind)) {
+      return null;
+    }
+    const clips = selected.kind === 'drum' ? this.session.drumClips() : this.session.instrumentClips()[selected.kind];
+    return clips.find(clip => clip.id === selected.id)?.patternId ?? null;
+  });
+
+  /** Patterns proposés pour le clip sélectionné : batterie, ou patterns du Piano Roll. */
+  readonly selectablePatterns = computed<readonly { id: string; name: string }[]>(() => {
+    const selected = this.selectedClip();
+    return selected?.kind === 'drum' ? this.session.patterns() : this.session.melodicPatterns();
   });
 
   onClipPatternChange(event: Event): void {
     const clip = this.selection();
+    const patternId = (event.target as HTMLSelectElement).value;
     if (clip?.kind === 'drum') {
-      this.session.setDrumClipPattern(clip.id, (event.target as HTMLSelectElement).value);
+      this.session.setDrumClipPattern(clip.id, patternId);
+    } else if (clip?.kind === 'melody' || clip?.kind === 'bass') {
+      this.session.setInstrumentClipPattern(clip.kind, clip.id, patternId);
     }
   }
 
@@ -316,6 +367,8 @@ export class StudioPageComponent implements LeaveConfirmation {
     const clip = this.selection();
     if (clip?.kind === 'drum') {
       this.session.resizeDrumClip(clip.id, deltaBars);
+    } else if (clip?.kind === 'melody' || clip?.kind === 'bass') {
+      this.session.resizeInstrumentClip(clip.kind, clip.id, deltaBars);
     }
   }
 
@@ -323,8 +376,12 @@ export class StudioPageComponent implements LeaveConfirmation {
     const clip = this.selection();
     if (clip?.kind === 'drum') {
       this.session.removeDrumClip(clip.id);
-      this.selectedClip.set(null);
+    } else if (clip?.kind === 'melody' || clip?.kind === 'bass') {
+      this.session.removeInstrumentClip(clip.kind, clip.id);
+    } else {
+      return;
     }
+    this.selectedClip.set(null);
   }
 
   addDrumClip(): void {
@@ -336,19 +393,19 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   /**
    * Alternative clavier au glisser-déposer, quand un clip a le focus :
-   * flèches = déplacer (Maj : d'une mesure pour l'audio), Suppr = supprimer un clip de batterie,
+   * flèches = déplacer (Maj : d'une mesure pour l'audio), Suppr = supprimer un clip de pattern,
    * Ctrl/Cmd + D = dupliquer, Échap = désélectionner.
    */
   onClipKey(event: KeyboardEvent, clip: TimelineClip): void {
-    const step = clip.kind === 'drum' ? 1 : event.shiftKey ? BEATS_PER_BAR : 1;
+    const step = isPatternKind(clip.kind) ? 1 : event.shiftKey ? BEATS_PER_BAR : 1;
     let handled = true;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       this.selectClip(clip);
       this.moveClip(clip, event.key === 'ArrowLeft' ? -step : step);
-    } else if ((event.key === 'Delete' || event.key === 'Backspace') && clip.kind === 'drum') {
+    } else if ((event.key === 'Delete' || event.key === 'Backspace') && isPatternKind(clip.kind)) {
       this.selectClip(clip);
       this.deleteSelected();
-    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd' && clip.kind === 'drum') {
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd' && isPatternKind(clip.kind)) {
       this.selectClip(clip);
       this.duplicateSelected();
     } else if (event.key === 'Escape') {
@@ -406,9 +463,9 @@ export class StudioPageComponent implements LeaveConfirmation {
     this.dragPreview.set(null);
   }
 
-  /** Nombre de mesures (batterie) ou de temps (audio) contenus dans la fenêtre visible. */
+  /** Nombre de mesures (patterns) ou de temps (audio) contenus dans la fenêtre visible. */
   private unitsInWindow(clip: TimelineClip): number {
-    return clip.kind === 'drum' ? this.visibleBars() : this.visibleBars() * BEATS_PER_BAR;
+    return isPatternKind(clip.kind) ? this.visibleBars() : this.visibleBars() * BEATS_PER_BAR;
   }
 
   /** Utilisé par `unsavedChangesGuard` avant de quitter le studio. */

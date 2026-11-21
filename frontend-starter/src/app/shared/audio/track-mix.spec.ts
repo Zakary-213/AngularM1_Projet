@@ -13,7 +13,7 @@ import {
 
 describe('mixage par piste', () => {
   it('laisse toutes les pistes à gain 1 par défaut', () => {
-    expect(effectiveTrackGains(createDefaultMixer())).toEqual({ drums: 1, instrumental: 1, voice: 1 });
+    expect(effectiveTrackGains(createDefaultMixer())).toEqual({ drums: 1, melody: 1, bass: 1, instrumental: 1, voice: 1 });
   });
 
   it('convertit les dB du fader en gain linéaire', () => {
@@ -30,7 +30,7 @@ describe('mixage par piste', () => {
 
   it('coupe une piste muette sans toucher aux autres', () => {
     const mixer = updateTrack(createDefaultMixer(), 'instrumental', { muted: true });
-    expect(effectiveTrackGains(mixer)).toEqual({ drums: 1, instrumental: 0, voice: 1 });
+    expect(effectiveTrackGains(mixer)).toEqual({ drums: 1, melody: 1, bass: 1, instrumental: 0, voice: 1 });
   });
 
   it('ne laisse entendre que les pistes en solo', () => {

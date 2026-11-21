@@ -22,6 +22,10 @@ export const PROJECT_LIMITS = Object.freeze({
   maxPatterns: 64,
   stepsPerPattern: 16,
   maxNotesPerPattern: 512,
+  // Patterns mélodiques (M4) : 1, 2 ou 4 mesures de 16 pas ; relâchement en secondes.
+  melodicBarChoices: [1, 2, 4],
+  minReleaseSeconds: 0.02,
+  maxReleaseSeconds: 2,
   minTrackDb: -36,
   maxTrackDb: 6,
   maxEqDb: 12,
@@ -32,6 +36,8 @@ export const TRACK_TYPES = ["drum", "instrument", "audio", "vocal"];
 // Instruments du Drum Rack (sons synthétisés) ; clap, percussion et 808 depuis la M3.
 export const DRUM_VOICES = ["kick", "snare", "clap", "hihat", "perc", "bass808"];
 export const DRUM_KITS = ["boomBap", "trap"];
+// Instruments du Piano Roll (synthétisés en Web Audio, M4).
+export const INSTRUMENTS = ["piano", "synth", "bass808"];
 // Mêmes gammes que la correction vocale du studio (musical-scale.ts).
 export const SCALES = ["major", "minor", "harmonicMinor", "phrygianDominant"];
 
@@ -138,12 +144,22 @@ const drumRowSchema = new mongoose.Schema(
   { _id: false },
 );
 
+// Note de type MIDI : hauteur (0 à 127, 60 = do4), début et durée en pas (doubles-croches) depuis le début du pattern.
 const noteSchema = new mongoose.Schema(
   {
-    pitch: { type: Number, required: true, min: 0, max: 127, validate: Number.isInteger }, // numéro MIDI
-    startStep: { type: Number, required: true, min: 0 },
-    durationSteps: { type: Number, required: true, min: 1 },
+    pitch: { type: Number, required: true, min: 0, max: 127, validate: Number.isInteger },
+    startStep: { type: Number, required: true, min: 0, validate: Number.isInteger },
+    durationSteps: { type: Number, required: true, min: 1, validate: Number.isInteger },
     velocity: { type: Number, default: 0.8, min: 0, max: 1 },
+  },
+  { _id: false },
+);
+
+// Réglages d'un instrument : brillance de 0 à 1, relâchement en secondes.
+const instrumentParamsSchema = new mongoose.Schema(
+  {
+    tone: { type: Number, required: true, min: 0, max: 1 },
+    releaseSeconds: { type: Number, required: true, min: L.minReleaseSeconds, max: L.maxReleaseSeconds },
   },
   { _id: false },
 );
@@ -155,10 +171,26 @@ const patternSchema = new mongoose.Schema(
     // Kit de sons du pattern ; absent dans les projets antérieurs à la M3 (boom bap).
     kit: { type: String, enum: DRUM_KITS },
     drumRows: { type: [drumRowSchema], default: [] },
+    // Pattern mélodique (M4) : instrument, réglages et longueur ; absents pour un pattern de batterie.
+    instrument: { type: String, enum: INSTRUMENTS },
+    params: { type: instrumentParamsSchema, default: undefined },
+    bars: { type: Number, enum: L.melodicBarChoices },
     notes: { type: [noteSchema], default: [], validate: maxItems(L.maxNotesPerPattern) },
   },
   { _id: false },
 );
+
+// Les notes tiennent dans le pattern et ne sont portées que par un pattern mélodique.
+patternSchema.pre("validate", function () {
+  if (this.notes.length > 0 && !this.instrument) {
+    this.invalidate("notes", "Seul un pattern mélodique (avec instrument) contient des notes");
+    return;
+  }
+  const length = (this.bars ?? 1) * L.stepsPerPattern;
+  if (this.notes.some((note) => note.startStep + note.durationSteps > length)) {
+    this.invalidate("notes", `Une note dépasse la fin du pattern (${length} pas)`);
+  }
+});
 
 const schema = new mongoose.Schema(
   {

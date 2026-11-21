@@ -1,0 +1,143 @@
+@let current = pattern();
+<div class="roll-toolbar" role="group" aria-label="Patterns mélodiques du projet">
+  <div class="field">
+    <label for="melodic-select">Pattern affiché</label>
+    <select id="melodic-select" (change)="onPatternChange($event)">
+      @for (entry of session.melodicPatterns(); track entry.id) {
+        <option [value]="entry.id" [selected]="entry.id === current.id">{{ entry.name }} · {{ instrumentLabels[entry.instrument] }}</option>
+      }
+    </select>
+  </div>
+  <div class="field">
+    <label for="melodic-instrument">Instrument</label>
+    <select id="melodic-instrument" (change)="onInstrumentChange($event)">
+      @for (instrument of instruments; track instrument) {
+        <option [value]="instrument" [selected]="instrument === current.instrument">{{ instrumentLabels[instrument] }}</option>
+      }
+    </select>
+  </div>
+  <div class="field">
+    <label for="melodic-bars">Longueur</label>
+    <select id="melodic-bars" (change)="onBarsChange($event)">
+      @for (bars of barChoices; track bars) {
+        <option [value]="bars" [selected]="bars === current.bars">{{ bars }} mesure{{ bars > 1 ? 's' : '' }}</option>
+      }
+    </select>
+  </div>
+  <button type="button" (click)="create()" [disabled]="patternCount() >= maxPatterns" aria-label="Nouveau pattern mélodique">＋ Nouveau</button>
+  <button type="button" (click)="duplicate()" [disabled]="patternCount() >= maxPatterns" aria-label="Dupliquer le pattern mélodique">Dupliquer</button>
+  <button type="button" (click)="startRename()" aria-label="Renommer le pattern mélodique">Renommer</button>
+  <button type="button" (click)="askDelete()" [disabled]="session.melodicPatterns().length <= 1" aria-label="Supprimer le pattern mélodique">Supprimer</button>
+</div>
+@if (renaming()) {
+  <form class="inline-form" [formGroup]="renameForm" (ngSubmit)="rename()">
+    <label for="melodic-name">Nom du pattern</label>
+    <input id="melodic-name" type="text" formControlName="name" [maxlength]="nameMaxLength" />
+    <button type="submit" class="button primary">Enregistrer</button>
+    <button type="button" (click)="renaming.set(false)">Annuler</button>
+  </form>
+}
+@if (confirmDelete()) {
+  <div class="inline-form" role="group" aria-label="Confirmer la suppression du pattern mélodique">
+    <span>Supprimer « {{ current.name }} » ?</span>
+    <button type="button" class="danger" (click)="delete()">Confirmer la suppression</button>
+    <button type="button" (click)="confirmDelete.set(false)">Annuler</button>
+  </div>
+}
+
+<div class="roll-toolbar" role="group" aria-label="Son et lecture du pattern">
+  <div class="field slider">
+    <label for="melodic-tone">Brillance : <b>{{ formatTone(current.params.tone) }}</b></label>
+    <input id="melodic-tone" type="range" min="0" max="100" step="5" [value]="current.params.tone * 100" (input)="onTone($event)" [attr.aria-valuetext]="formatTone(current.params.tone)" />
+  </div>
+  <div class="field slider">
+    <label for="melodic-release">Relâchement : <b>{{ formatRelease(current.params.releaseSeconds) }}</b></label>
+    <input id="melodic-release" type="range" [min]="minRelease" [max]="maxRelease" step="0.01" [value]="current.params.releaseSeconds" (input)="onRelease($event)" [attr.aria-valuetext]="formatRelease(current.params.releaseSeconds)" />
+  </div>
+  <button type="button" class="audition" [class.on]="auditioning()" (click)="session.toggleAudition()" [disabled]="session.micState() !== 'idle'" [attr.aria-pressed]="auditioning()">
+    {{ auditioning() ? '■ Arrêter l’écoute' : '▶ Écouter en boucle' }}
+  </button>
+  <button type="button" (click)="placeOnTimeline()">＋ Placer sur la piste {{ trackLabel() }}</button>
+  <small class="muted" role="status">{{ current.notes.length }} note{{ current.notes.length > 1 ? 's' : '' }} · joué par {{ usage() }} clip{{ usage() > 1 ? 's' : '' }}</small>
+</div>
+@if (message(); as text) { <p class="error" role="alert">{{ text }}</p> }
+
+<p class="muted help" id="roll-help">
+  Instruments synthétisés, sans sample. Cliquez une case pour poser une note (longueur choisie ci-dessous), les touches du clavier à gauche font entendre la hauteur.
+  Glissez une note pour la déplacer, sa poignée droite pour l’allonger. Au clavier, sur une note : ←/→ un pas (Ctrl : un temps), ↑/↓ un demi-ton (Ctrl : une octave),
+  Maj + ←/→ raccourcir/allonger, + / − vélocité, Suppr pour supprimer. Les modifications s’entendent pendant la lecture.
+</p>
+
+<form class="roll-toolbar add-form" [formGroup]="addForm" (ngSubmit)="addFromForm()" aria-label="Ajouter une note au clavier">
+  <div class="field">
+    <label for="note-length">Longueur des notes</label>
+    <select id="note-length" [formControl]="noteLength">
+      @for (length of lengthChoices; track length) { <option [ngValue]="length">{{ lengthLabels[length] }}</option> }
+    </select>
+  </div>
+  <div class="field">
+    <label for="note-pitch">Hauteur</label>
+    <select id="note-pitch" formControlName="pitch">
+      @for (pitch of rows(); track pitch) { <option [ngValue]="pitch">{{ noteName(pitch) }}</option> }
+    </select>
+  </div>
+  <div class="field narrow">
+    <label for="note-bar">Mesure</label>
+    <input id="note-bar" type="number" min="1" [max]="current.bars" step="1" formControlName="bar" />
+  </div>
+  <div class="field narrow">
+    <label for="note-step">Pas</label>
+    <input id="note-step" type="number" min="1" max="16" step="1" formControlName="step" />
+  </div>
+  <button type="submit">Ajouter la note</button>
+</form>
+
+@if (selectedNote(); as note) {
+  <div class="roll-toolbar note-tools" role="group" aria-label="Note sélectionnée">
+    <span role="status">Note : <b>{{ noteLabel(note) }}</b></span>
+    <button type="button" (click)="moveSelected(-1, 0)" aria-label="Un pas plus tôt">◀</button>
+    <button type="button" (click)="moveSelected(1, 0)" aria-label="Un pas plus tard">▶</button>
+    <button type="button" (click)="moveSelected(0, 1)" aria-label="Un demi-ton plus haut">▲</button>
+    <button type="button" (click)="moveSelected(0, -1)" aria-label="Un demi-ton plus bas">▼</button>
+    <button type="button" (click)="resizeSelected(-1)" aria-label="Raccourcir d’un pas">− 1 pas</button>
+    <button type="button" (click)="resizeSelected(1)" aria-label="Allonger d’un pas">+ 1 pas</button>
+    <label class="velocity-field">Vélocité
+      <input type="range" min="5" max="100" step="5" aria-label="Vélocité de la note" [value]="note.velocity * 100" (input)="onVelocity($event)" [attr.aria-valuetext]="formatTone(note.velocity)" />
+    </label>
+    <button type="button" class="danger" (click)="removeSelected()">Supprimer la note</button>
+    <button type="button" (click)="selectedNoteId.set(null)">Désélectionner</button>
+  </div>
+}
+
+<!-- Seule cette zone défile (dans les deux sens) : la page ne déborde pas. -->
+<div class="roll-scroll" [style.--step-width.px]="stepWidth" [style.--row-height.px]="rowHeight">
+  <div class="roll">
+    <div class="keys" aria-label="Clavier : écouter une hauteur" role="group">
+      @for (pitch of rows(); track pitch) {
+        <button type="button" class="key" [class.black]="isBlackKey(pitch)" [class.c-key]="pitch % 12 === 0" (click)="session.previewNote(pitch)" [attr.aria-label]="'Écouter ' + noteName(pitch)">
+          {{ pitch % 12 === 0 || !isBlackKey(pitch) ? noteName(pitch) : '' }}
+        </button>
+      }
+    </div>
+    <div class="note-grid" [style.width.px]="steps() * stepWidth" [style.height.px]="rows().length * rowHeight" (click)="onGridClick($event)" aria-describedby="roll-help">
+      @for (pitch of rows(); track pitch) {
+        <div class="pitch-row" [class.black]="isBlackKey(pitch)" aria-hidden="true"></div>
+      }
+      @if (session.melodicStep() >= 0) {
+        <span class="playhead" [style.left.px]="session.melodicStep() * stepWidth" aria-hidden="true"></span>
+      }
+      @for (note of current.notes; track note.id) {
+        @let box = noteBox(note);
+        <button type="button" class="note" [class.selected]="note.id === selectedNoteId()" [class.dragging]="dragPreview()?.id === note.id"
+          [style.left.px]="box.left" [style.top.px]="box.top" [style.width.px]="box.width" [style.opacity]="0.45 + note.velocity * 0.55"
+          [attr.aria-label]="noteLabel(note)" [attr.aria-pressed]="note.id === selectedNoteId()" aria-describedby="roll-help"
+          (click)="selectNote(note, $event)" (keydown)="onNoteKey($event, note)"
+          (pointerdown)="onNotePointerDown($event, note)" (pointermove)="onNotePointerMove($event)" (pointerup)="onNotePointerUp($event)" (pointercancel)="onNotePointerCancel()">
+          <span class="note-name" aria-hidden="true">{{ noteName(note.pitch) }}</span>
+          <span class="resize-handle" aria-hidden="true"></span>
+        </button>
+      }
+    </div>
+  </div>
+</div>
+<p class="muted">Grille : {{ current.bars }} mesure{{ current.bars > 1 ? 's' : '' }} de 16 pas ; trait épais = début de mesure, trait moyen = temps. Notes jouées par la piste {{ trackLabel() }} une fois placées sur la timeline.</p>

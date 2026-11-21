@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDemoPattern, cycleStep, toggleStep } from './drum-pattern';
 import { StudioState, contentFingerprint, createEmptyPattern, fromProject, secondsToBeats, takeClipPosition, takeStartFromClip, toProjectContent } from './project-mapping';
+import { MelodicPattern, createDefaultMelodicPatterns } from './melodic-pattern';
 import { FLAT_THREE_BAND_EQ } from './three-band-eq';
 import { createDefaultMixer, updateTrack } from './track-mix';
 import { MusicalProject } from '../models/musical-project.model';
@@ -44,18 +45,46 @@ const state: StudioState = {
     { id: 'drums-refrain', startBar: 8, lengthBars: 8, patternId: 'pattern-refrain' },
   ],
   instrumentalStartBeat: 4,
+  melodicPatterns: [
+    {
+      id: 'melody-1',
+      name: 'Accords',
+      instrument: 'piano',
+      params: { tone: 0.7, releaseSeconds: 0.5 },
+      bars: 2,
+      notes: [
+        { id: 'a', pitch: 57, startStep: 0, durationSteps: 8, velocity: 0.8 },
+        { id: 'b', pitch: 60, startStep: 0, durationSteps: 8, velocity: 0.6 },
+        { id: 'c', pitch: 64, startStep: 16, durationSteps: 16, velocity: 1 },
+      ],
+    },
+    { id: 'bass-1', name: 'Basse', instrument: 'bass808', params: { tone: 0.2, releaseSeconds: 0.1 }, bars: 1, notes: [{ id: 'd', pitch: 33, startStep: 0, durationSteps: 6, velocity: 0.9 }] },
+  ],
+  instrumentClips: {
+    melody: [{ id: 'melody-a', startBar: 4, lengthBars: 8, patternId: 'melody-1' }],
+    bass: [{ id: 'bass-a', startBar: 0, lengthBars: 4, patternId: 'bass-1' }],
+  },
 };
+
+/** Les identifiants de notes sont recréés à l'ouverture : on compare tout le reste. */
+function withoutNoteIds(patterns: readonly MelodicPattern[]) {
+  return patterns.map(pattern => ({ ...pattern, notes: pattern.notes.map(({ id: _id, ...note }) => note) }));
+}
 
 describe('conversion studio ↔ format de sauvegarde v1', () => {
   it('retrouve exactement l’état du studio après un aller-retour', () => {
     const content = toProjectContent(state);
-    expect(fromProject(project({ ...content }))).toEqual(state);
+    const restored = fromProject(project({ ...content }));
+    expect({ ...restored, melodicPatterns: withoutNoteIds(restored.melodicPatterns) }).toEqual({ ...state, melodicPatterns: withoutNoteIds(state.melodicPatterns) });
+    expect(toProjectContent(restored)).toEqual(content);
   });
 
-  it('produit les trois pistes du studio et un clip de batterie qui référence le pattern', () => {
+  it('produit les pistes du studio et un clip de batterie qui référence le pattern', () => {
     const content = toProjectContent(state);
     expect(content.tracks.map(track => [track.id, track.type])).toEqual([
       ['drums', 'drum'],
+      ['melody', 'instrument'],
+      ['bass', 'instrument'],
       ['instrumental', 'audio'],
       ['voice', 'vocal'],
     ]);
@@ -64,14 +93,60 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
       { id: 'drums-refrain', startBeat: 32, durationBeats: 32, patternId: 'pattern-refrain' },
     ]);
     expect(content.tracks[0].volumeDb).toBe(-6);
-    expect(content.tracks[2].mute).toBe(true);
-    expect(content.patterns.map(pattern => pattern.name)).toEqual(['Couplet', 'Refrain']);
+    expect(content.tracks.find(track => track.id === 'voice')!.mute).toBe(true);
+    expect(content.patterns.map(pattern => pattern.name)).toEqual(['Couplet', 'Refrain', 'Accords', 'Basse']);
     expect(content.patterns[0].drumRows.every(row => row.steps.length === 16 && row.velocities?.length === 16)).toBe(true);
     // Kick du refrain, pas 3 : vélocité moyenne (deux clics), lisible aussi comme simple frappe.
     const bass = content.patterns[1].drumRows.find(row => row.voice === 'bass808')!;
     expect(bass.velocities![2]).toBe(0.7);
     expect(bass.steps[2]).toBe(true);
-    expect(content.patterns.map(pattern => pattern.kit)).toEqual(['boomBap', 'trap']);
+    expect(content.patterns.map(pattern => pattern.kit)).toEqual(['boomBap', 'trap', undefined, undefined]);
+  });
+
+  it('M4 : sauvegarde les notes MIDI, l’instrument et ses réglages, et les clips des pistes Mélodie et Basse', () => {
+    const content = toProjectContent(state);
+    const accords = content.patterns.find(pattern => pattern.id === 'melody-1')!;
+    expect(accords).toMatchObject({ instrument: 'piano', params: { tone: 0.7, releaseSeconds: 0.5 }, bars: 2, drumRows: [] });
+    expect(accords.notes![0]).toEqual({ pitch: 57, startStep: 0, durationSteps: 8, velocity: 0.8 });
+    expect(content.tracks.find(track => track.id === 'melody')!.clips).toEqual([{ id: 'melody-a', startBeat: 16, durationBeats: 32, patternId: 'melody-1' }]);
+    expect(content.tracks.find(track => track.id === 'bass')!.clips[0].patternId).toBe('bass-1');
+  });
+
+  it('M4 : un projet antérieur reçoit des patterns mélodiques vides et des pistes d’instruments vides', () => {
+    const loaded = fromProject(project());
+    expect(withoutNoteIds(loaded.melodicPatterns)).toEqual(withoutNoteIds(createDefaultMelodicPatterns()));
+    expect(loaded.instrumentClips).toEqual({ melody: [], bass: [] });
+    expect(loaded.patterns).toHaveLength(1);
+  });
+
+  it('M4 : ignore les notes invalides et remplace un instrument ou un pattern inconnus', () => {
+    const loaded = fromProject(
+      project({
+        patterns: [
+          {
+            id: 'm',
+            name: 'M',
+            instrument: 'theremin',
+            bars: 3,
+            params: { tone: 9, releaseSeconds: 0.2 },
+            drumRows: [],
+            notes: [
+              { pitch: 60, startStep: 0, durationSteps: 4, velocity: 0.5 },
+              { pitch: 60, startStep: 2, durationSteps: 4, velocity: 0.5 },
+              { pitch: 200, startStep: 0, durationSteps: 4, velocity: 0.5 },
+              { pitch: 62, startStep: 40, durationSteps: 4, velocity: 0.5 },
+            ],
+          },
+        ],
+        tracks: [{ id: 'melody', name: 'Mélodie', type: 'instrument', clips: [{ id: 'c', startBeat: 4, durationBeats: 8, patternId: 'absent' }] }],
+      }),
+    );
+    const pattern = loaded.melodicPatterns[0];
+    expect(pattern).toMatchObject({ instrument: 'piano', bars: 1, params: { tone: 1, releaseSeconds: 0.2 } });
+    expect(pattern.notes.map(note => [note.pitch, note.startStep])).toEqual([[60, 0]]);
+    expect(loaded.instrumentClips.melody).toEqual([{ id: 'c', startBar: 1, lengthBars: 2, patternId: 'm' }]);
+    // Le pattern mélodique n'est pas pris pour un pattern de batterie.
+    expect(loaded.patterns.map(entry => entry.id)).toEqual(['pattern-1']);
   });
 
   it('référence l’instrumentale par son fichier et porte son égaliseur, sans octets audio', () => {

@@ -15,8 +15,8 @@
       }
     </select>
   </div>
-  <button type="button" (click)="create()" [disabled]="session.patterns().length >= maxPatterns" aria-label="Nouveau pattern">＋ Nouveau</button>
-  <button type="button" (click)="duplicate()" [disabled]="session.patterns().length >= maxPatterns" aria-label="Dupliquer le pattern">Dupliquer</button>
+  <button type="button" (click)="create()" [disabled]="session.patterns().length + session.melodicPatterns().length >= maxPatterns" aria-label="Nouveau pattern">＋ Nouveau</button>
+  <button type="button" (click)="duplicate()" [disabled]="session.patterns().length + session.melodicPatterns().length >= maxPatterns" aria-label="Dupliquer le pattern">Dupliquer</button>
   <button type="button" (click)="startRename()" aria-label="Renommer le pattern">Renommer</button>
   <button type="button" (click)="askDelete()" [disabled]="session.patterns().length <= 1" aria-label="Supprimer le pattern">Supprimer</button>
   <small class="muted" role="status">

@@ -85,6 +85,8 @@ export class StudioProjectService {
       activeTakeId: this.takeRefs().some(take => take.id === this.session.activeTakeId()) ? this.session.activeTakeId() : null,
       drumClips: this.session.drumClips(),
       instrumentalStartBeat: this.session.instrumentalStartBeat(),
+      melodicPatterns: this.session.melodicPatterns(),
+      instrumentClips: this.session.instrumentClips(),
     };
   });
 
@@ -405,9 +407,10 @@ export class StudioProjectService {
     this.session.setBpm(state.bpm);
     this.session.projectKey.set(state.key);
     this.session.loadPatterns(state.patterns);
+    this.session.loadMelodicPatterns(state.melodicPatterns);
     this.session.mixer.set(state.mixer);
     this.session.instrumentalEq.set(state.instrumentalEq);
-    this.session.loadArrangement(state.drumClips, state.instrumentalStartBeat);
+    this.session.loadArrangement(state.drumClips, state.instrumentalStartBeat, state.instrumentClips);
     this.session.setInstrumental(null);
     this.pendingFile = null;
     this.upload.set({ state: 'idle' });

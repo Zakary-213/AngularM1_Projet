@@ -18,7 +18,39 @@ import {
   shiftRow,
   toggleStep,
 } from './drum-pattern';
+import { playInstrumentNote } from './instrument-synth';
+import {
+  DEFAULT_MELODY_PATTERN_ID,
+  INSTRUMENT_RANGES,
+  InstrumentId,
+  InstrumentParams,
+  InstrumentTrackId,
+  MelodicBars,
+  MelodicPattern,
+  addNote,
+  clampParams,
+  createDefaultMelodicPatterns,
+  createMelodicPattern,
+  createMelodicPatternId,
+  defaultTrackFor,
+  moveNote,
+  removeNote,
+  resizeNote,
+  setNoteVelocity,
+  setPatternBars,
+  setPatternInstrument,
+} from './melodic-pattern';
 import { gainToDecibels } from './mix-graph';
+import {
+  EMPTY_INSTRUMENT_CLIPS,
+  InstrumentClips,
+  ScheduledNote,
+  auditionNotesAt,
+  instrumentClipsEndBar,
+  instrumentClipsUsing,
+  notesAtSongStep,
+  patternStepAt,
+} from './note-scheduling';
 import { InputDevice, MicrophoneRecorder, describeMicrophoneError, takeStartSeconds, toInputDevices } from './microphone-recorder';
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm, stepDurationSeconds } from './music-time';
 import { renderMix } from './offline-render';
@@ -61,6 +93,8 @@ const CLIPPING_PEAK = 0.98;
 const BASS_OCTAVE_MIDI = 24;
 /** Délai de la préécoute : laisse au contexte audio le temps de programmer la frappe. */
 const PREVIEW_DELAY_SECONDS = 0.01;
+/** Durée de la préécoute d'une note du Piano Roll, en secondes. */
+const NOTE_PREVIEW_SECONDS = 0.4;
 /** Pas du décalage manuel d'une prise (correction de latence), en secondes. */
 export const TAKE_NUDGE_SECONDS = 0.01;
 /** Décalage manuel maximal dans un sens ou dans l'autre, en secondes. */
@@ -115,6 +149,8 @@ const SILENT_LEVEL: InputLevel = { rms: 0, peak: 0, clipping: false };
 /** État de l'arrangement mémorisé par Annuler / Rétablir (positions et clips, jamais l'audio). */
 export interface ArrangementSnapshot {
   readonly drumClips: readonly DrumClip[];
+  /** Clips des pistes Mélodie et Basse (M4). */
+  readonly instrumentClips: InstrumentClips;
   readonly instrumentalStartBeat: number;
   /** Position de chaque prise (secondes), par identifiant. */
   readonly takeStarts: Readonly<Record<string, number>>;
@@ -166,6 +202,26 @@ export class StudioSessionService implements OnDestroy {
   );
   /** Clips de la piste Batterie (le pattern joue en boucle dans chacun). */
   readonly drumClips = signal<readonly DrumClip[]>(DEFAULT_DRUM_CLIPS);
+  /** Patterns du Piano Roll (M4) : instrument, réglages et notes MIDI. */
+  readonly melodicPatterns = signal<readonly MelodicPattern[]>(createDefaultMelodicPatterns());
+  /** Pattern affiché et modifié dans le Piano Roll. */
+  readonly editedMelodicPatternId = signal(DEFAULT_MELODY_PATTERN_ID);
+  readonly editedMelodicPattern = computed(
+    () => this.melodicPatterns().find(entry => entry.id === this.editedMelodicPatternId()) ?? this.melodicPatterns()[0],
+  );
+  /** Clips des pistes Mélodie et Basse : chacun joue un pattern mélodique en boucle. */
+  readonly instrumentClips = signal<InstrumentClips>(EMPTY_INSTRUMENT_CLIPS);
+  /** Pattern écouté seul en boucle depuis le Piano Roll, ou `null` : lecture normale du morceau. */
+  readonly auditionPatternId = signal<string | null>(null);
+  /** Pas en surbrillance dans le Piano Roll (pattern affiché), ou -1 s'il ne joue pas. */
+  readonly melodicStep = computed(() => {
+    if (this.transportState() === 'stopped') {
+      return -1;
+    }
+    const pattern = this.editedMelodicPattern();
+    const step = Math.max(0, this.songStep());
+    return this.auditionPatternId() === pattern.id ? step % (pattern.bars * STEPS_PER_BAR) : patternStepAt(this.instrumentClips(), pattern, step);
+  });
   /** Début de l'instrumentale dans le morceau, en temps (beats) : suit les changements de BPM. */
   readonly instrumentalStartBeat = signal(0);
   private readonly history = new UndoHistory<ArrangementSnapshot>();
@@ -183,7 +239,8 @@ export class StudioSessionService implements OnDestroy {
     const takes = this.takes().map(take => take.startSeconds + take.buffer.duration);
     const lastSecond = Math.max(instrumental, ...takes, 0);
     const drumsEnd = drumClipsEndBar(this.drumClips()) * STEPS_PER_BAR;
-    return clampSongStep(Math.max(4 * STEPS_PER_BAR, drumsEnd, Math.ceil(lastSecond / stepSeconds)));
+    const instrumentsEnd = instrumentClipsEndBar(this.instrumentClips()) * STEPS_PER_BAR;
+    return clampSongStep(Math.max(4 * STEPS_PER_BAR, drumsEnd, instrumentsEnd, Math.ceil(lastSecond / stepSeconds)));
   });
   /** Tonalité du projet (la mineur par défaut) : reprise par la correction vocale. */
   readonly projectKey = signal<ProjectKey>({ root: 9, scale: 'minor' });
@@ -361,7 +418,8 @@ export class StudioSessionService implements OnDestroy {
   }
 
   private insertPattern(steps: DrumPattern, name = nextPatternName(this.patterns()), kit: DrumKit = this.editedPattern().kit): string | null {
-    if (this.patterns().length >= MAX_PATTERNS) {
+    // Batterie et instruments partagent la limite de patterns du format de sauvegarde.
+    if (this.patterns().length + this.melodicPatterns().length >= MAX_PATTERNS) {
       return null;
     }
     const id = createPatternId();
@@ -373,6 +431,171 @@ export class StudioSessionService implements OnDestroy {
   private updateEditedPattern(change: (steps: DrumPattern) => DrumPattern): void {
     const id = this.editedPattern().id;
     this.patterns.update(patterns => patterns.map(entry => (entry.id === id ? { ...entry, steps: change(entry.steps) } : entry)));
+  }
+
+  // ——— Piano Roll et instruments (M4) ———
+
+  selectMelodicPattern(id: string): void {
+    if (this.melodicPatterns().some(entry => entry.id === id)) {
+      this.editedMelodicPatternId.set(id);
+    }
+  }
+
+  /** Crée un pattern mélodique vide pour `instrument` et l'ouvre ; `null` si la limite est atteinte. */
+  createMelodicPattern(instrument: InstrumentId = this.editedMelodicPattern().instrument): string | null {
+    const count = this.melodicPatterns().length + 1;
+    const prefix = instrument === 'bass808' ? 'Basse' : 'Mélodie';
+    return this.insertMelodicPattern(createMelodicPattern(createMelodicPatternId(), `${prefix} ${String(count).padStart(2, '0')}`, instrument));
+  }
+
+  duplicateMelodicPattern(id: string): string | null {
+    const source = this.melodicPatterns().find(entry => entry.id === id);
+    return source
+      ? this.insertMelodicPattern({ ...source, id: createMelodicPatternId(), name: `${source.name} (copie)`.slice(0, PATTERN_NAME_MAX_LENGTH) })
+      : null;
+  }
+
+  renameMelodicPattern(id: string, name: string): boolean {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > PATTERN_NAME_MAX_LENGTH) {
+      return false;
+    }
+    this.updateMelodicPattern(id, pattern => ({ ...pattern, name: trimmed }));
+    return true;
+  }
+
+  /** Supprime un pattern mélodique non utilisé. Renvoie un message si la suppression est refusée. */
+  deleteMelodicPattern(id: string): string | null {
+    const patterns = this.melodicPatterns();
+    if (patterns.length <= 1) {
+      return 'Le projet garde au moins un pattern mélodique.';
+    }
+    const used = instrumentClipsUsing(this.instrumentClips(), id);
+    if (used > 0) {
+      return `Ce pattern est joué par ${used} clip${used > 1 ? 's' : ''} : changez leur pattern ou supprimez-les d'abord.`;
+    }
+    if (this.auditionPatternId() === id) {
+      this.stopPlayback();
+    }
+    const remaining = patterns.filter(entry => entry.id !== id);
+    this.melodicPatterns.set(remaining);
+    if (this.editedMelodicPatternId() === id) {
+      this.editedMelodicPatternId.set(remaining[0].id);
+    }
+    return null;
+  }
+
+  /** Remplace la bibliothèque de patterns mélodiques (ouverture d'un projet). */
+  loadMelodicPatterns(patterns: readonly MelodicPattern[]): void {
+    const safe = patterns.length > 0 ? patterns : createDefaultMelodicPatterns();
+    this.melodicPatterns.set(safe);
+    this.editedMelodicPatternId.set(safe[0].id);
+  }
+
+  /** Change l'instrument d'un pattern ; ses notes sont ramenées dans la tessiture de l'instrument. */
+  setMelodicInstrument(id: string, instrument: InstrumentId): void {
+    this.updateMelodicPattern(id, pattern => (pattern.instrument === instrument ? pattern : setPatternInstrument(pattern, instrument)));
+  }
+
+  setMelodicParams(id: string, change: Partial<InstrumentParams>): void {
+    this.updateMelodicPattern(id, pattern => ({ ...pattern, params: clampParams({ ...pattern.params, ...change }, pattern.params) }));
+  }
+
+  setMelodicBars(id: string, bars: MelodicBars): void {
+    this.updateMelodicPattern(id, pattern => setPatternBars(pattern, bars));
+  }
+
+  /** Ajoute une note au pattern affiché et la fait entendre ; renvoie l'identifiant de la note ou un message d'erreur. */
+  addNote(pitch: number, startStep: number, durationSteps: number): { id: string } | { error: string } {
+    const result = addNote(this.editedMelodicPattern(), { pitch, startStep, durationSteps });
+    if ('error' in result) {
+      return result;
+    }
+    this.updateMelodicPattern(result.pattern.id, () => result.pattern);
+    void this.previewNote(pitch);
+    return { id: result.note.id };
+  }
+
+  /** Déplace une note du pattern affiché (pas et demi-tons), dans la tessiture de son instrument. */
+  moveNote(noteId: string, deltaSteps: number, deltaPitch: number): void {
+    const pattern = this.editedMelodicPattern();
+    const next = moveNote(pattern, noteId, deltaSteps, deltaPitch, INSTRUMENT_RANGES[pattern.instrument]);
+    this.updateMelodicPattern(pattern.id, () => next);
+    const moved = next.notes.find(note => note.id === noteId);
+    if (deltaPitch !== 0 && moved) {
+      void this.previewNote(moved.pitch);
+    }
+  }
+
+  resizeNote(noteId: string, deltaSteps: number): void {
+    this.updateMelodicPattern(this.editedMelodicPattern().id, pattern => resizeNote(pattern, noteId, deltaSteps));
+  }
+
+  setNoteVelocity(noteId: string, velocity: number): void {
+    this.updateMelodicPattern(this.editedMelodicPattern().id, pattern => setNoteVelocity(pattern, noteId, velocity));
+  }
+
+  removeNote(noteId: string): void {
+    this.updateMelodicPattern(this.editedMelodicPattern().id, pattern => removeNote(pattern, noteId));
+  }
+
+  /** Fait entendre une note avec l'instrument et les réglages du pattern affiché. */
+  async previewNote(pitch: number): Promise<void> {
+    const pattern = this.editedMelodicPattern();
+    try {
+      const { context, master } = await this.engine.start();
+      playInstrumentNote(context, master, pattern.instrument, pitch, context.currentTime + PREVIEW_DELAY_SECONDS, NOTE_PREVIEW_SECONDS, 0.8, pattern.params);
+    } catch (error) {
+      console.error('[studio] préécoute impossible', error);
+      this.engineError.set("Le moteur audio n'a pas pu démarrer dans ce navigateur.");
+    }
+  }
+
+  /**
+   * Écoute en boucle du pattern affiché, seul sur sa piste (la batterie l'accompagne).
+   * Un second appel arrête l'écoute.
+   */
+  async toggleAudition(): Promise<void> {
+    if (this.micState() !== 'idle') {
+      return;
+    }
+    const id = this.editedMelodicPattern().id;
+    if (this.auditionPatternId() === id && this.playing()) {
+      this.stopPlayback();
+      return;
+    }
+    this.haltTransport();
+    this.auditionPatternId.set(id);
+    this.songStep.set(0);
+    this.transportState.set('stopped');
+    const started = await this.startPlayback();
+    if (!started) {
+      this.auditionPatternId.set(null);
+    }
+  }
+
+  private insertMelodicPattern(pattern: MelodicPattern): string | null {
+    // Batterie et instruments partagent la limite de patterns du format de sauvegarde.
+    if (this.patterns().length + this.melodicPatterns().length >= MAX_PATTERNS) {
+      return null;
+    }
+    this.melodicPatterns.update(patterns => [...patterns, pattern]);
+    this.editedMelodicPatternId.set(pattern.id);
+    return pattern.id;
+  }
+
+  private updateMelodicPattern(id: string, change: (pattern: MelodicPattern) => MelodicPattern): void {
+    this.melodicPatterns.update(patterns => patterns.map(entry => (entry.id === id ? change(entry) : entry)));
+  }
+
+  /** Notes à déclencher à un pas : pattern écouté seul, ou clips des pistes Mélodie et Basse. */
+  private notesAt(songStep: number): ScheduledNote[] {
+    const auditionId = this.auditionPatternId();
+    const audition = auditionId ? this.melodicPatterns().find(entry => entry.id === auditionId) : undefined;
+    if (audition) {
+      return auditionNotesAt(audition, defaultTrackFor(audition.instrument), songStep);
+    }
+    return notesAtSongStep(this.instrumentClips(), this.melodicPatterns(), songStep);
   }
 
   /** Lecture / pause : la pause garde la position, la lecture reprend au même pas. */
@@ -466,6 +689,52 @@ export class StudioSessionService implements OnDestroy {
     this.changeArrangement(() => this.drumClips.update(clips => removeDrumClip(clips, id)));
   }
 
+  /** Ajoute un clip sur la piste `track` à la mesure de la tête de lecture, jouant `patternId`. */
+  addInstrumentClipAtPlayhead(track: InstrumentTrackId, patternId: string): string | null {
+    if (!this.melodicPatterns().some(entry => entry.id === patternId)) {
+      return null;
+    }
+    const newId = `${track}-${crypto.randomUUID()}`;
+    const next = addDrumClip(this.instrumentClips()[track], Math.floor(this.songStep() / STEPS_PER_BAR), newId, patternId);
+    if (!next) {
+      return null;
+    }
+    this.changeArrangement(() => this.setInstrumentClips(track, next));
+    return newId;
+  }
+
+  moveInstrumentClip(track: InstrumentTrackId, id: string, deltaBars: number): void {
+    this.changeArrangement(() => this.setInstrumentClips(track, moveDrumClip(this.instrumentClips()[track], id, deltaBars)));
+  }
+
+  resizeInstrumentClip(track: InstrumentTrackId, id: string, deltaBars: number): void {
+    this.changeArrangement(() => this.setInstrumentClips(track, resizeDrumClip(this.instrumentClips()[track], id, deltaBars)));
+  }
+
+  duplicateInstrumentClip(track: InstrumentTrackId, id: string): string | null {
+    const newId = `${track}-${crypto.randomUUID()}`;
+    const next = duplicateDrumClip(this.instrumentClips()[track], id, newId);
+    if (!next) {
+      return null;
+    }
+    this.changeArrangement(() => this.setInstrumentClips(track, next));
+    return newId;
+  }
+
+  setInstrumentClipPattern(track: InstrumentTrackId, id: string, patternId: string): void {
+    if (this.melodicPatterns().some(entry => entry.id === patternId)) {
+      this.changeArrangement(() => this.setInstrumentClips(track, setDrumClipPattern(this.instrumentClips()[track], id, patternId)));
+    }
+  }
+
+  removeInstrumentClip(track: InstrumentTrackId, id: string): void {
+    this.changeArrangement(() => this.setInstrumentClips(track, removeDrumClip(this.instrumentClips()[track], id)));
+  }
+
+  private setInstrumentClips(track: InstrumentTrackId, clips: readonly DrumClip[]): void {
+    this.instrumentClips.update(current => ({ ...current, [track]: clips }));
+  }
+
   /** Déplace l'instrumentale par pas d'un temps ; elle ne commence jamais avant le morceau. */
   moveInstrumental(deltaBeats: number): void {
     const maxBeat = MAX_SONG_BARS * (STEPS_PER_BAR / STEPS_PER_BEAT);
@@ -495,8 +764,9 @@ export class StudioSessionService implements OnDestroy {
   }
 
   /** Remplace l'arrangement (ouverture d'un projet) et vide l'historique. */
-  loadArrangement(drumClips: readonly DrumClip[], instrumentalStartBeat: number): void {
+  loadArrangement(drumClips: readonly DrumClip[], instrumentalStartBeat: number, instrumentClips: InstrumentClips = EMPTY_INSTRUMENT_CLIPS): void {
     this.drumClips.set(drumClips);
+    this.instrumentClips.set(instrumentClips);
     this.instrumentalStartBeat.set(instrumentalStartBeat);
     this.history.clear();
     this.historyVersion.update(version => version + 1);
@@ -505,6 +775,7 @@ export class StudioSessionService implements OnDestroy {
   private arrangementSnapshot(): ArrangementSnapshot {
     return {
       drumClips: this.drumClips(),
+      instrumentClips: this.instrumentClips(),
       instrumentalStartBeat: this.instrumentalStartBeat(),
       takeStarts: Object.fromEntries(this.takes().map(take => [take.id, take.startSeconds])),
     };
@@ -524,6 +795,7 @@ export class StudioSessionService implements OnDestroy {
 
   private restoreArrangement(snapshot: ArrangementSnapshot): void {
     this.drumClips.set(snapshot.drumClips);
+    this.instrumentClips.set(snapshot.instrumentClips);
     this.instrumentalStartBeat.set(snapshot.instrumentalStartBeat);
     // Une prise supprimée depuis n'est pas recréée : seules les positions sont restaurées.
     this.takes.update(takes =>
@@ -542,6 +814,7 @@ export class StudioSessionService implements OnDestroy {
   /** Arrête et revient au début du morceau. */
   stopPlayback(): void {
     this.haltTransport();
+    this.auditionPatternId.set(null);
     this.transportState.set('stopped');
     this.songStep.set(0);
   }
@@ -864,6 +1137,9 @@ export class StudioSessionService implements OnDestroy {
         bpm: this.bpm(),
         bars,
         drumsGain: gains.drums,
+        // L'export suit l'arrangement : l'écoute seule d'un pattern n'y figure pas.
+        notesAt: step => notesAtSongStep(this.instrumentClips(), this.melodicPatterns(), step),
+        instrumentGains: { melody: gains.melody, bass: gains.bass },
         clips,
       });
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
@@ -888,9 +1164,12 @@ export class StudioSessionService implements OnDestroy {
         songStep => this.drumsAt(songStep),
         () => this.bpm(),
         () => this.metronome(),
+        songStep => this.notesAt(songStep),
       );
       // Pas de boucle pendant une prise : la voix doit suivre le morceau de façon linéaire.
-      const loop = includeTake ? this.loopRange() : null;
+      // Écoute d'un pattern du Piano Roll : boucle sur sa longueur, depuis le début.
+      const audition = this.melodicPatterns().find(entry => entry.id === this.auditionPatternId());
+      const loop = audition ? { startStep: 0, endStep: audition.bars * STEPS_PER_BAR } : includeTake ? this.loopRange() : null;
       let fromSongStep = this.transportState() === 'paused' ? this.songStep() : 0;
       if (loop && (fromSongStep < loop.startStep || fromSongStep >= loop.endStep)) {
         fromSongStep = loop.startStep;

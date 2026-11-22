@@ -29,3 +29,25 @@ export interface LyricsGeneration {
   readonly targetSyllables: number;
   readonly lines: readonly LyricsLine[];
 }
+
+export const MAX_LYRICS_LINE_LENGTH = 240;
+export const MAX_LYRICS_HISTORY = 5;
+
+export interface LyricsRegeneration {
+  readonly from: number;
+  readonly to: number;
+  readonly lines: readonly string[];
+}
+
+export interface LyricsVersion {
+  readonly options: LyricsGenerationOptions;
+  readonly bpm: number;
+  readonly targetSyllables: number;
+  readonly lines: readonly string[];
+}
+
+export interface ProjectLyrics {
+  readonly current: LyricsVersion;
+  /** Anciens états, du plus ancien au plus récent. */
+  readonly history: readonly LyricsVersion[];
+}

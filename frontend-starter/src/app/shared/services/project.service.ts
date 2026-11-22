@@ -1,7 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { MusicalProject, NewProject, ProjectContent, ProjectSummary } from '../models/musical-project.model';
-import type { LyricsGeneration, LyricsGenerationOptions } from '../models/lyrics.model';
+import type { LyricsGeneration, LyricsGenerationOptions, LyricsRegeneration } from '../models/lyrics.model';
 import { Page } from '../models/page.model';
 
 /** Opérations HTTP sur les projets musicaux (routes /api/projects, JWT ajouté par l'intercepteur). */
@@ -21,8 +21,8 @@ export class ProjectService {
     return this.http.get<MusicalProject>(`/api/projects/${encodeURIComponent(id)}`);
   }
 
-  generateLyrics(id: string, options: LyricsGenerationOptions) {
-    return this.http.post<LyricsGeneration>(`/api/projects/${encodeURIComponent(id)}/lyrics/generate`, options);
+  generateLyrics(id: string, options: LyricsGenerationOptions, regenerate?: LyricsRegeneration) {
+    return this.http.post<LyricsGeneration>(`/api/projects/${encodeURIComponent(id)}/lyrics/generate`, regenerate ? { ...options, regenerate } : options);
   }
 
   /** `revision` : celle du projet ouvert ; le serveur répond 409 si elle a changé entre-temps. */

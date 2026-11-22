@@ -2,6 +2,15 @@ const frenchVowels = /eaux?|au|ai|ei|ou|œu|eu|oi|ui|ie|[aeiouyàâäéèêëî�
 const englishVowels = /[aeiouy]+/g;
 const rhymePatterns = { AABB: [0, 0, 1, 1], ABAB: [0, 1, 0, 1] };
 
+export function rhymePairForMeasure(index, rhymeScheme) {
+  const pattern = rhymePatterns[rhymeScheme];
+  const position = index % pattern.length;
+  const group = pattern[position];
+  const blockStart = index - position;
+  const otherPosition = pattern.findIndex((value, candidate) => value === group && candidate !== position);
+  return { group: blockStart / 2 + group, partner: blockStart + otherPosition };
+}
+
 function wordsIn(text) {
   return text.normalize("NFC").toLowerCase().match(/\p{L}+(?:['’]\p{L}+)*/gu) ?? [];
 }
@@ -21,11 +30,21 @@ function estimateWord(word, language) {
   return (spoken.match(englishVowels) ?? letters.match(englishVowels))?.length ?? 0;
 }
 
+function countSyllables(words, language) {
+  return words.reduce((total, word) => total + estimateWord(word, language), 0);
+}
+
+export function estimateLyricSyllables(text, language) {
+  return countSyllables(wordsIn(text), language);
+}
+
 function rhymeEnding(word, language) {
   if (!word) return "";
+  if (language === "fr" && /^[cmnst]['’]est$/u.test(word)) return "è";
   let letters = word.split(/['’]/u).at(-1);
   if (language === "fr") {
     letters = letters
+      .replace(/qu/gu, "q")
       .replace(/(?:es|e|s|x)$/u, "")
       .replace(/ll$/u, "l")
       .replace(/(?:ain|ein)$/u, "in");
@@ -40,7 +59,7 @@ function rhymeEnding(word, language) {
 function internalRhyme(words, language) {
   const endings = new Map();
   for (const word of words) {
-    if (word.length < 4) continue;
+    if (word.length < 3) continue;
     const ending = rhymeEnding(word, language);
     if (ending.length < 2) continue;
     const first = endings.get(ending);
@@ -55,21 +74,23 @@ export function analyzeLyrics(lines, language, rhymeScheme) {
   const endings = words.map((line) => rhymeEnding(line.at(-1), language));
   const groups = lines.map((_, index) => {
     if (rhymeScheme === "internal") return null;
-    const group = Math.floor(index / 4) * 2 + rhymePatterns[rhymeScheme][index % 4];
-    return String.fromCharCode(65 + group);
+    return rhymePairForMeasure(index, rhymeScheme);
   });
 
   return lines.map((line, index) => {
-    const syllables = words[index].reduce((total, word) => total + estimateWord(word, language), 0);
-    const group = groups[index];
-    if (group === null) {
-      const pair = internalRhyme(words[index], language);
-      return { ...line, syllables, rhyme: { group, words: pair, matches: pair.length === 2 } };
+    const syllables = countSyllables(words[index], language);
+    const pair = groups[index];
+    if (pair === null) {
+      const internal = internalRhyme(words[index], language);
+      return { ...line, syllables, rhyme: { group: null, words: internal, matches: internal.length === 2 } };
     }
 
-    const partner = groups.findIndex((label, position) => label === group && position !== index);
+    const { group, partner } = pair;
     const lastWord = words[index].at(-1);
-    const matches = Boolean(endings[index] && endings[index] === endings[partner] && lastWord !== words[partner]?.at(-1));
-    return { ...line, syllables, rhyme: { group, words: lastWord ? [lastWord] : [], matches } };
+    const firstInBlock = Math.floor(index / 4) * 4;
+    const blockEndings = endings.slice(firstInBlock, firstInBlock + 4);
+    const sameSoundThroughout = blockEndings.length === 4 && blockEndings.every(ending => ending === endings[index]);
+    const matches = Boolean(endings[index] && endings[index] === endings[partner] && lastWord !== words[partner]?.at(-1) && !sameSoundThroughout);
+    return { ...line, syllables, rhyme: { group: String.fromCharCode(65 + group), words: lastWord ? [lastWord] : [], matches } };
   });
 }

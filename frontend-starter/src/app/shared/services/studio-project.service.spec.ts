@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioEngineService } from '../audio/audio-engine.service';
 import { StudioSessionService, VocalTake } from '../audio/studio-session.service';
 import { MusicalProject, ProjectContent } from '../models/musical-project.model';
+import type { LyricsVersion } from '../models/lyrics.model';
 import { ProjectService } from './project.service';
 import { TrackService } from './track.service';
 import { Track } from '../models/track.model';
@@ -99,6 +100,27 @@ describe('StudioProjectService', () => {
     response.next({ ...stored, revision: 5 });
     expect(service.saveState()).toBe('saved');
     expect(service.project()?.revision).toBe(5);
+  });
+
+  it('sauvegarde et recharge les paroles et leur historique avec la révision du projet', () => {
+    const version: LyricsVersion = {
+      options: { theme: 'La nuit', language: 'fr', mood: 'dark', structure: 'verse', measures: 4, flow: 'standard', rhymeScheme: 'AABB', languageLevel: 'standard' },
+      bpm: 132, targetSyllables: 7, lines: ['Ma route', 'Le doute', 'La lumière', 'Une prière'],
+    };
+    const lyrics = { current: version, history: [{ ...version, lines: ['Mon route', ...version.lines.slice(1)] }] };
+    const saved = { ...stored, formatVersion: 2, revision: 5, lyrics };
+    service.load('p1');
+    expect(service.lyrics()).toBeUndefined();
+    service.lyrics.set(lyrics);
+    expect(service.saveState()).toBe('dirty');
+    api.save.mockReturnValue(of(saved));
+    service.save();
+    expect(api.save).toHaveBeenCalledWith('p1', 4, expect.objectContaining({ lyrics }));
+    expect(service.saveState()).toBe('saved');
+    api.get.mockReturnValue(of(saved));
+    service.reload();
+    expect(service.lyrics()).toEqual(lyrics);
+    expect(service.saveState()).toBe('saved');
   });
 
   it('une modification faite pendant la sauvegarde reste non sauvegardée', () => {

@@ -5,7 +5,7 @@ import { provideRouter } from '@angular/router';
 import { Subject, of, throwError } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
-import type { LyricsGeneration } from '../../shared/models/lyrics.model';
+import type { LyricsGeneration, ProjectLyrics } from '../../shared/models/lyrics.model';
 import type { MusicalProject, ProjectKeySignature } from '../../shared/models/musical-project.model';
 import { ProjectService } from '../../shared/services/project.service';
 import { StudioProjectService, type ProjectLoadState } from '../../shared/services/studio-project.service';
@@ -27,22 +27,30 @@ describe('Paroles dans le studio', () => {
   const savedProject = signal<MusicalProject | null>(project);
   const loadState = signal<ProjectLoadState>('loaded');
   const conflict = signal(false);
+  const lyrics = signal<ProjectLyrics | undefined>(undefined);
+  const projectLoadVersion = signal(0);
   const bpm = signal(90);
   const projectKey = signal(key);
+  const songStep = signal(0);
+  const transportState = signal<'stopped' | 'paused' | 'playing'>('stopped');
   const generateLyrics = vi.fn();
 
   beforeEach(() => {
     savedProject.set(project);
     loadState.set('loaded');
     conflict.set(false);
+    lyrics.set(undefined);
+    projectLoadVersion.set(0);
     bpm.set(90);
     projectKey.set(key);
+    songStep.set(0);
+    transportState.set('stopped');
     generateLyrics.mockReset();
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
-        { provide: StudioProjectService, useValue: { project: savedProject, loadState, conflict } },
-        { provide: StudioSessionService, useValue: { bpm, projectKey } },
+        { provide: StudioProjectService, useValue: { project: savedProject, loadState, conflict, lyrics, projectLoadVersion } },
+        { provide: StudioSessionService, useValue: { bpm, projectKey, songStep, transportState } },
         { provide: ProjectService, useValue: { generateLyrics } },
       ],
     });
@@ -111,6 +119,35 @@ describe('Paroles dans le studio', () => {
     expect(element.querySelector('li mark')?.textContent).toBe('nuit');
   });
 
+  it('annonce les paires de rimes repérées et surligne seulement celles qui correspondent', () => {
+    const lines = ['retenu', 'feu', 'perdus', 'retenue'].map((text, index) => ({
+      measure: index + 1, text, syllables: 2,
+      rhyme: { group: index % 2 === 0 ? 'A' : 'B', words: [text], matches: index % 2 === 0 },
+    }));
+    generateLyrics.mockReturnValue(of({ ...result, lines }));
+    component.form.patchValue({ theme: 'La nuit', measures: 4, rhymeScheme: 'ABAB' });
+    component.generate();
+    fixture.detectChanges();
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).toContain('Schéma demandé ABAB · Paires de rimes repérées 1/2');
+    expect(Array.from(element.querySelectorAll('li mark'), mark => mark.textContent)).toEqual(['retenu', 'perdus']);
+  });
+
+  it('compte les mesures avec une rime interne et surligne les deux mots', () => {
+    generateLyrics.mockReturnValue(of({
+      ...result, lines: [
+        { measure: 1, text: 'Un jeu près du feu', syllables: 5, rhyme: { group: null, words: ['jeu', 'feu'], matches: true } },
+        { measure: 2, text: 'Je marche dans la ville', syllables: 6, rhyme: { group: null, words: [], matches: false } },
+      ],
+    }));
+    component.form.patchValue({ theme: 'La nuit', rhymeScheme: 'internal' });
+    component.generate();
+    fixture.detectChanges();
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.textContent).toContain('Rimes internes · Mesures avec une rime 1/2');
+    expect(Array.from(element.querySelectorAll('li mark'), mark => mark.textContent)).toEqual(['jeu', 'feu']);
+  });
+
   it('propose de choisir un projet dans le studio libre', () => {
     savedProject.set(null);
     fixture.componentRef.setInput('projectId', null);
@@ -118,5 +155,56 @@ describe('Paroles dans le studio', () => {
     const element = fixture.nativeElement as HTMLElement;
     expect(element.querySelector('form')).toBeNull();
     expect(element.querySelector('a')?.getAttribute('href')).toBe('/projects');
+  });
+
+  it('modifie une ligne, conserve la version précédente et peut annuler', () => {
+    generateLyrics.mockReturnValue(of(result));
+    component.form.controls.theme.setValue('La nuit');
+    component.generate();
+    const original = lyrics()?.current;
+    component.edit(1);
+    component.editField.setValue('Je trace ma route');
+    component.applyEdit();
+    expect(lyrics()?.current.lines).toEqual(['Je trace ma route']);
+    expect(lyrics()?.history).toEqual([original]);
+    component.undo();
+    expect(lyrics()?.current).toEqual(original);
+    expect(lyrics()?.history).toEqual([]);
+  });
+
+  it('régénère la mesure demandée avec les réglages et le texte de la version courante', () => {
+    generateLyrics.mockReturnValueOnce(of(result)).mockReturnValueOnce(of({ ...result, lines: [{ ...result.lines[0], text: 'En suivant la lune' }] }));
+    component.form.controls.theme.setValue('La nuit');
+    component.generate();
+    const current = lyrics()!.current;
+    component.form.controls.theme.setValue('Un autre thème');
+    component.regenerate(1, 1);
+    expect(generateLyrics).toHaveBeenLastCalledWith('p1', current.options, { from: 1, to: 1, lines: current.lines });
+    expect(lyrics()?.current.lines).toEqual(['En suivant la lune']);
+    expect(lyrics()?.history).toEqual([current]);
+  });
+
+  it('suit la position du transport lors de la lecture, de la pause, d’un retour et de l’arrêt', () => {
+    const next = { ...result.lines[0], measure: 2, text: 'Deuxième mesure' };
+    generateLyrics.mockReturnValue(of({ ...result, lines: [...result.lines, next] }));
+    component.form.controls.theme.setValue('La nuit');
+    component.generate();
+    component.prompterVisible.set(true);
+    const element = fixture.nativeElement as HTMLElement;
+    transportState.set('playing');
+    songStep.set(15);
+    fixture.detectChanges();
+    expect(element.querySelector('.prompter-line')?.textContent).toBe(result.lines[0].text);
+    songStep.set(16);
+    transportState.set('paused');
+    fixture.detectChanges();
+    expect(element.querySelector('.prompter-line')?.textContent).toBe(next.text);
+    expect(element.querySelector('li[aria-current="step"]')?.textContent).toContain('Mesure 2');
+    songStep.set(0);
+    fixture.detectChanges();
+    expect(element.querySelector('.prompter-line')?.textContent).toBe(result.lines[0].text);
+    transportState.set('stopped');
+    fixture.detectChanges();
+    expect(element.querySelector('.prompter-line')).toBeNull();
   });
 });

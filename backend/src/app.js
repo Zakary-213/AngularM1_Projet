@@ -619,6 +619,11 @@ export function createApp() {
       console.error("[lyrics] Erreur interne de génération");
       return res.status(500).json({ message: "Une erreur interne empêche la génération des paroles" });
     }
+    if (res.locals.privateProjectLyrics) {
+      console.error("[projects] Erreur de sauvegarde du projet avec paroles");
+      const invalid = error?.name === "ValidationError";
+      return res.status(invalid ? 400 : 500).json({ message: invalid ? "Le contenu du projet est invalide" : "La sauvegarde a échoué" });
+    }
 
     console.error("[error] Erreur reçue par le gestionnaire central", error);
 

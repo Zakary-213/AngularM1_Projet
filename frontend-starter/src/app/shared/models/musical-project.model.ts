@@ -1,4 +1,5 @@
 import { ScaleName } from '../audio/pitch/musical-scale';
+import type { LyricsLine, ProjectLyrics } from './lyrics.model';
 
 /**
  * Version du format de sauvegarde comprise par ce studio (voir « Contrat d'API »).
@@ -136,6 +137,7 @@ export interface ProjectContent {
   readonly master?: { readonly volume: number };
   /** Absente des projets v1. */
   readonly vocal?: ProjectVocal;
+  readonly lyrics?: ProjectLyrics;
 }
 
 export interface MusicalProject extends ProjectContent {
@@ -144,6 +146,7 @@ export interface MusicalProject extends ProjectContent {
   readonly formatVersion: number;
   readonly title: string;
   readonly timeSignature?: ProjectTimeSignature;
+  readonly lyricsAnalysis?: readonly LyricsLine[];
   readonly origin: ProjectOrigin;
   readonly revision: number;
   readonly createdAt: string;

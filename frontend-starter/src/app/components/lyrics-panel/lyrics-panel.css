@@ -43,7 +43,22 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 }
 .lyric-text { overflow-wrap: anywhere; }
 mark { background: #f5a623; color: #171310; border-radius: 2px; padding: 0 2px; }
+.lyric-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.lyric-actions .button, .block-form .button { white-space: normal; min-height: 44px; }
+.line-edit { grid-column: 2 / -1; }
+.block-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-top: 16px; }
+.prompter {
+  margin: 16px 0;
+  padding: 16px;
+  background: #191919;
+  border-left: 4px solid #f5a623;
+  overflow-wrap: anywhere;
+}
+.prompter-line { margin: 4px 0; font-size: clamp(1.25rem, 3vw, 2rem); font-weight: bold; }
+.prompter-next { margin: 0; color: var(--muted, #aaa); }
+.lyrics-proposal li.is-current { border-top-color: #f5a623; background: #f5a62314; }
 
 @media (max-width: 650px) {
   .lyrics-proposal li { grid-template-columns: 1fr; gap: 4px; }
+  .line-edit { grid-column: 1; }
 }

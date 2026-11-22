@@ -9,6 +9,8 @@ import { createApp } from "../src/app.js";
 import { MusicalProject } from "../src/models/MusicalProject.js";
 import { Track } from "../src/models/Track.js";
 import { LyricsQuota } from "../src/models/LyricsQuota.js";
+import { estimateLyricSyllables } from "../src/services/lyrics-analysis.js";
+import { planRhymeEndings } from "../src/services/lyrics-rhyme-plan.js";
 
 /*
  * Tests HTTP des routes /api/projects. MongoDB est remplacé par un stockage en
@@ -427,6 +429,56 @@ test("M12 : la génération exige un JWT et un projet appartenant au compte", as
   assert.equal(groq.mock.callCount(), 0);
 });
 
+test("M12 : la régénération remplace seulement la ligne ou le bloc demandé", async (t) => {
+  const texts = lyricLines.map(line => line.text);
+  const groq = stubGroq(t, "test-key", (_url, request) => {
+    const { regenerate } = JSON.parse(JSON.parse(request.body).messages[1].content);
+    assert.deepEqual(regenerate.context.map(line => line.measure), lyricLines
+      .filter(line => line.measure < regenerate.from || line.measure > regenerate.to)
+      .map(line => line.measure));
+    return groqLyricsReply(lyricLines.slice(regenerate.from - 1, regenerate.to).map(line =>
+      ({ measure: line.measure, text: "Je repense aux amis et je marche", compactText: "Je marche sur le sol" }),
+    ));
+  });
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  for (const [from, to] of [[2, 2], [5, 8]]) {
+    const response = await call(alice, "POST", route, { theme: "La nuit", regenerate: { from, to, lines: texts } });
+    assert.equal(response.status, 200);
+    response.body.lines.forEach(({ measure, text }) => {
+      if (measure >= from && measure <= to) assert.match(text, /^(?:Je repense|Je marche)/u);
+      else assert.equal(text, texts[measure - 1]);
+    });
+  }
+  assert.equal((await call(alice, "POST", route, { theme: "La nuit", regenerate: { from: 2, to: 9, lines: texts } })).status, 400);
+  assert.equal(groq.mock.callCount(), 2);
+  assert.deepEqual([...lyricsAttempts.values()], [2]);
+});
+
+test("M12 : le projet conserve le texte et son historique sans consommer le quota", async () => {
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}`;
+  const options = { theme: "La nuit", mood: "neutral", language: "fr", structure: "verse", measures: 4, flow: "standard", rhymeScheme: "AABB", languageLevel: "standard" };
+  const before = { options, bpm: 90, targetSyllables: 10, lines: ["Mon route", "Un doute", "", "Les étoiles"] };
+  const lyrics = { current: { ...before, lines: ["Ma route", ...before.lines.slice(1)] }, history: [before] };
+  assert.equal((await call(alice, "GET", route)).body.lyrics, undefined);
+  assert.equal((await call(bob, "PUT", route, { revision: 0, lyrics })).status, 404);
+  assert.equal((await call(alice, "PUT", route, { revision: 0, lyrics: { ...lyrics, history: Array(6).fill(before) } })).status, 400);
+  assert.equal((await call(alice, "PUT", route, { revision: 0, lyrics: { ...lyrics, current: { ...before, lines: ["Une ligne"] } } })).status, 400);
+  const saved = await call(alice, "PUT", route, { revision: 0, lyrics, lyricsAnalysis: [{ measure: 1, syllables: 99 }] });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body.lyrics, lyrics);
+  assert.equal(saved.body.lyricsAnalysis[0].text, "Ma route");
+  assert.equal(saved.body.lyricsAnalysis[2].syllables, 0);
+  const reloaded = await call(alice, "GET", route);
+  assert.deepEqual(reloaded.body.lyrics, lyrics);
+  assert.deepEqual(reloaded.body.lyricsAnalysis, saved.body.lyricsAnalysis);
+  assert.equal((await call(alice, "PUT", route, { revision: 0, lyrics })).status, 409);
+  assert.equal((await call(alice, "PUT", route, { revision: 1, bpm: 140 })).status, 200);
+  assert.deepEqual((await call(alice, "GET", route)).body.lyrics, lyrics);
+  assert.equal(lyricsAttempts.size, 0);
+});
+
 test("M12 : la route utilise la clé du serveur et les paramètres du projet", async (t) => {
   const groq = stubGroq(t, "test-key", () => groqLyricsReply(lyricLines));
   const { body: project } = await call(alice, "POST", "", { title: "Projet privé", origin: "create", bpm: 140 });
@@ -435,8 +487,9 @@ test("M12 : la route utilise la clé du serveur et les paramètres du projet", a
   assert.equal(response.status, 200);
   assert.equal(response.body.targetSyllables, 6);
   assert.deepEqual({ bpm: response.body.bpm, timeSignature: response.body.timeSignature, key: response.body.key }, context);
-  assert.deepEqual(response.body.lines.map(({ rhyme, ...line }) => line), lyricLines.map((line) => ({ ...line, syllables: 3 })));
-  assert.deepEqual(response.body.lines[0].rhyme, { group: "A", words: ["fictif"], matches: false });
+  assert.ok(response.body.lines.every((line, index) => line.text.startsWith(lyricLines[index].text) && line.syllables >= 3));
+  assert.deepEqual(response.body.lines.map(line => line.rhyme.group), ["A", "A", "B", "B", "C", "C", "D", "D"]);
+  assert.ok(response.body.lines.every(line => line.rhyme.matches));
   assert.equal(groq.mock.callCount(), 1);
   const [url, options] = groq.mock.calls[0].arguments;
   assert.equal(url, "https://api.groq.com/openai/v1/chat/completions");
@@ -472,6 +525,137 @@ test("M12 : les réglages valides sont transmis avec le bon nombre de mesures et
     assert.equal(linesSchema.maxItems, measures);
   }
   assert.equal(groq.mock.callCount(), 2);
+});
+
+test("M12 : AABB, ABAB et internes complètent les rimes prévues en un seul appel", async (t) => {
+  let endings;
+  const groq = stubGroq(t, "test-key", (_url, options) => {
+    const { messages } = JSON.parse(options.body);
+    const plan = messages[0].content.split("Fins par numéro de mesure : ")[1].split(".")[0];
+    endings = plan.split(" | ").map(entry => entry.split("=")[1]);
+    assert.equal(endings.length, 8);
+    return groqLyricsReply(endings.map((ending, index) => ({
+      measure: index + 1,
+      text: index === 0 ? `Dans ${ending}.` : "Je pense à",
+    })));
+  });
+  for (const [user, rhymeScheme] of [[alice, "AABB"], [alice, "ABAB"], [bob, "internal"]]) {
+    const { body: target } = await createProject(user);
+    for (const language of ["fr", "en"]) {
+      const response = await call(user, "POST", `/${target.id}/lyrics/generate`, { theme: "La nuit", rhymeScheme, language });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.lines[0].text, `Dans ${endings[0]}.`);
+      assert.ok(response.body.lines.every((line, index) => line.text.replace(/\.$/u, "").endsWith(endings[index]) && line.rhyme.matches));
+    }
+  }
+  assert.equal(groq.mock.callCount(), 6);
+});
+
+test("M12 : régénérer la mesure 4 en ABAB utilise la rime de la mesure 2 conservée", async (t) => {
+  const lines = ["Je reste retenu", "Les ombres font un grand feu", "Nos espoirs perdus", "On danse sans retenue"];
+  const groq = stubGroq(t, "test-key", (_url, options) => {
+    const { messages } = JSON.parse(options.body);
+    assert.match(messages[0].content, /Fins par numéro de mesure : 1=jeu\./u);
+    return groqLyricsReply([{ measure: 1, text: "On connaît les règles du jeu, malgré tout" }]);
+  });
+  const { body: project } = await createProject(alice);
+  const response = await call(alice, "POST", `/${project.id}/lyrics/generate`, {
+    theme: "La nuit", rhymeScheme: "ABAB", measures: 4, regenerate: { from: 4, to: 4, lines },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.lines.map(line => line.text), [...lines.slice(0, 3), "On connaît les règles du jeu"]);
+  assert.ok(response.body.lines.every(line => line.rhyme.matches));
+  assert.equal(groq.mock.callCount(), 1);
+});
+
+test("M12 : la régénération utilise la variante courte dans les trois schémas, langues, densités et formats", async (t) => {
+  const groq = stubGroq(t, "test-key", (_url, request) => {
+    const { messages, response_format } = JSON.parse(request.body);
+    const { regenerate, measures, targetSyllables, language } = JSON.parse(messages[1].content);
+    assert.equal(response_format.type, "json_object");
+    assert.equal(measures, regenerate.to - regenerate.from + 1);
+    assert.match(messages[0].content, /compactText/u);
+    const plan = messages[0].content.split("Fins par numéro de mesure : ")[1].split(".")[0];
+    const endings = new Map(plan.split(" | ").map(entry => entry.split("=")));
+    const beat = language === "fr" ? "là" : "go";
+    return groqLyricsReply(Array.from({ length: regenerate.to - regenerate.from + 1 }, (_, index) => {
+      const ending = endings.get(String(index + 1));
+      const prefixBudget = Math.max(1, targetSyllables - estimateLyricSyllables(ending, language));
+      return { measure: index + 1, text: (beat + " ").repeat(35).trim(), compactText: (beat + " ").repeat(prefixBudget).trim() };
+    }));
+  });
+
+  let cases = 0;
+  for (const bpm of [90, 140]) {
+    const { body: project } = await call(alice, "POST", "", { title: "Rimes", origin: "create", bpm });
+    const route = `/${project.id}/lyrics/generate`;
+    for (const language of ["fr", "en"]) {
+      for (const rhymeScheme of ["AABB", "ABAB", "internal"]) {
+        for (const flow of ["relaxed", "standard", "fast"]) {
+          for (const measures of [4, 8, 16]) {
+            const lines = planRhymeEndings({ language, rhymeScheme, firstMeasure: 1, lastMeasure: measures, targetSyllables: 7 });
+            for (const [from, to] of [[2, 2], [2, measures]]) {
+              lyricsAttempts.clear();
+              const body = { theme: "Fête", language, rhymeScheme, flow, measures, regenerate: { from, to, lines } };
+              const response = await call(alice, "POST", route, body);
+              const settings = [bpm, language, rhymeScheme, flow, measures, from, to].join("/");
+              assert.equal(response.status, 200, settings);
+              assert.equal(response.body.lines.length, measures, settings);
+              for (const line of response.body.lines) {
+                assert.ok(line.rhyme.matches, settings);
+                if (line.measure < from || line.measure > to) {
+                  assert.equal(line.text, lines[line.measure - 1], settings);
+                } else {
+                  assert.ok(Math.abs(line.syllables - response.body.targetSyllables) <= 2, settings);
+                }
+              }
+              assert.deepEqual([...lyricsAttempts.values()], [1]);
+              cases++;
+            }
+          }
+        }
+      }
+    }
+  }
+  assert.equal(cases, 216);
+  assert.equal(groq.mock.callCount(), cases);
+});
+
+test("M12 : une régénération hors cadence est rejetée sans écraser le texte", async (t) => {
+  const groq = stubGroq(t, "test-key", () => groqLyricsReply([
+    { measure: 1, text: "On avance vers la fête et on chante encore avec tous les amis", compactText: "On chante encore avec tous les amis" },
+  ]));
+  const { body: project } = await call(alice, "POST", "", { title: "Rimes", origin: "create", bpm: 140 });
+  const lines = ["Un dernier détour", "Bientôt de retour", "Un rêve dans la nuit", "Écoutez le bruit"];
+  const response = await call(alice, "POST", `/${project.id}/lyrics/generate`, {
+    theme: "Fête", flow: "relaxed", measures: 4, regenerate: { from: 1, to: 1, lines },
+  });
+  assert.equal(response.status, 502);
+  assert.match(response.body.message, /La mesure 1 régénérée.*5 syllabes/u);
+  assert.equal(groq.mock.callCount(), 1);
+  assert.equal((await call(alice, "GET", `/${project.id}`)).body.revision, 0);
+});
+
+test("M12 : une mesure interne trop longue reprend la partie courte séparée par une virgule", async (t) => {
+  let ending;
+  const groq = stubGroq(t, "test-key", (_url, options) => {
+    const { messages } = JSON.parse(options.body);
+    ending = messages[0].content.split("Fins par numéro de mesure : 1=")[1].split(".")[0];
+    return groqLyricsReply([
+      { measure: 1, text: `Avec tous nos amis on danse et on chante, Voici ${ending}` },
+      { measure: 2, text: "Une ligne hors de la sélection" },
+    ]);
+  });
+  const { body: project } = await createProject(alice);
+  const lines = ["On se voit ce soir", "Du bruit dans la nuit", "Un détour sans retour", "Des doutes sur la route"];
+  const response = await call(alice, "POST", `/${project.id}/lyrics/generate`, {
+    theme: "Fête", rhymeScheme: "internal", flow: "relaxed", measures: 4, regenerate: { from: 1, to: 1, lines },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.lines.map(line => line.text), [`Voici ${ending}`, ...lines.slice(1)]);
+  assert.ok(Math.abs(response.body.lines[0].syllables - 7) <= 2);
+  assert.ok(response.body.lines[0].rhyme.matches);
+  assert.equal(groq.mock.callCount(), 1);
 });
 
 test("M12 : une valeur hors contrat est rejetée avant tout appel à Groq", async (t) => {
@@ -633,7 +817,7 @@ test("M12 : thème, paroles et détails des erreurs restent hors des logs", asyn
 
   const generated = await call(alice, "POST", route, { theme });
   assert.equal(generated.status, 200);
-  assert.equal(generated.body.lines[0].text, lyric);
+  assert.ok(generated.body.lines[0].text.startsWith(lyric));
 
   const malformed = await fetch(base + route, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: `{"theme":"${theme}",`,

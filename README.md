@@ -229,11 +229,22 @@ Renseigner dans `backend/.env` :
 
 > ⚠️ Ne jamais committer `.env` ni copier un secret dans le code Angular.
 
+#### Créer une base MongoDB Atlas
+
+1. Dans un projet Atlas, ouvrir **Clusters** et créer un cluster **Free (M0)**. [Créer un cluster gratuit](https://www.mongodb.com/docs/atlas/tutorial/deploy-free-tier-cluster/)
+2. Dans **Database Users**, créer un utilisateur de base de données avec un mot de passe. Dans **Specific Privileges**, lui attribuer le rôle `readWrite` sur la base du backend. Conserver son nom si elle existe déjà, ou choisir un nom comme `zakat-record` pour une nouvelle base. [Configurer un utilisateur de base de données](https://www.mongodb.com/docs/atlas/security-add-mongodb-users/)
+3. Dans **IP Access List**, autoriser l’adresse IP publique du poste qui lance le backend. Lors de la création du cluster, **Add My Current IP Address** permet d’ajouter l’IP du poste courant. Mettre l’entrée à jour si l’IP change. [Autoriser une adresse IP](https://www.mongodb.com/docs/atlas/security/ip-access-list/)
+4. Sur le cluster, ouvrir **Connect → Drivers → Node.js** et copier l’URI `mongodb+srv://` comme valeur de `MONGODB_URI` dans `backend/.env`. Renseigner les identifiants et le même nom de base qu’à l’étape 2, par exemple `…mongodb.net/zakat-record?…`, en gardant les options fournies par Atlas. [Récupérer l’URI](https://www.mongodb.com/docs/drivers/node/current/get-started/)
+
+Dans l’URI, encoder les caractères réservés du mot de passe. Par exemple, `@` s’écrit `%40`. [Format des URI MongoDB](https://www.mongodb.com/docs/manual/reference/connection-string-formats/)
+
+#### Lancer l’API
+
 ```bash
 npm install && npm start
 ```
 
-L'API écoute sur `http://localhost:3000`.
+L'API écoute sur `http://localhost:3000`. Ouvrir [la route de vérification](http://localhost:3000/api/health) pour vérifier que le backend a démarré après la connexion à MongoDB.
 
 ### 3. Frontend
 

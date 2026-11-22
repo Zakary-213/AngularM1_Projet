@@ -1,18 +1,43 @@
-<p class="muted">Rendu hors temps réel : batterie, mélodie, basse, instrumentale et prise vocale non muettes, exactement comme à l'écoute (l'écoute seule d'un pattern du Piano Roll n'est pas exportée : seuls ses clips le sont).</p>
-<div class="row">
-  <div class="field">
-    <label for="export-bars">Durée</label>
-    <select id="export-bars" [formControl]="bars">
-      @for (choice of barChoices; track choice) { <option [ngValue]="choice">{{ choice }} mesure{{ choice > 1 ? 's' : '' }}</option> }
-    </select>
+<p class="muted">Rendu hors temps réel du morceau entier, exactement comme à l'écoute : batterie, mélodie, basse, instrumentale et prise vocale non muettes, aux positions de la timeline, avec le mixeur (volumes, panoramique, égaliseurs, réverbération, delay) et le Master. L'écoute seule d'un pattern du Piano Roll et le métronome ne sont pas exportés.</p>
+
+<dl class="facts">
+  <div>
+    <dt>Durée</dt>
+    <dd>
+      @if (plan(); as length) {
+        @if (length.ok) {
+          {{ formatSeconds(length.seconds) }}@if (length.seconds > length.contentSeconds) { <span class="muted"> (dont {{ formatSeconds(length.seconds - length.contentSeconds) }} de traîne des effets)</span> }
+        } @else { rien à exporter }
+      }
+    </dd>
   </div>
-  <button type="button" class="button" (click)="exportWav()" [disabled]="session.exporting()">
+  <div><dt>Voix</dt><dd>{{ voiceSource() }}</dd></div>
+  <div><dt>Format</dt><dd>WAV stéréo 16 bits, 44,1 kHz</dd></div>
+</dl>
+@if (plan(); as length) {
+  @if (length.ok && length.truncated) { <p class="error">Le morceau dépasse {{ maxMinutes }} minutes : seules les {{ maxMinutes }} premières minutes seront exportées.</p> }
+}
+
+<div class="row">
+  <button type="button" class="button" (click)="exportWav()" [disabled]="session.exporting() || !plan().ok">
     {{ session.exporting() ? 'Rendu en cours…' : '⬇ Exporter en WAV' }}
   </button>
 </div>
-<div role="status">
-  @if (session.exportReport(); as report) {
-    <p>Fichier généré : {{ formatSeconds(report.seconds) }}, crête {{ formatDecibels(report.peakDb) }}.</p>
+
+<div role="status" class="status">
+  @if (session.exporting()) {
+    @let percent = progressPercent();
+    <!-- 0 % est une progression connue : ne pas le confondre avec « non fournie » (null). -->
+    @if (percent !== null) {
+      <label for="export-progress">Rendu : {{ percent }} %</label>
+      <progress id="export-progress" max="100" [value]="percent">{{ percent }} %</progress>
+    } @else {
+      <p>Rendu en cours… (avancement non fourni par ce navigateur)</p>
+    }
+  } @else if (session.exportReport(); as report) {
+    <p>Fichier téléchargé : {{ formatSeconds(report.seconds) }}, crête {{ formatDecibels(report.peakDb) }}, voix {{ report.correctedVoice ? 'corrigée' : 'originale' }}.</p>
   }
 </div>
 @if (session.exportError(); as message) { <p class="error" role="alert">{{ message }}</p> }
+
+<p class="muted note">MP3 non proposé : les navigateurs ne savent pas encoder le MP3 et les encodeurs JavaScript disponibles (LGPL, plus de 100 Ko) n'ont pas été ajoutés. Convertissez le WAV avec un outil externe si besoin.</p>

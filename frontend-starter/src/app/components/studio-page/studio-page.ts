@@ -468,10 +468,14 @@ export class StudioPageComponent implements LeaveConfirmation {
     return isPatternKind(clip.kind) ? this.visibleBars() : this.visibleBars() * BEATS_PER_BAR;
   }
 
+  onAutoSaveChange(event: Event): void {
+    this.studioProject.autoSave.set((event.target as HTMLInputElement).checked);
+  }
+
   /** Utilisé par `unsavedChangesGuard` avant de quitter le studio. */
   canLeave(): boolean {
     if (this.studioProject.uploading()) {
-      return confirm('L’instrumentale est en cours d’envoi. Quitter interrompt l’envoi. Quitter quand même ?');
+      return confirm('Un fichier audio est en cours d’envoi. Quitter interrompt l’envoi. Quitter quand même ?');
     }
     return !this.studioProject.hasUnsavedChanges() || confirm('Des modifications ne sont pas sauvegardées. Quitter quand même ?');
   }

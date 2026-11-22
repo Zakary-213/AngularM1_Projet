@@ -1,7 +1,11 @@
 import { ScaleName } from '../audio/pitch/musical-scale';
 
-/** Version du format de sauvegarde comprise par ce studio (voir « Contrat d'API »). */
-export const PROJECT_FORMAT_VERSION = 1;
+/**
+ * Version du format de sauvegarde comprise par ce studio (voir « Contrat d'API »).
+ * v2 (M10) : section `vocal` et version corrigée d'une prise ; un projet v1 se lit
+ * avec les réglages de correction par défaut et passe en v2 à sa prochaine sauvegarde.
+ */
+export const PROJECT_FORMAT_VERSION = 2;
 export const PROJECT_TITLE_MAX_LENGTH = 80;
 
 export type ProjectOrigin = 'create' | 'import';
@@ -23,6 +27,39 @@ export interface ProjectClip {
   readonly audioFileId?: string;
   /** Nom affiché du clip (ex. nom du fichier importé). */
   readonly label?: string;
+  /** Version corrigée d'une prise (fichier dérivé de la bibliothèque, M9/M10). */
+  readonly correction?: ProjectTakeCorrection;
+}
+
+export interface ProjectTakeCorrection {
+  readonly audioFileId: string;
+  /** Style appliqué, pour l'affichage. */
+  readonly styleLabel?: string;
+  /** Version corrigée jouée sur la piste Voix (écoute et export) au lieu de l'originale. */
+  readonly enabled?: boolean;
+}
+
+/** Réglages complets d'une correction vocale, tels que sauvegardés (VoiceSettings). */
+export interface ProjectVoiceSettings {
+  readonly root: number;
+  readonly scale: ScaleName;
+  readonly allowedPitchClasses: readonly number[];
+  readonly strength: number;
+  readonly retuneMs: number;
+  readonly toleranceCents: number;
+  readonly transposeSemitones: number;
+  readonly eq: { readonly lowCutHz: number; readonly bodyDb: number; readonly presenceDb: number; readonly airDb: number };
+  readonly fx: { readonly reverbMix: number; readonly reverbSeconds: number; readonly delayMix: number; readonly delayMs: number; readonly feedback: number };
+}
+
+/** Correction vocale du projet (M9) : style choisi, dose, réglages personnalisés et styles personnels. */
+export interface ProjectVocal {
+  readonly styleId: string;
+  /** Dose d'effet de 0 à 1. */
+  readonly dose: number;
+  readonly userStyleName?: string;
+  readonly custom?: ProjectVoiceSettings;
+  readonly userStyles?: readonly { readonly name: string; readonly basedOn: string; readonly settings: ProjectVoiceSettings }[];
 }
 
 /** Envoi d'une piste vers un effet partagé : activé ou non, quantité de 0 à 1. */
@@ -92,6 +129,8 @@ export interface ProjectContent {
   readonly patterns: readonly ProjectPattern[];
   /** Volume Master linéaire (0 à 1, 0,8 par défaut). */
   readonly master?: { readonly volume: number };
+  /** Absente des projets v1. */
+  readonly vocal?: ProjectVocal;
 }
 
 export interface MusicalProject extends ProjectContent {

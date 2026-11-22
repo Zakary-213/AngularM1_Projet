@@ -1,8 +1,11 @@
 import mongoose from "mongoose";
 
 /*
- * Format de sauvegarde d'un projet musical (version 1), défini en M0 et
- * utilisé par les routes /api/projects de M1.
+ * Format de sauvegarde d'un projet musical, défini en M0 et utilisé par les
+ * routes /api/projects de M1. Version 2 (M10) : ajoute la section `vocal`
+ * (réglages de correction vocale et styles personnels, M9) et la version
+ * corrigée d'une prise (`clips[].correction`). Un projet v1 reste lisible tel
+ * quel (ces champs y sont absents) et passe en v2 à sa prochaine sauvegarde.
  *
  * Unités : positions et durées des clips en temps (beats), pour qu'un
  * changement de BPM conserve l'arrangement ; décalage dans un fichier audio
@@ -13,7 +16,9 @@ import mongoose from "mongoose";
  * document Track (audioFileId) dont le fichier reste sur le disque.
  */
 
-export const PROJECT_FORMAT_VERSION = 1;
+export const PROJECT_FORMAT_VERSION = 2;
+/** Versions que ce serveur sait relire (et réécrire dans la version courante). */
+export const SUPPORTED_FORMAT_VERSIONS = Object.freeze([1, 2]);
 export const PROJECT_LIMITS = Object.freeze({
   titleMaxLength: 80,
   minBpm: 60,
@@ -31,6 +36,19 @@ export const PROJECT_LIMITS = Object.freeze({
   maxTrackDb: 6,
   maxEqDb: 12,
   clipLabelMaxLength: 120,
+  // Correction vocale (M9) : mêmes bornes que le studio (pitch-correction.ts, voice-eq.ts, voice-fx.ts).
+  maxUserStyles: 12,
+  styleNameMaxLength: 30,
+  styleLabelMaxLength: 60,
+  maxRetuneMs: 300,
+  maxToleranceCents: 50,
+  maxTransposeSemitones: 12,
+  maxLowCutHz: 300,
+  minReverbSeconds: 0.3,
+  maxReverbSeconds: 5,
+  minDelayMs: 50,
+  maxDelayMs: 1000,
+  maxFeedback: 0.8,
 });
 
 export const TRACK_TYPES = ["drum", "instrument", "audio", "vocal"];
@@ -41,6 +59,8 @@ export const DRUM_KITS = ["boomBap", "trap"];
 export const INSTRUMENTS = ["piano", "synth", "bass808"];
 // Mêmes gammes que la correction vocale du studio (musical-scale.ts).
 export const SCALES = ["major", "minor", "harmonicMinor", "phrygianDominant"];
+// Styles de correction vocale du studio (vocal-styles.ts).
+export const VOCAL_STYLE_IDS = ["natural", "rap", "trap", "drill", "rai", "robot"];
 
 const L = PROJECT_LIMITS;
 // Identifiants générés par le client (UUID) : stables entre sauvegardes et reconnexions.
@@ -91,6 +111,18 @@ const fxSchema = new mongoose.Schema(
   { _id: false },
 );
 
+// Version corrigée d'une prise (M9/M10) : fichier dérivé dans la bibliothèque ; l'original n'est jamais modifié.
+const correctionSchema = new mongoose.Schema(
+  {
+    audioFileId: { type: mongoose.Schema.Types.ObjectId, ref: "Track", required: true },
+    // Style appliqué, pour l'affichage (« Trap », « Personnalisé (basé sur Raï) »).
+    styleLabel: { type: String, trim: true, maxlength: L.styleLabelMaxLength, default: "" },
+    // Version corrigée jouée sur la piste Voix (écoute et export) au lieu de l'originale.
+    enabled: { type: Boolean, default: false },
+  },
+  { _id: false },
+);
+
 const clipSchema = new mongoose.Schema(
   {
     id: stableId,
@@ -102,6 +134,7 @@ const clipSchema = new mongoose.Schema(
     patternId: { type: String, match: stableId.match },
     audioFileId: { type: mongoose.Schema.Types.ObjectId, ref: "Track" },
     pitchCorrection: { type: pitchCorrectionSchema, default: undefined },
+    correction: { type: correctionSchema, default: undefined },
   },
   { _id: false },
 );
@@ -110,6 +143,9 @@ const clipSchema = new mongoose.Schema(
 clipSchema.pre("validate", function () {
   if (Boolean(this.patternId) === Boolean(this.audioFileId)) {
     this.invalidate("patternId", "Un clip référence soit un pattern, soit un fichier audio");
+  }
+  if (this.correction && !this.audioFileId) {
+    this.invalidate("correction", "Seule une prise audio peut avoir une version corrigée");
   }
 });
 
@@ -212,9 +248,84 @@ patternSchema.pre("validate", function () {
   }
 });
 
+// Réglages complets d'une correction vocale (VoiceSettings du studio).
+const pitchClass = { type: Number, min: 0, max: 11, validate: Number.isInteger };
+const voiceEqSchema = new mongoose.Schema(
+  {
+    // Coupe-bas en Hz (0 = désactivé), gains en dB.
+    lowCutHz: { type: Number, required: true, min: 0, max: L.maxLowCutHz },
+    bodyDb: { type: Number, required: true, min: -L.maxEqDb, max: L.maxEqDb },
+    presenceDb: { type: Number, required: true, min: -L.maxEqDb, max: L.maxEqDb },
+    airDb: { type: Number, required: true, min: -L.maxEqDb, max: L.maxEqDb },
+  },
+  { _id: false },
+);
+const voiceFxSchema = new mongoose.Schema(
+  {
+    // Niveaux de 0 à 1, réverbération en secondes, écho en millisecondes.
+    reverbMix: { type: Number, required: true, min: 0, max: 1 },
+    reverbSeconds: { type: Number, required: true, min: L.minReverbSeconds, max: L.maxReverbSeconds },
+    delayMix: { type: Number, required: true, min: 0, max: 1 },
+    delayMs: { type: Number, required: true, min: L.minDelayMs, max: L.maxDelayMs },
+    feedback: { type: Number, required: true, min: 0, max: L.maxFeedback },
+  },
+  { _id: false },
+);
+const voiceSettingsSchema = new mongoose.Schema(
+  {
+    root: { ...pitchClass, required: true },
+    scale: { type: String, required: true, enum: SCALES },
+    // Notes autorisées (0 = do … 11 = si), sans doublon.
+    allowedPitchClasses: {
+      type: [pitchClass],
+      validate: { validator: (values) => new Set(values).size === values.length, message: "Notes autorisées en double" },
+    },
+    strength: { type: Number, required: true, min: 0, max: 1 },
+    retuneMs: { type: Number, required: true, min: 0, max: L.maxRetuneMs },
+    toleranceCents: { type: Number, required: true, min: 0, max: L.maxToleranceCents },
+    transposeSemitones: { type: Number, required: true, min: -L.maxTransposeSemitones, max: L.maxTransposeSemitones, validate: Number.isInteger },
+    eq: { type: voiceEqSchema, required: true },
+    fx: { type: voiceFxSchema, required: true },
+  },
+  { _id: false },
+);
+
+const userStyleSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true, minlength: 1, maxlength: L.styleNameMaxLength },
+    basedOn: { type: String, required: true, enum: VOCAL_STYLE_IDS },
+    settings: { type: voiceSettingsSchema, required: true },
+  },
+  { _id: false },
+);
+
+// Correction vocale du projet (M9) : style choisi, dose, réglages personnalisés et styles personnels.
+const vocalSchema = new mongoose.Schema(
+  {
+    styleId: { type: String, enum: VOCAL_STYLE_IDS, default: "natural" },
+    dose: { type: Number, default: 1, min: 0, max: 1 },
+    // Style personnel choisi (l'un de `userStyles`), sinon absent.
+    userStyleName: { type: String, trim: true, maxlength: L.styleNameMaxLength },
+    // Réglages modifiés à la main (« Personnalisé ») ; absents tant qu'on suit le style.
+    custom: { type: voiceSettingsSchema, default: undefined },
+    userStyles: { type: [userStyleSchema], default: [], validate: maxItems(L.maxUserStyles) },
+  },
+  { _id: false },
+);
+
+vocalSchema.pre("validate", function () {
+  const names = this.userStyles.map((style) => style.name);
+  if (new Set(names).size !== names.length) {
+    this.invalidate("userStyles", "Deux styles personnels portent le même nom");
+  }
+  if (this.userStyleName && !names.includes(this.userStyleName)) {
+    this.invalidate("userStyleName", "Le style personnel choisi doit faire partie des styles du projet");
+  }
+});
+
 const schema = new mongoose.Schema(
   {
-    formatVersion: { type: Number, required: true, default: PROJECT_FORMAT_VERSION, enum: [PROJECT_FORMAT_VERSION] },
+    formatVersion: { type: Number, required: true, default: PROJECT_FORMAT_VERSION, enum: SUPPORTED_FORMAT_VERSIONS },
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     title: { type: String, required: true, trim: true, minlength: 1, maxlength: L.titleMaxLength },
     // Parcours de départ : « Créer une prod » ou « Importer une prod ».
@@ -231,6 +342,8 @@ const schema = new mongoose.Schema(
     master: {
       volume: { type: Number, default: 0.8, min: 0, max: 1 },
     },
+    // Absente des projets v1 : le studio reprend alors ses réglages par défaut.
+    vocal: { type: vocalSchema, default: undefined },
     // Incrémentée à chaque sauvegarde : une sauvegarde basée sur une révision
     // dépassée est refusée (409) au lieu d'écraser le travail d'un autre onglet.
     revision: { type: Number, default: 0, min: 0 },

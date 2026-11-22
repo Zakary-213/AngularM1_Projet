@@ -1,14 +1,16 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpErrorResponse, HttpEvent, HttpEventType, HttpResponse } from '@angular/common/http';
 import { Observable, Subject, of, throwError } from 'rxjs';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioEngineService } from '../audio/audio-engine.service';
 import { StudioSessionService, VocalTake } from '../audio/studio-session.service';
 import { MusicalProject, ProjectContent } from '../models/musical-project.model';
 import { ProjectService } from './project.service';
 import { TrackService } from './track.service';
 import { Track } from '../models/track.model';
-import { StudioProjectService } from './studio-project.service';
+import { AUTO_SAVE_DELAY_MS, StudioProjectService } from './studio-project.service';
+import { findStyle, styleSettings } from '../audio/pitch/vocal-styles';
+import { LEGACY_USER_STYLES_KEY } from '../audio/pitch/voice-correction-state';
 
 const stored: MusicalProject = {
   id: 'p1',
@@ -53,7 +55,8 @@ describe('StudioProjectService', () => {
   let session: StudioSessionService;
 
   beforeEach(() => {
-    api = { get: vi.fn(() => of(stored)), save: vi.fn() };
+    localStorage.clear();
+    api ={ get: vi.fn(() => of(stored)), save: vi.fn() };
     tracksApi = { upload: vi.fn(), audio: vi.fn(() => of(new Blob(['audio']))) };
     engine = { decode: vi.fn(async () => fakeBuffer()), suspend: vi.fn(async () => undefined), currentTime: () => 0 };
     TestBed.configureTestingModule({
@@ -67,6 +70,8 @@ describe('StudioProjectService', () => {
     });
     service = TestBed.inject(StudioProjectService);
     session = TestBed.inject(StudioSessionService);
+    // Sauvegarde automatique testée à part (minuteur simulé), pour garder ces tests déterministes.
+    service.autoSave.set(false);
   });
 
   it('charge le projet dans le studio, sans modification en attente', () => {
@@ -132,7 +137,7 @@ describe('StudioProjectService', () => {
   });
 
   it('refuse d’ouvrir un projet d’une version future du format', () => {
-    api.get.mockReturnValue(of({ ...stored, formatVersion: 2 }));
+    api.get.mockReturnValue(of({ ...stored, formatVersion: 3 }));
     service.load('p1');
     expect(service.loadState()).toBe('error');
     expect(service.loadError()).toContain('version plus récente');
@@ -322,6 +327,167 @@ describe('StudioProjectService', () => {
       fakeRecording(recorded('take-1', 'Prise 1'));
       await service.stopRecording();
       expect(tracksApi.upload).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sauvegarde automatique (M10)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      service.autoSave.set(true);
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('regroupe une série de modifications en une seule sauvegarde, après le délai', () => {
+      service.load('p1');
+      api.save.mockReturnValue(of({ ...stored, revision: 5 }));
+      for (let step = 1; step <= 5; step++) {
+        session.toggleStep('kick', step);
+        TestBed.tick();
+        vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS / 2);
+      }
+      expect(api.save).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS);
+      expect(api.save).toHaveBeenCalledTimes(1);
+      const content = api.save.mock.calls[0][2] as ProjectContent;
+      expect(content.patterns[0].drumRows.find(row => row.voice === 'kick')?.steps.slice(1, 6)).toEqual([true, true, true, true, true]);
+      TestBed.tick();
+      expect(service.saveState()).toBe('saved');
+    });
+
+    it('rien n’est envoyé sans modification, ni pendant un conflit, ni si elle est désactivée', () => {
+      service.load('p1');
+      TestBed.tick();
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS * 2);
+      expect(api.save).not.toHaveBeenCalled();
+
+      api.save.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 409 })));
+      session.toggleStep('kick', 1);
+      TestBed.tick();
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS);
+      expect(service.saveState()).toBe('conflict');
+      session.toggleStep('kick', 2);
+      TestBed.tick();
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS * 3);
+      expect(api.save).toHaveBeenCalledTimes(1);
+
+      service.reload();
+      service.autoSave.set(false);
+      session.toggleStep('kick', 3);
+      TestBed.tick();
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS * 3);
+      expect(api.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('après un échec, attend une nouvelle modification avant de réessayer (pas de boucle)', () => {
+      service.load('p1');
+      api.save.mockReturnValue(throwError(() => new HttpErrorResponse({ status: 0 })));
+      session.toggleStep('kick', 1);
+      TestBed.tick();
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS);
+      expect(service.saveState()).toBe('error');
+      TestBed.tick();
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS * 5);
+      expect(api.save).toHaveBeenCalledTimes(1);
+
+      api.save.mockReturnValue(of({ ...stored, revision: 5 }));
+      session.toggleStep('kick', 2);
+      TestBed.tick();
+      vi.advanceTimersByTime(AUTO_SAVE_DELAY_MS);
+      expect(api.save).toHaveBeenCalledTimes(2);
+      TestBed.tick();
+      expect(service.saveState()).toBe('saved');
+    });
+  });
+
+  describe('correction vocale (M9 / M10)', () => {
+    const TAKE_FILE = '64b0000000000000000000c1';
+    const CORRECTED_FILE = '64b0000000000000000000d1';
+    const trap = styleSettings(findStyle('trap'), 1, { root: 0, scale: 'major' }, 132);
+    const correctedBuffer = () => ({ ...fakeBuffer(12), getChannelData: () => new Float32Array(1200) }) as unknown as AudioBuffer;
+    const voice = (correction?: { audioFileId: string; styleLabel: string; enabled: boolean }) => ({
+      id: 'voice',
+      name: 'Voix principale',
+      type: 'vocal' as const,
+      activeClipId: 'take-1',
+      clips: [{ id: 'take-1', startBeat: 0, durationBeats: 8, audioFileId: TAKE_FILE, label: 'Prise 1', ...(correction ? { correction } : {}) }],
+    });
+
+    it('sauvegarde le style, la dose, les réglages personnalisés et les styles personnels', () => {
+      service.load('p1');
+      session.voiceCorrection.set({ styleId: 'trap', dose: 0.5, userStyleName: 'Refrain', custom: trap });
+      session.userVocalStyles.set([{ name: 'Refrain', basedOn: 'trap', settings: trap }]);
+      expect(service.saveState()).toBe('dirty');
+      api.save.mockReturnValue(of({ ...stored, revision: 5 }));
+      service.save();
+      const content = api.save.mock.calls[0][2] as ProjectContent;
+      expect(content.vocal).toMatchObject({ styleId: 'trap', dose: 0.5, userStyleName: 'Refrain', custom: { retuneMs: trap.retuneMs } });
+      expect(content.vocal?.userStyles?.map(style => style.name)).toEqual(['Refrain']);
+    });
+
+    it('à la réouverture, retrouve les réglages sans modification en attente', () => {
+      api.get.mockReturnValue(
+        of({ ...stored, formatVersion: 2, vocal: { styleId: 'drill', dose: 0.3, userStyles: [{ name: 'Sombre', basedOn: 'drill', settings: trap }], userStyleName: 'Sombre', custom: trap } }),
+      );
+      service.load('p1');
+      expect(session.voiceCorrection()).toMatchObject({ styleId: 'drill', dose: 0.3, userStyleName: 'Sombre' });
+      expect(session.userVocalStyles().map(style => style.name)).toEqual(['Sombre']);
+      expect(service.saveState()).toBe('saved');
+    });
+
+    it('migration : un projet v1 reprend les styles personnels du navigateur, à sauvegarder', () => {
+      localStorage.setItem(LEGACY_USER_STYLES_KEY, JSON.stringify([{ name: 'Ancien', basedOn: 'rap', settings: trap }]));
+      service.load('p1');
+      expect(session.userVocalStyles().map(style => style.name)).toEqual(['Ancien']);
+      expect(service.saveState()).toBe('dirty');
+    });
+
+    it('envoie la version corrigée en WAV, la sauvegarde avec la prise et garde l’original', async () => {
+      api.get.mockReturnValue(of({ ...stored, tracks: [voice()] }));
+      service.load('p1');
+      await vi.waitFor(() => expect(session.take()?.id).toBe('take-1'));
+      tracksApi.upload.mockReturnValue(of(new HttpResponse({ body: { id: CORRECTED_FILE } as Track })));
+      service.useCorrectedVersion(correctedBuffer(), 'Trap');
+
+      const [file, title] = tracksApi.upload.mock.calls[0] as [File, string];
+      expect(file.type).toBe('audio/wav');
+      expect(title).toBe('Prise 1 · corrigée (Trap) · Minuit');
+      expect(session.correctionActive()).toBe(true);
+      api.save.mockReturnValue(of({ ...stored, revision: 5 }));
+      service.save();
+      const clip = (api.save.mock.calls[0][2] as ProjectContent).tracks.find(track => track.id === 'voice')!.clips[0];
+      expect(clip).toMatchObject({ audioFileId: TAKE_FILE, correction: { audioFileId: CORRECTED_FILE, styleLabel: 'Trap', enabled: true } });
+    });
+
+    it('à la réouverture, récupère la version corrigée et la rejoue sur la piste Voix', async () => {
+      api.get.mockReturnValue(of({ ...stored, formatVersion: 2, tracks: [voice({ audioFileId: CORRECTED_FILE, styleLabel: 'Trap', enabled: true })] }));
+      service.load('p1');
+      expect(tracksApi.audio.mock.calls.map(call => call[0])).toEqual([TAKE_FILE, CORRECTED_FILE]);
+      await vi.waitFor(() => expect(session.correctionActive()).toBe(true));
+      expect(session.correctedTake()?.styleLabel).toBe('Trap');
+      expect(service.saveState()).toBe('saved');
+
+      // Désactiver la correction (mixeur) est une modification sauvegardée ; le fichier reste référencé.
+      session.useCorrectedTake.set(false);
+      api.save.mockReturnValue(of({ ...stored, revision: 5 }));
+      service.save();
+      const clip = (api.save.mock.calls[0][2] as ProjectContent).tracks.find(track => track.id === 'voice')!.clips[0];
+      expect(clip.correction).toEqual({ audioFileId: CORRECTED_FILE, styleLabel: 'Trap', enabled: false });
+    });
+
+    it('échec d’envoi de la version corrigée : message, sauvegarde bloquée, nouvel essai', async () => {
+      api.get.mockReturnValue(of({ ...stored, tracks: [voice()] }));
+      service.load('p1');
+      await vi.waitFor(() => expect(session.take()?.id).toBe('take-1'));
+      const response = new Subject<HttpEvent<Track>>();
+      tracksApi.upload.mockReturnValueOnce(response);
+      service.useCorrectedVersion(correctedBuffer(), 'Rap');
+      expect(service.canSave()).toBe(false);
+      response.error(new HttpErrorResponse({ status: 0 }));
+      expect(service.correctionUpload()).toMatchObject({ state: 'error' });
+
+      tracksApi.upload.mockReturnValueOnce(of(new HttpResponse({ body: { id: CORRECTED_FILE } as Track })));
+      service.retryCorrectionUpload();
+      expect(service.correctionRef()?.fileId).toBe(CORRECTED_FILE);
     });
   });
 });

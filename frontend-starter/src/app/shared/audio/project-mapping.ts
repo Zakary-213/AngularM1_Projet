@@ -3,7 +3,8 @@ import { DEFAULT_KIT, DEFAULT_PATTERN_ID, DRUM_KITS, DRUM_VOICES, DrumKit, DrumV
 export { createEmptyPattern } from './drum-pattern';
 import { BEATS_PER_BAR, DEFAULT_BPM, STEPS_PER_BAR, clampBpm } from './music-time';
 import { SCALE_NAMES, ScaleName } from './pitch/musical-scale';
-import { ProjectKey } from './pitch/vocal-styles';
+import { ProjectKey, UserVocalStyle } from './pitch/vocal-styles';
+import { VoiceCorrectionState, readProjectVocal, toProjectVocal } from './pitch/voice-correction-state';
 import { STUDIO_TRACKS } from './studio-tracks';
 import { DEFAULT_DRUM_CLIPS, DrumClip } from './arrangement';
 import {
@@ -24,8 +25,10 @@ import { MixerState, TRACK_IDS, TrackId, TrackMix, clampMasterVolume, createDefa
 import { MusicalProject, ProjectClip, ProjectContent, ProjectPattern, ProjectTrackType } from '../models/musical-project.model';
 
 /**
- * Conversion entre l'état sérialisable du studio et le format de sauvegarde v1
- * (réglages du mixeur M7 inclus : pan, égaliseur et envois d'effets par piste, Master).
+ * Conversion entre l'état sérialisable du studio et le format de sauvegarde v2
+ * (réglages du mixeur M7 inclus : pan, égaliseur et envois d'effets par piste, Master ;
+ * correction vocale M9 et version corrigée de la prise active, M10). Un projet v1 se lit
+ * de la même façon : les champs v2 absents reprennent leurs valeurs par défaut.
  * Les objets audio (buffers, nœuds, prises) n'y figurent jamais : l'instrumentale
  * et les prises vocales sont référencées par l'identifiant de leur fichier dans
  * la bibliothèque (M6, M8).
@@ -50,6 +53,15 @@ export interface TakeRef {
   readonly durationSeconds: number;
 }
 
+/** Version corrigée de la prise active, envoyée au serveur (fichier dérivé, l'original est conservé). */
+export interface TakeCorrectionRef {
+  readonly takeId: string;
+  readonly fileId: string;
+  readonly styleLabel: string;
+  /** Jouée sur la piste Voix (écoute et export) au lieu de l'originale. */
+  readonly enabled: boolean;
+}
+
 export interface StudioState {
   readonly bpm: number;
   readonly key: ProjectKey;
@@ -70,7 +82,15 @@ export interface StudioState {
   readonly melodicPatterns: readonly MelodicPattern[];
   /** Clips des pistes Mélodie et Basse (M4). */
   readonly instrumentClips: InstrumentClips;
+  /** Réglages de la correction vocale (M9). */
+  readonly vocal: VoiceCorrectionState;
+  /** Styles personnels de correction, sauvegardés avec le projet. */
+  readonly userStyles: readonly UserVocalStyle[];
+  /** Version corrigée de la prise active, ou `null`. */
+  readonly correction: TakeCorrectionRef | null;
 }
+
+const STYLE_LABEL_MAX_LENGTH = 60;
 
 const POSITION_DECIMALS = 10000;
 const round = (value: number) => Math.round(value * POSITION_DECIMALS) / POSITION_DECIMALS;
@@ -163,11 +183,21 @@ export function toProjectContent(state: StudioState): ProjectContent {
                     durationBeats: secondsToBeats(take.durationSeconds, state.bpm),
                     audioFileId: take.fileId,
                     label: take.label.slice(0, CLIP_LABEL_MAX_LENGTH),
+                    ...(state.correction?.takeId === take.id
+                      ? {
+                          correction: {
+                            audioFileId: state.correction.fileId,
+                            styleLabel: state.correction.styleLabel.slice(0, STYLE_LABEL_MAX_LENGTH),
+                            enabled: state.correction.enabled,
+                          },
+                        }
+                      : {}),
                   }))
                 : [],
       };
     }),
     master: { volume: state.masterVolume },
+    vocal: toProjectVocal(state.vocal, state.userStyles),
   };
 }
 
@@ -330,12 +360,28 @@ function readTakes(project: MusicalProject, bpm: number): { takes: TakeRef[]; ac
   return { takes, activeTakeId };
 }
 
+/** Version corrigée de la prise active ; celle d'une autre prise n'est pas reprise (le studio n'en joue qu'une). */
+function readCorrection(project: MusicalProject, activeTakeId: string | null): TakeCorrectionRef | null {
+  const clip = project.tracks?.find(candidate => candidate.id === 'voice')?.clips?.find(candidate => candidate.id === activeTakeId);
+  const correction = clip?.correction;
+  if (!activeTakeId || !correction || typeof correction.audioFileId !== 'string' || !correction.audioFileId) {
+    return null;
+  }
+  return {
+    takeId: activeTakeId,
+    fileId: correction.audioFileId,
+    styleLabel: typeof correction.styleLabel === 'string' ? correction.styleLabel.slice(0, STYLE_LABEL_MAX_LENGTH) : '',
+    enabled: correction.enabled === true,
+  };
+}
+
 /** État du studio à partir d'un projet chargé ; les valeurs absentes ou invalides reprennent les défauts. */
 export function fromProject(project: MusicalProject): StudioState {
   const bpm = Number.isFinite(project.bpm) ? clampBpm(project.bpm) : DEFAULT_BPM;
   const { takes, activeTakeId } = readTakes(project, bpm);
   const patterns = readPatterns(project);
   const melodicPatterns = readMelodicPatterns(project);
+  const vocal = readProjectVocal(project.vocal);
   return {
     bpm,
     key: readKey(project),
@@ -349,6 +395,9 @@ export function fromProject(project: MusicalProject): StudioState {
     instrumentalStartBeat: readInstrumental(project).startBeat,
     melodicPatterns,
     instrumentClips: readInstrumentClips(project, melodicPatterns),
+    vocal: vocal.state,
+    userStyles: vocal.userStyles,
+    correction: readCorrection(project, activeTakeId),
   };
 }
 

@@ -83,7 +83,17 @@
         <button type="button" class="button" (click)="applyToVoiceTrack()" [disabled]="!result() || processing()">Utiliser la version corrigée sur la piste Voix</button>
       }
     </div>
+    @if (studioProject?.correctionUpload(); as upload) {
+      @if (upload.state === 'uploading') {
+        <p class="small" role="status">Envoi de la version corrigée dans vos fichiers audio… {{ upload.progress }} %</p>
+      } @else {
+        <p class="error" role="alert">{{ upload.message }} <button type="button" class="link" (click)="retryCorrectionUpload()">Réessayer</button></p>
+      }
+    } @else if (inProject() && correctedOnTrack()) {
+      <p class="small muted">La version corrigée est un fichier à part (vos fichiers audio) : elle est sauvegardée avec le projet, la prise originale reste intacte.</p>
+    }
   }
+  @if (studioProject?.correctionError(); as message) { <p class="error" role="alert">{{ message }}</p> }
 
   @if (result(); as done) {
     <dl class="facts">
@@ -205,7 +215,7 @@
       <label for="style-name">Enregistrer ces réglages comme mon style</label>
       <input id="style-name" type="text" [formControl]="styleName" [maxlength]="30" placeholder="Ex. Refrain trap doux" aria-describedby="style-name-help" />
       <small id="style-name-help" class="muted" [class.error]="styleName.touched && styleName.invalid">
-        @if (styleName.touched && styleName.invalid) { Donnez un nom (30 caractères maximum). } @else { Gardé dans ce navigateur, avec les styles de base. }
+        @if (styleName.touched && styleName.invalid) { Donnez un nom (30 caractères maximum). } @else if (inProject()) { Sauvegardé avec le projet, avec les styles de base. } @else { Gardé dans ce navigateur (session libre), avec les styles de base. }
       </small>
     </div>
     <button type="button" class="button" (click)="saveUserStyle()">Enregistrer</button>

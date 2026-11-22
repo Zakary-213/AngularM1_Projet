@@ -1,9 +1,12 @@
 import { HttpErrorResponse, HttpEventType } from '@angular/common/http';
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { AudioEngineService } from '../audio/audio-engine.service';
 import { StudioSessionService, VocalTake } from '../audio/studio-session.service';
 import { recordingFileFormat } from '../audio/microphone-recorder';
-import { InstrumentalRef, StudioState, TakeRef, contentFingerprint, fromProject, secondsToBeats, toProjectContent } from '../audio/project-mapping';
+import { InstrumentalRef, StudioState, TakeCorrectionRef, TakeRef, contentFingerprint, fromProject, secondsToBeats, toProjectContent } from '../audio/project-mapping';
+import { migrateUserStyles } from '../audio/pitch/voice-correction-state';
+import { readStoredUserStylesJson } from '../audio/pitch/user-styles-storage';
+import { encodeWav } from '../audio/wav-encoder';
 import { MusicalProject, PROJECT_FORMAT_VERSION } from '../models/musical-project.model';
 import { ProjectService } from './project.service';
 import { TrackService } from './track.service';
@@ -25,8 +28,14 @@ export type TakeUpload = { readonly state: 'uploading'; readonly progress: numbe
 export type InstrumentalDownload = 'idle' | 'loading' | 'error';
 
 /**
- * Projet ouvert dans le studio : chargement, état de sauvegarde et sauvegarde,
- * ainsi que l'envoi et la récupération du fichier de l'instrumentale (M6).
+ * Délai de la sauvegarde automatique après la dernière modification (ms) : une série
+ * de réglages (curseur, déplacements de clips) part en une seule requête.
+ */
+export const AUTO_SAVE_DELAY_MS = 2000;
+/**
+ * Projet ouvert dans le studio : chargement, état de sauvegarde, sauvegarde explicite
+ * et automatique (M10), ainsi que l'envoi et la récupération des fichiers audio :
+ * instrumentale (M6), prises (M8) et version corrigée de la prise active (M9/M10).
  * Fourni par la page Studio, à côté de `StudioSessionService` dont il lit et
  * remplit l'état. Sans projet ouvert (`/studio`), l'instrumentale reste locale.
  */
@@ -61,8 +70,24 @@ export class StudioProjectService {
   readonly takeErrors = signal<Readonly<Record<string, string>>>({});
   readonly takesLoading = signal(0);
 
+  /** Version corrigée de la prise active telle qu'elle sera sauvegardée (fichier déjà envoyé). */
+  readonly correctionRef = signal<Omit<TakeCorrectionRef, 'enabled'> | null>(null);
+  readonly correctionUpload = signal<TakeUpload | null>(null);
+  /** Version corrigée du projet impossible à récupérer à l'ouverture. */
+  readonly correctionError = signal<string | null>(null);
+  /** Dernière version corrigée choisie, gardée pour un nouvel essai d'envoi. */
+  private pendingCorrection: { takeId: string; buffer: AudioBuffer; styleLabel: string } | null = null;
+
+  /** Sauvegarde automatique, différée de AUTO_SAVE_DELAY_MS après la dernière modification. */
+  readonly autoSave = signal(true);
+  /** Empreinte dont la sauvegarde automatique a échoué : pas de nouvel essai tant que rien ne change. */
+  private failedFingerprint: string | null = null;
+
   readonly uploading = computed(
-    () => this.upload().state === 'uploading' || Object.values(this.takeUploads()).some(upload => upload.state === 'uploading'),
+    () =>
+      this.upload().state === 'uploading' ||
+      this.correctionUpload()?.state === 'uploading' ||
+      Object.values(this.takeUploads()).some(upload => upload.state === 'uploading'),
   );
 
   private readonly currentState = computed<StudioState>(() => {
@@ -87,12 +112,21 @@ export class StudioProjectService {
       instrumentalStartBeat: this.session.instrumentalStartBeat(),
       melodicPatterns: this.session.melodicPatterns(),
       instrumentClips: this.session.instrumentClips(),
+      vocal: this.session.voiceCorrection(),
+      userStyles: this.session.userVocalStyles(),
+      correction: this.currentCorrection(),
     };
   });
 
-  readonly hasUnsavedChanges = computed(
-    () => this.project() !== null && this.savedFingerprint() !== contentFingerprint(this.currentState()),
-  );
+  /** La version corrigée envoyée ne vaut que pour la prise active ; son choix suit la piste Voix. */
+  private readonly currentCorrection = computed<TakeCorrectionRef | null>(() => {
+    const ref = this.correctionRef();
+    return ref && ref.takeId === this.session.activeTakeId() ? { ...ref, enabled: this.session.useCorrectedTake() } : null;
+  });
+
+  private readonly currentFingerprint = computed(() => contentFingerprint(this.currentState()));
+
+  readonly hasUnsavedChanges = computed(() => this.project() !== null && this.savedFingerprint() !== this.currentFingerprint());
 
   readonly saveState = computed<ProjectSaveState>(() => {
     if (this.conflict()) return 'conflict';
@@ -103,6 +137,20 @@ export class StudioProjectService {
 
   /** Sauvegarde possible : modifications présentes, aucun envoi de fichier ni sauvegarde en cours. */
   readonly canSave = computed(() => this.hasUnsavedChanges() && !this.saving() && !this.conflict() && !this.uploading());
+
+  constructor() {
+    // Sauvegarde automatique : chaque modification relance le délai, les mouvements de
+    // curseur rapprochés ne produisent donc qu'une requête. Jamais pendant un conflit
+    // ni un envoi de fichier ; après un échec, elle attend une nouvelle modification.
+    effect(onCleanup => {
+      const fingerprint = this.currentFingerprint();
+      if (!this.autoSave() || !this.canSave() || (this.saveError() && fingerprint === this.failedFingerprint)) {
+        return;
+      }
+      const timer = setTimeout(() => untracked(() => this.save()), AUTO_SAVE_DELAY_MS);
+      onCleanup(() => clearTimeout(timer));
+    });
+  }
 
   load(id: string): void {
     this.loadState.set('loading');
@@ -134,13 +182,15 @@ export class StudioProjectService {
       return;
     }
     const state = this.currentState();
+    const fingerprint = contentFingerprint(state);
     this.saving.set(true);
     this.saveError.set(null);
     this.projects.save(project.id, project.revision, toProjectContent(state)).subscribe({
       next: saved => {
         this.project.set(saved);
         // Empreinte de l'état envoyé : une modification faite pendant la requête reste « non sauvegardée ».
-        this.savedFingerprint.set(contentFingerprint(state));
+        this.savedFingerprint.set(fingerprint);
+        this.failedFingerprint = null;
         this.saving.set(false);
         console.log('[studio-project] projet sauvegardé', { id: saved.id, revision: saved.revision });
       },
@@ -151,6 +201,7 @@ export class StudioProjectService {
           this.conflict.set(true);
           return;
         }
+        this.failedFingerprint = fingerprint;
         this.saveError.set(this.saveErrorMessage(error));
       },
     });
@@ -255,6 +306,94 @@ export class StudioProjectService {
     this.takeRefs.update(refs => refs.filter(ref => ref.id !== id));
     this.takeUploads.update(({ [id]: _removed, ...rest }) => rest);
     this.takeErrors.update(({ [id]: _removed, ...rest }) => rest);
+  }
+
+  /**
+   * Joue la version corrigée sur la piste Voix ; dans un projet, l'envoie aussi à la
+   * bibliothèque (WAV mono) pour la sauvegarder avec la prise. L'original n'est pas modifié.
+   */
+  useCorrectedVersion(buffer: AudioBuffer, styleLabel: string): void {
+    const takeId = this.session.activeTakeId();
+    if (!takeId || this.correctionUpload()?.state === 'uploading') {
+      return;
+    }
+    this.session.correctedTake.set({ takeId, buffer, styleLabel });
+    this.session.useCorrectedTake.set(true);
+    this.correctionError.set(null);
+    if (!this.project()) {
+      return;
+    }
+    this.pendingCorrection = { takeId, buffer, styleLabel };
+    this.sendCorrection();
+  }
+
+  retryCorrectionUpload(): void {
+    if (this.pendingCorrection && this.correctionUpload()?.state === 'error') {
+      this.sendCorrection();
+    }
+  }
+
+  private sendCorrection(): void {
+    const pending = this.pendingCorrection;
+    const take = this.session.takes().find(candidate => candidate.id === pending?.takeId);
+    if (!pending || !take) {
+      return;
+    }
+    const wav = new Blob([encodeWav([pending.buffer.getChannelData(0)], pending.buffer.sampleRate)], { type: 'audio/wav' });
+    const file = new File([wav], `${take.name} (corrigée).wav`, { type: 'audio/wav' });
+    this.correctionUpload.set({ state: 'uploading', progress: 0 });
+    this.tracks.upload(file, `${take.name} · corrigée (${pending.styleLabel}) · ${this.project()?.title ?? 'Studio'}`).subscribe({
+      next: event => {
+        if (event.type === HttpEventType.UploadProgress) {
+          this.correctionUpload.set({ state: 'uploading', progress: event.total ? Math.round((100 * event.loaded) / event.total) : 0 });
+          return;
+        }
+        if (event.type !== HttpEventType.Response || !event.body) {
+          return;
+        }
+        this.correctionUpload.set(null);
+        // Remplacée ou abandonnée (autre prise active) pendant l'envoi : le fichier reste dans la bibliothèque.
+        if (this.pendingCorrection !== pending || this.session.activeTakeId() !== pending.takeId) {
+          return;
+        }
+        this.pendingCorrection = null;
+        this.correctionRef.set({ takeId: pending.takeId, fileId: event.body.id, styleLabel: pending.styleLabel });
+        console.log('[studio-project] version corrigée envoyée', { takeId: pending.takeId, fileId: event.body.id });
+      },
+      error: (error: unknown) => {
+        console.error('[studio-project] envoi de la version corrigée impossible', error);
+        this.correctionUpload.set({ state: 'error', message: this.uploadErrorMessage(error) });
+      },
+    });
+  }
+
+  private fetchCorrection(ref: Omit<TakeCorrectionRef, 'enabled'>): void {
+    this.tracks.audio(ref.fileId).subscribe({
+      next: blob => {
+        void this.decodeCorrection(ref, blob);
+      },
+      error: (error: unknown) => {
+        console.error('[studio-project] version corrigée introuvable', error);
+        this.correctionError.set(
+          error instanceof HttpErrorResponse && error.status === 404
+            ? 'La version corrigée de la prise n’existe plus dans votre bibliothèque : la prise originale est jouée.'
+            : 'La version corrigée de la prise n’a pas pu être récupérée : la prise originale est jouée.',
+        );
+      },
+    });
+  }
+
+  private async decodeCorrection(ref: Omit<TakeCorrectionRef, 'enabled'>, blob: Blob): Promise<void> {
+    try {
+      const buffer = await this.engine.decode(await blob.arrayBuffer());
+      // Ignorée si la prise active ou la version corrigée ont changé entre-temps.
+      if (this.correctionRef()?.fileId === ref.fileId && this.session.activeTakeId() === ref.takeId) {
+        this.session.correctedTake.set({ takeId: ref.takeId, buffer, styleLabel: ref.styleLabel });
+      }
+    } catch (error) {
+      console.error('[studio-project] décodage de la version corrigée impossible', error);
+      this.correctionError.set('La version corrigée ne peut pas être décodée par ce navigateur : la prise originale est jouée.');
+    }
   }
 
   private sendTake(take: VocalTake): void {
@@ -411,6 +550,10 @@ export class StudioProjectService {
     this.session.mixer.set(state.mixer);
     this.session.masterVolume.set(state.masterVolume);
     this.session.loadArrangement(state.drumClips, state.instrumentalStartBeat, state.instrumentClips);
+    this.session.voiceCorrection.set(state.vocal);
+    // Projet antérieur à la M10 : il reprend les styles personnels gardés dans ce navigateur
+    // (ils deviennent une modification à sauvegarder).
+    this.session.userVocalStyles.set(migrateUserStyles(project.vocal, state.userStyles, readStoredUserStylesJson()));
     this.session.setInstrumental(null);
     this.pendingFile = null;
     this.upload.set({ state: 'idle' });
@@ -418,6 +561,13 @@ export class StudioProjectService {
     this.downloadError.set(null);
     this.instrumentalRef.set(state.instrumental);
     this.session.clearTakes(state.activeTakeId);
+    this.correctionRef.set(state.correction ? { takeId: state.correction.takeId, fileId: state.correction.fileId, styleLabel: state.correction.styleLabel } : null);
+    this.session.correctedTake.set(null);
+    this.session.useCorrectedTake.set(state.correction?.enabled ?? false);
+    this.correctionUpload.set(null);
+    this.correctionError.set(null);
+    this.pendingCorrection = null;
+    this.failedFingerprint = null;
     this.takeRefs.set([...state.takes]);
     this.takeUploads.set({});
     this.takeErrors.set({});
@@ -428,6 +578,9 @@ export class StudioProjectService {
     }
     const order = state.takes.map(take => take.id);
     state.takes.forEach(take => this.fetchTake(take, order));
+    if (state.correction) {
+      this.fetchCorrection(state.correction);
+    }
   }
 
   private fail(message: string): void {

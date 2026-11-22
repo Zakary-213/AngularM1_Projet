@@ -41,7 +41,7 @@ describe('StudioSessionService — prises', () => {
     session.restoreTake(take('a'), ['a', 'b']);
     session.restoreTake(take('b'), ['a', 'b']);
     expect(session.take()?.id).toBe('a');
-    session.correctedTake.set({ buffer: {} as AudioBuffer, styleLabel: 'Trap' });
+    session.correctedTake.set({ takeId: 'a', buffer: {} as AudioBuffer, styleLabel: 'Trap' });
     session.useCorrectedTake.set(true);
     session.selectTake('b');
     expect(session.take()?.id).toBe('b');

@@ -59,12 +59,23 @@ export class MixerPanelComponent {
     return new Set(this.tracks.filter(track => !mixer[track.id].muted && !isTrackAudible(mixer, track.id)).map(track => track.id));
   });
 
+  /** Une version corrigée de la prise active existe (onglet Correction vocale) : elle peut être activée ici. */
+  readonly hasCorrection = computed(() => {
+    const corrected = this.session.correctedTake();
+    return corrected !== null && corrected.takeId === this.session.activeTakeId();
+  });
+
   private readonly lastClipAt: Partial<Record<MeterId, number | null>> = {};
   private frame = 0;
 
   constructor() {
     afterNextRender(() => this.startMeters());
     inject(DestroyRef).onDestroy(() => cancelAnimationFrame(this.frame));
+  }
+
+  /** « Correction de hauteur » de la piste Voix : version corrigée ou prise originale, à l'écoute et à l'export. */
+  toggleCorrection(event: Event): void {
+    this.session.useCorrectedTake.set((event.target as HTMLInputElement).checked && this.hasCorrection());
   }
 
   onVolume(track: StudioTrackInfo, event: Event): void {

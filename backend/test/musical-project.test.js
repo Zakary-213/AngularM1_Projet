@@ -70,7 +70,8 @@ test("toPublic expose id et ownerId en texte, sans _id ni __v", () => {
 test("refuse un BPM hors bornes et une version de format inconnue", async () => {
   assert.ok((await errorsOf(validProject({ bpm: 300 }))).includes("bpm"));
   assert.ok((await errorsOf(validProject({ bpm: 59 }))).includes("bpm"));
-  assert.ok((await errorsOf(validProject({ formatVersion: 2 }))).includes("formatVersion"));
+  assert.ok((await errorsOf(validProject({ formatVersion: 3 }))).includes("formatVersion"));
+  assert.deepEqual(await errorsOf(validProject({ formatVersion: 1 })), [], "un projet v1 reste valide");
 });
 
 test("refuse trop de pistes", async () => {
@@ -174,4 +175,65 @@ test("M7 : refuse un pan, un envoi d'effet ou un Master hors bornes", async () =
   assert.ok(errors.includes("tracks.0.fx.reverb.amount"));
   assert.ok(errors.includes("tracks.0.fx.delay.amount"));
   assert.ok(errors.includes("master.volume"));
+});
+
+const voiceSettings = (overrides = {}) => ({
+  root: 9,
+  scale: "minor",
+  allowedPitchClasses: [0, 2, 4, 5, 7, 9, 11],
+  strength: 1,
+  retuneMs: 5,
+  toleranceCents: 0,
+  transposeSemitones: 0,
+  eq: { lowCutHz: 100, bodyDb: 0, presenceDb: 3, airDb: 4 },
+  fx: { reverbMix: 0.15, reverbSeconds: 1.6, delayMix: 0.12, delayMs: 330, feedback: 0.25 },
+  ...overrides,
+});
+
+test("M9/M10 : réglages de correction vocale et styles personnels du projet", async () => {
+  const vocal = {
+    styleId: "trap",
+    dose: 0.7,
+    userStyleName: "Refrain",
+    custom: voiceSettings({ strength: 0.8 }),
+    userStyles: [{ name: "Refrain", basedOn: "trap", settings: voiceSettings() }],
+  };
+  assert.deepEqual(await errorsOf(validProject({ vocal })), []);
+  const project = new MusicalProject(validProject());
+  assert.equal(project.vocal, undefined, "absente d'un projet antérieur");
+});
+
+test("M9/M10 : refuse des réglages de correction hors bornes ou incohérents", async () => {
+  const errors = await errorsOf(
+    validProject({
+      vocal: {
+        styleId: "autotune",
+        dose: 1.5,
+        custom: voiceSettings({ retuneMs: 900, transposeSemitones: 13, allowedPitchClasses: [0, 0, 12], fx: { reverbMix: 2, reverbSeconds: 1, delayMix: 0, delayMs: 330, feedback: 0.9 } }),
+      },
+    }),
+  );
+  for (const path of ["vocal.styleId", "vocal.dose", "vocal.custom.retuneMs", "vocal.custom.transposeSemitones", "vocal.custom.fx.reverbMix", "vocal.custom.fx.feedback"]) {
+    assert.ok(errors.includes(path), path);
+  }
+  assert.ok(errors.some((path) => path.startsWith("vocal.custom.allowedPitchClasses")));
+
+  const duplicate = { name: "A", basedOn: "rap", settings: voiceSettings() };
+  assert.ok((await errorsOf(validProject({ vocal: { userStyles: [duplicate, duplicate] } }))).includes("vocal.userStyles"));
+  assert.ok((await errorsOf(validProject({ vocal: { userStyleName: "Inconnu", userStyles: [] } }))).includes("vocal.userStyleName"));
+  const tooMany = Array.from({ length: PROJECT_LIMITS.maxUserStyles + 1 }, (_, i) => ({ name: `S${i}`, basedOn: "rap", settings: voiceSettings() }));
+  assert.ok((await errorsOf(validProject({ vocal: { userStyles: tooMany } }))).includes("vocal.userStyles"));
+});
+
+test("M9/M10 : version corrigée d'une prise, seulement sur un clip audio", async () => {
+  const withCorrection = validProject();
+  withCorrection.tracks[1].clips[0].correction = { audioFileId: new mongoose.Types.ObjectId(), styleLabel: "Trap", enabled: true };
+  assert.deepEqual(await errorsOf(withCorrection), []);
+
+  const onPattern = validProject();
+  onPattern.tracks[0].clips[0].correction = { audioFileId: new mongoose.Types.ObjectId() };
+  assert.ok((await errorsOf(onPattern)).some((path) => path.endsWith("correction")));
+  const withoutFile = validProject();
+  withoutFile.tracks[1].clips[0].correction = { styleLabel: "Trap" };
+  assert.ok((await errorsOf(withoutFile)).some((path) => path.endsWith("correction.audioFileId")));
 });

@@ -5,6 +5,7 @@ import { MelodicPattern, createDefaultMelodicPatterns } from './melodic-pattern'
 import { FLAT_THREE_BAND_EQ } from './three-band-eq';
 import { createDefaultMixer, updateTrack } from './track-mix';
 import { MusicalProject } from '../models/musical-project.model';
+import { findStyle, styleSettings } from './pitch/vocal-styles';
 
 function project(overrides: Partial<MusicalProject> = {}): MusicalProject {
   return {
@@ -72,6 +73,10 @@ const state: StudioState = {
     melody: [{ id: 'melody-a', startBar: 4, lengthBars: 8, patternId: 'melody-1' }],
     bass: [{ id: 'bass-a', startBar: 0, lengthBars: 4, patternId: 'bass-1' }],
   },
+  // M9/M10 : réglages de correction, style personnel et version corrigée de la prise active.
+  vocal: { styleId: 'rai', dose: 0.8, userStyleName: 'Mon raï', custom: styleSettings(findStyle('rai'), 0.8, { root: 2, scale: 'harmonicMinor' }, 140) },
+  userStyles: [{ name: 'Mon raï', basedOn: 'rai', settings: styleSettings(findStyle('rai'), 0.8, { root: 2, scale: 'harmonicMinor' }, 140) }],
+  correction: { takeId: 'take-b', fileId: '64b0000000000000000000c9', styleLabel: 'Personnalisé (basé sur Mon raï)', enabled: true },
 };
 
 /** Les identifiants de notes sont recréés à l'ouverture : on compare tout le reste. */
@@ -79,7 +84,7 @@ function withoutNoteIds(patterns: readonly MelodicPattern[]) {
   return patterns.map(pattern => ({ ...pattern, notes: pattern.notes.map(({ id: _id, ...note }) => note) }));
 }
 
-describe('conversion studio ↔ format de sauvegarde v1', () => {
+describe('conversion studio ↔ format de sauvegarde (v1 et v2)', () => {
   it('retrouve exactement l’état du studio après un aller-retour', () => {
     const content = toProjectContent(state);
     const restored = fromProject(project({ ...content }));
@@ -172,7 +177,16 @@ describe('conversion studio ↔ format de sauvegarde v1', () => {
     expect(voice.activeClipId).toBe('take-b');
     expect(voice.clips).toEqual([
       { id: 'take-a', startBeat: 0, offsetSeconds: 0.09, durationBeats: 28, audioFileId: '64b0000000000000000000b1', label: 'Prise 1' },
-      { id: 'take-b', startBeat: 14, offsetSeconds: 0, durationBeats: 70, audioFileId: '64b0000000000000000000b2', label: 'Refrain' },
+      {
+        id: 'take-b',
+        startBeat: 14,
+        offsetSeconds: 0,
+        durationBeats: 70,
+        audioFileId: '64b0000000000000000000b2',
+        label: 'Refrain',
+        // M10 : la version corrigée (fichier dérivé) accompagne la prise active, l'original reste référencé.
+        correction: { audioFileId: '64b0000000000000000000c9', styleLabel: 'Personnalisé (basé sur Mon raï)', enabled: true },
+      },
     ]);
     const none = toProjectContent({ ...state, takes: [], activeTakeId: null }).tracks.find(track => track.id === 'voice')!;
     expect(none.clips).toEqual([]);

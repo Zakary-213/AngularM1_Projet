@@ -52,6 +52,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-
 .save-status[data-state='dirty'] .status-dot, .save-status[data-state='saving'] .status-dot { background: #f5a623; }
 .save-status[data-state='error'] .status-dot, .save-status[data-state='conflict'] .status-dot { background: #ff5449; }
 .save-note { font-size: 11px; max-width: 60ch; }
+.autosave { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; cursor: pointer; }
+.autosave input { width: 18px; height: 18px; accent-color: #f5a623; }
 .save-alert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; border-color: #7a2e29; }
 .save-alert p { margin: 0; color: #ffb4ab; }
 .inline-link { text-decoration: underline; }

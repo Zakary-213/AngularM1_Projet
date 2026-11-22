@@ -308,21 +308,21 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 ### A. Moteur de correction
 
-- [ ] Choisir le moteur à partir des essais réalisés en **M0**.
-- [ ] Détecter ou estimer la hauteur des passages vocaux.
-- [ ] Appliquer une correction **sans modifier volontairement la durée totale de la prise**.
-- [ ] Préserver la version originale et produire une version corrigée, ou un rendu dérivé réutilisable.
-- [ ] Gérer le temps de traitement, les erreurs et les voix difficiles à corriger.
+- [x] Choisir le moteur à partir des essais réalisés en **M0**. *(TD-PSOLA + détection YIN, retenus en M0.)*
+- [x] Détecter ou estimer la hauteur des passages vocaux.
+- [x] Appliquer une correction **sans modifier volontairement la durée totale de la prise**.
+- [x] Préserver la version originale et produire une version corrigée, ou un rendu dérivé réutilisable. *(M10 : fichier dérivé dans la bibliothèque, référencé par la prise.)*
+- [x] Gérer le temps de traitement, les erreurs et les voix difficiles à corriger. *(Web Worker, Annuler, message et « Réessayer », part de voix détectée affichée.)*
 
 ### B. Interface utilisateur
 
-- [ ] Ajouter **Auto-Tune : Activé / Désactivé** dans les effets de la piste vocale.
+- [x] Ajouter **Auto-Tune : Activé / Désactivé** dans les effets de la piste vocale. *(Libellé « Correction de hauteur : activée / désactivée », tranche Voix du mixeur.)*
 - [x] Choisir une **tonalité** (ex. La mineur) et une **gamme**.
 - [x] Régler l'intensité et, **si le moteur le permet**, la vitesse de correction.
 - [x] Proposer des préréglages **Naturel** et **Effet marqué**.
 - [x] Comparer **Avant / Après** sur la même prise.
-- [ ] Enregistrer les réglages de correction.
-- [ ] Inclure la version corrigée dans l'export audio.
+- [x] Enregistrer les réglages de correction.
+- [x] Inclure la version corrigée dans l'export audio.
 
 ### C. Extension : préréglages par style et mode personnalisé
 
@@ -333,7 +333,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [x] **Niveau simple (par défaut)** : une rangée de cartes de style, un seul bouton rotatif **« Dose d'effet »** (0 à 100 %, qui pilote ensemble intensité et vitesse dans les proportions du style), la tonalité du projet reprise automatiquement, et un bouton **Avant / Après**.
 - [x] Chaque carte affiche une phrase d'explication (« voix juste mais naturelle », « effet robotique assumé »…) et se prévisualise sur la prise courante avant d'être appliquée.
 - [x] **Niveau avancé (repliable)** : tous les réglages du style choisi, modifiables ; toute modification bascule sur **« Personnalisé (basé sur Trap) »** au lieu d'écraser le préréglage.
-- [ ] Bouton **Réinitialiser le style** et possibilité d'**enregistrer son propre préréglage** avec le projet.
+- [x] Bouton **Réinitialiser le style** et possibilité d'**enregistrer son propre préréglage** avec le projet.
 - [x] Afficher la courbe de hauteur (détectée et corrigée) sur la durée de la prise, pour voir où la voix est recalée.
 
 **Préréglages de style (valeurs de départ, à ajuster à l'écoute)**
@@ -361,7 +361,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 - [x] Les préréglages sont des **données** (nom, description, valeurs) dans un seul fichier, testées unitairement (bornes, gammes, valeurs par style).
 - [x] La prise originale n'est jamais modifiée ; changer de style recalcule la version corrigée.
-- [ ] Le traitement d'une prise longue ne bloque pas l'interface (état « calcul en cours », possibilité d'annuler).
+- [x] Le traitement d'une prise longue ne bloque pas l'interface (état « calcul en cours », possibilité d'annuler).
 - [x] Accessible au clavier : cartes de style = boutons radio, réglages avec labels et valeur lue (« 70 % », « 40 ms »).
 - [x] Les noms de style décrivent un rendu, pas un artiste : ne pas citer ni imiter la voix d'un artiste existant.
 
@@ -382,21 +382,21 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 
 ### Sauvegarde
 
-- [ ] Sauvegarder pistes, BPM, instruments, patterns, notes, clips, volumes et effets.
-- [ ] Sauvegarder les fichiers importés et les prises vocales.
-- [ ] Sauvegarder les paramètres de correction vocale.
-- [ ] Mettre en place une sauvegarde explicite et, si possible, **automatique**.
-- [ ] Indiquer clairement **Modifications non sauvegardées / Sauvegarde en cours / Sauvegardé / Erreur**.
-- [ ] Charger un projet et retrouver la même session éditable.
+- [x] Sauvegarder pistes, BPM, instruments, patterns, notes, clips, volumes et effets.
+- [x] Sauvegarder les fichiers importés et les prises vocales. *(Références vers la bibliothèque, jamais d'audio dans le JSON.)*
+- [x] Sauvegarder les paramètres de correction vocale. *(Style, dose, réglages personnalisés, styles personnels et version corrigée de la prise active ; format v2.)*
+- [x] Mettre en place une sauvegarde explicite et, si possible, **automatique**. *(Ctrl + S / bouton, et sauvegarde automatique 2 s après la dernière modification.)*
+- [x] Indiquer clairement **Modifications non sauvegardées / Sauvegarde en cours / Sauvegardé / Erreur**. *(Plus « Conflit » si le projet a été modifié ailleurs : rien n'est écrasé.)*
+- [x] Charger un projet et retrouver la même session éditable.
 
 ### Export
 
-- [ ] Produire un **mix unique** respectant les positions des clips.
-- [ ] Inclure drums, instruments, prod importée, voix et effets actifs.
-- [ ] Prendre en compte les volumes, la correction vocale et le Master.
-- [ ] Exporter en **WAV** en priorité ; MP3 en complément si disponible.
-- [ ] Indiquer la progression ou l'état du rendu.
-- [ ] Permettre le téléchargement du fichier final.
+- [x] Produire un **mix unique** respectant les positions des clips. *(Tout le morceau : fin du dernier clip ou fichier, + traîne des effets ; 10 min maximum.)*
+- [x] Inclure drums, instruments, prod importée, voix et effets actifs.
+- [x] Prendre en compte les volumes, la correction vocale et le Master.
+- [x] Exporter en **WAV** en priorité ; MP3 en complément si disponible. *(WAV seulement : MP3 non disponible sans dépendance, limite documentée.)*
+- [x] Indiquer la progression ou l'état du rendu. *(Pourcentage sous Chrome / Safari ; « Rendu en cours » seul sous Firefox.)*
+- [x] Permettre le téléchargement du fichier final.
 
 **Livrable :** sauvegarde/rechargement fiable + export audible hors de l'application.
 

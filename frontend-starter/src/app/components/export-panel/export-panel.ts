@@ -1,28 +1,44 @@
-import { Component, inject } from '@angular/core';
-import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { Component, computed, inject } from '@angular/core';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
+import { MAX_EXPORT_SECONDS } from '../../shared/audio/song-length';
+import { StudioProjectService } from '../../shared/services/studio-project.service';
 
-const EXPORT_BAR_CHOICES = [1, 2, 4, 8] as const;
-const DEFAULT_EXPORT_BARS = 4;
-
-/** Export WAV du mix écouté : rendu hors temps réel avec le même graphe que la lecture. */
+/**
+ * Export WAV du morceau entier (M10) : rendu hors temps réel avec le même graphe que la
+ * lecture, sur toute la timeline (positions des clips, durée réelle des fichiers).
+ */
 @Component({
   selector: 'app-export-panel',
-  imports: [ReactiveFormsModule],
   templateUrl: './export-panel.html',
   styleUrl: './export-panel.css',
 })
 export class ExportPanelComponent {
   readonly session = inject(StudioSessionService);
-  readonly barChoices = EXPORT_BAR_CHOICES;
-  readonly bars = new FormControl<number>(DEFAULT_EXPORT_BARS, { nonNullable: true });
+  private readonly studioProject = inject(StudioProjectService, { optional: true });
+  readonly maxMinutes = MAX_EXPORT_SECONDS / 60;
+
+  readonly plan = this.session.exportPlan;
+  readonly progressPercent = computed(() => {
+    const progress = this.session.exportProgress();
+    return progress === null ? null : Math.round(progress * 100);
+  });
+  /** Ce qui sera entendu sur la piste Voix dans le fichier. */
+  readonly voiceSource = computed(() => {
+    if (!this.session.take()) {
+      return 'aucune prise';
+    }
+    return this.session.correctionActive() ? `version corrigée (${this.session.correctedTake()?.styleLabel})` : 'prise originale';
+  });
 
   exportWav(): void {
-    void this.session.exportWav(this.bars.value);
+    void this.session.exportWav(this.studioProject?.project()?.title ?? 'zakat-record');
   }
 
   formatSeconds(seconds: number): string {
-    return `${seconds.toFixed(2).replace('.', ',')} s`;
+    const total = Math.round(seconds * 10) / 10;
+    const minutes = Math.floor(total / 60);
+    const rest = (total - minutes * 60).toFixed(1).replace('.', ',');
+    return minutes > 0 ? `${minutes} min ${rest} s` : `${rest} s`;
   }
 
   formatDecibels(decibels: number): string {

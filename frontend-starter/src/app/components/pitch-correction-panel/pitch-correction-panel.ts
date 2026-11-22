@@ -10,7 +10,6 @@ import { PitchJobCancelled, PitchJobRunner } from '../../shared/audio/pitch/pitc
 import { createTestVoice } from '../../shared/audio/pitch/test-voice';
 import {
   DEFAULT_DOSE,
-  DEFAULT_STYLE_ID,
   MAX_STYLE_NAME_LENGTH,
   MAX_USER_STYLES,
   UserVocalStyle,
@@ -18,11 +17,13 @@ import {
   VocalStyleId,
   VoiceSettings,
   findStyle,
-  parseUserStyles,
   sameSettings,
   sanitizeVoiceSettings,
   styleSettings,
 } from '../../shared/audio/pitch/vocal-styles';
+import { VoiceCorrectionState, upsertUserStyle } from '../../shared/audio/pitch/voice-correction-state';
+import { storeUserStyles } from '../../shared/audio/pitch/user-styles-storage';
+import { StudioProjectService } from '../../shared/services/studio-project.service';
 import { MAX_EQ_DB, MAX_LOW_CUT_HZ } from '../../shared/audio/pitch/voice-eq';
 import { FX_LIMITS, applyVoiceChain, tempoDelayMs } from '../../shared/audio/pitch/voice-fx';
 import { StudioSessionService, downloadBlob } from '../../shared/audio/studio-session.service';
@@ -51,7 +52,6 @@ type Listening = 'before' | 'after' | null;
 
 /** Délai avant de recalculer après un changement de réglage (évite un calcul par cran de curseur). */
 const RECOMPUTE_DELAY_MS = 250;
-const USER_STYLES_STORAGE_KEY = 'zakat.vocalStyles.v1';
 export const CURVE_WIDTH = 600;
 export const CURVE_HEIGHT = 120;
 
@@ -71,6 +71,8 @@ function toMono(buffer: AudioBuffer): Float32Array<ArrayBuffer> {
  * une seule « dose d'effet » ; le panneau avancé expose tous les réglages et
  * bascule en « Personnalisé ». L'original n'est jamais modifié : chaque réglage
  * produit une nouvelle version, calculée dans un Web Worker et annulable.
+ * Les réglages et les styles personnels vivent dans la session (sauvegardés avec le
+ * projet, M10) : ils sont conservés quand on change d'onglet.
  */
 @Component({
   selector: 'app-pitch-correction-panel',
@@ -81,6 +83,8 @@ function toMono(buffer: AudioBuffer): Float32Array<ArrayBuffer> {
 export class PitchCorrectionPanelComponent implements OnDestroy {
   private readonly engine = inject(AudioEngineService);
   readonly session = inject(StudioSessionService);
+  /** Projet ouvert (absent dans la session libre et dans les tests du panneau seul). */
+  readonly studioProject = inject(StudioProjectService, { optional: true });
   private readonly runner = new PitchJobRunner();
   private playingSource: AudioBufferSourceNode | null = null;
   /** Incrémenté à chaque calcul : un résultat arrivé en retard n'écrase pas un plus récent. */
@@ -99,13 +103,14 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   readonly source = signal<VocalSource | null>(null);
   readonly sourceError = signal<string | null>(null);
 
-  readonly styleId = signal<VocalStyleId>(DEFAULT_STYLE_ID);
+  readonly styleId = computed(() => this.session.voiceCorrection().styleId);
   /** Nom du style personnel choisi, s'il y en a un. */
-  readonly userStyleName = signal<string | null>(null);
-  readonly dose = signal(DEFAULT_DOSE);
+  readonly userStyleName = computed(() => this.session.voiceCorrection().userStyleName);
+  readonly dose = computed(() => this.session.voiceCorrection().dose);
   /** Réglages modifiés à la main ; `null` tant qu'on suit le style choisi. */
-  readonly custom = signal<VoiceSettings | null>(null);
-  readonly userStyles = signal<UserVocalStyle[]>(this.loadUserStyles());
+  readonly custom = computed(() => this.session.voiceCorrection().custom);
+  readonly userStyles = this.session.userVocalStyles;
+  readonly inProject = computed(() => this.studioProject?.project() != null);
 
   readonly settings = computed<VoiceSettings>(
     () => this.custom() ?? styleSettings(findStyle(this.styleId()), this.dose(), this.session.projectKey(), this.session.bpm()),
@@ -125,7 +130,7 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
     const result = this.result();
     return result ? pitchCurvePaths(result.frames, CURVE_WIDTH, CURVE_HEIGHT) : null;
   });
-  readonly correctedOnTrack = computed(() => this.session.useCorrectedTake() && this.session.correctedTake() !== null);
+  readonly correctedOnTrack = this.session.correctionActive;
 
   readonly advanced = new FormGroup({
     root: new FormControl(9, { nonNullable: true }),
@@ -177,26 +182,20 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   }
 
   selectStyle(id: VocalStyleId): void {
-    this.userStyleName.set(null);
-    this.styleId.set(id);
-    this.custom.set(null);
+    this.updateCorrection({ styleId: id, userStyleName: null, custom: null });
   }
 
   selectUserStyle(style: UserVocalStyle): void {
-    this.styleId.set(style.basedOn);
-    this.userStyleName.set(style.name);
     // Un style personnel garde sa propre tonalité : il a été réglé pour elle.
-    this.custom.set(style.settings);
+    this.updateCorrection({ styleId: style.basedOn, userStyleName: style.name, custom: style.settings });
   }
 
   onDose(event: Event): void {
-    this.dose.set(Number((event.target as HTMLInputElement).value) / 100);
+    this.updateCorrection({ dose: Number((event.target as HTMLInputElement).value) / 100 });
   }
 
   resetStyle(): void {
-    this.custom.set(null);
-    this.userStyleName.set(null);
-    this.dose.set(DEFAULT_DOSE);
+    this.updateCorrection({ custom: null, userStyleName: null, dose: DEFAULT_DOSE });
   }
 
   useStudioTake(): void {
@@ -277,13 +276,26 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
     this.listening.set(which);
   }
 
-  /** Remplace la prise de la piste Voix par la version corrigée (l'originale reste conservée). */
+  /**
+   * Remplace la prise de la piste Voix par la version corrigée (l'originale reste conservée) ;
+   * dans un projet, la version corrigée est envoyée dans la bibliothèque pour être sauvegardée.
+   */
   applyToVoiceTrack(): void {
     const result = this.result();
-    if (result && this.source()?.fromStudioTake) {
-      this.session.correctedTake.set({ buffer: result.buffer, styleLabel: result.styleLabel });
+    const takeId = this.session.activeTakeId();
+    if (!result || !this.source()?.fromStudioTake || !takeId) {
+      return;
+    }
+    if (this.studioProject) {
+      this.studioProject.useCorrectedVersion(result.buffer, result.styleLabel);
+    } else {
+      this.session.correctedTake.set({ takeId, buffer: result.buffer, styleLabel: result.styleLabel });
       this.session.useCorrectedTake.set(true);
     }
+  }
+
+  retryCorrectionUpload(): void {
+    this.studioProject?.retryCorrectionUpload();
   }
 
   useOriginalOnTrack(): void {
@@ -303,23 +315,22 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
       return;
     }
     const name = this.styleName.value.trim();
-    const others = this.userStyles().filter(style => style.name !== name);
-    if (others.length >= MAX_USER_STYLES) {
+    const style: UserVocalStyle = { name, basedOn: this.styleId(), settings: this.settings() };
+    const styles = upsertUserStyle(this.userStyles(), style);
+    if (!styles) {
       this.saveMessage.set(`${MAX_USER_STYLES} styles personnels maximum : supprimez-en un.`);
       return;
     }
-    const style: UserVocalStyle = { name, basedOn: this.styleId(), settings: this.settings() };
-    this.persistUserStyles([...others, style], `Style « ${name} » enregistré dans ce navigateur.`);
-    this.userStyleName.set(name);
-    this.custom.set(style.settings);
+    this.persistUserStyles(styles, `Style « ${name} » enregistré`);
+    this.updateCorrection({ userStyleName: name, custom: style.settings });
     this.styleName.reset();
   }
 
   deleteUserStyle(style: UserVocalStyle): void {
-    this.persistUserStyles(this.userStyles().filter(other => other.name !== style.name), `Style « ${style.name} » supprimé.`);
     if (this.userStyleName() === style.name) {
-      this.userStyleName.set(null);
+      this.updateCorrection({ userStyleName: null });
     }
+    this.persistUserStyles(this.userStyles().filter(other => other.name !== style.name), `Style « ${style.name} » supprimé`);
   }
 
   /** Cale l'écho sur la croche du tempo du projet. */
@@ -439,27 +450,22 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
       },
     });
     if (next && !sameSettings(next, previous)) {
-      this.custom.set(next);
+      this.updateCorrection({ custom: next });
     }
   }
 
-  private loadUserStyles(): UserVocalStyle[] {
-    try {
-      return parseUserStyles(localStorage.getItem(USER_STYLES_STORAGE_KEY));
-    } catch (error) {
-      // Stockage indisponible (navigation privée, données bloquées) : pas de styles personnels.
-      console.warn('[pitch-correction] styles personnels illisibles', error);
-      return [];
-    }
+  private updateCorrection(change: Partial<VoiceCorrectionState>): void {
+    this.session.voiceCorrection.update(state => ({ ...state, ...change }));
   }
 
+  /** Dans un projet, les styles partent avec la sauvegarde ; sinon ils restent dans ce navigateur. */
   private persistUserStyles(styles: UserVocalStyle[], successMessage: string): void {
     this.userStyles.set(styles);
-    try {
-      localStorage.setItem(USER_STYLES_STORAGE_KEY, JSON.stringify(styles));
-      this.saveMessage.set(successMessage);
-    } catch (error) {
-      console.warn('[pitch-correction] enregistrement du style impossible', error);
+    if (this.inProject()) {
+      this.saveMessage.set(`${successMessage} : il sera sauvegardé avec le projet.`);
+    } else if (storeUserStyles(styles)) {
+      this.saveMessage.set(`${successMessage} dans ce navigateur.`);
+    } else {
       this.saveMessage.set("Le navigateur refuse l'enregistrement : le style est gardé jusqu'à la fermeture du studio.");
     }
   }

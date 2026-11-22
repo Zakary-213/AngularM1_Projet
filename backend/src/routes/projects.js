@@ -1,6 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
-import { MusicalProject, PROJECT_FORMAT_VERSION, PROJECT_LIMITS } from "../models/MusicalProject.js";
+import { MusicalProject, PROJECT_FORMAT_VERSION, PROJECT_LIMITS, SUPPORTED_FORMAT_VERSIONS } from "../models/MusicalProject.js";
 import { Track } from "../models/Track.js";
 
 /*
@@ -12,7 +12,7 @@ import { Track } from "../models/Track.js";
 const DEFAULT_PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 50;
 /** Champs qu'un client peut écrire lors d'une sauvegarde (liste blanche). */
-const EDITABLE_FIELDS = ["title", "bpm", "key", "tracks", "patterns", "master"];
+const EDITABLE_FIELDS = ["title", "bpm", "key", "tracks", "patterns", "master", "vocal"];
 const ORIGINS = ["create", "import"];
 
 class RequestError extends Error {
@@ -74,7 +74,11 @@ function ownedFilter(req) {
 async function assertOwnedAudioFiles(tracks, ownerId) {
   const ids = [
     ...new Set(
-      (tracks ?? []).flatMap((track) => (track.clips ?? []).map((clip) => clip.audioFileId).filter(Boolean)).map(String),
+      (tracks ?? [])
+        // Prise originale et version corrigée : les deux doivent appartenir à l'utilisateur.
+        .flatMap((track) => (track.clips ?? []).flatMap((clip) => [clip.audioFileId, clip.correction?.audioFileId]))
+        .filter(Boolean)
+        .map(String),
     ),
   ];
   if (ids.length === 0) {
@@ -171,7 +175,7 @@ export function createProjectRouter(auth) {
       if (!existing) {
         throw new RequestError(404, "Projet inconnu");
       }
-      if (existing.formatVersion !== PROJECT_FORMAT_VERSION) {
+      if (!SUPPORTED_FORMAT_VERSIONS.includes(existing.formatVersion)) {
         // Projet d'une version future : on refuse plutôt que de le réécrire et perdre des données.
         throw new RequestError(422, "Format de projet non pris en charge par cette version du studio");
       }
@@ -190,6 +194,9 @@ export function createProjectRouter(auth) {
       if (validated.tracks) {
         await assertOwnedAudioFiles(validated.tracks, req.auth.sub);
       }
+
+      // Un projet d'une version antérieure est réécrit dans la version courante (les nouveaux champs sont facultatifs).
+      validated.formatVersion = PROJECT_FORMAT_VERSION;
 
       // La condition sur la révision rend l'écriture atomique face à une autre sauvegarde.
       const updated = await MusicalProject.findOneAndUpdate(

@@ -40,6 +40,13 @@
             <input [id]="fx.kind + '-' + track.id" type="range" min="0" max="100" step="5" [value]="percent(send)" (input)="onFxAmount(track, fx.kind, $event)" [attr.aria-label]="fx.label + ' : quantité, ' + track.name" [attr.aria-valuetext]="percent(send) + ' %'" />
           }
         }
+        @if (track.id === 'voice') {
+          <!-- « Auto-Tune » est une marque : on parle de correction de hauteur (cahier M9). -->
+          <label class="check"><input type="checkbox" [checked]="session.correctionActive()" [disabled]="!hasCorrection()" (change)="toggleCorrection($event)" aria-describedby="voice-correction-help" /> Correction de hauteur : <b>{{ session.correctionActive() ? 'activée' : 'désactivée' }}</b></label>
+          <small id="voice-correction-help" class="hint">
+            @if (hasCorrection()) { {{ session.correctedTake()?.styleLabel }} · version corrigée de la prise active. } @else { Calculez une version dans l’onglet Correction vocale pour l’activer. }
+          </small>
+        }
       </fieldset>
 
       <small class="state">

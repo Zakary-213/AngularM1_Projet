@@ -315,6 +315,7 @@ Schéma : `backend/src/models/MusicalProject.js` ; routes : `backend/src/routes/
 | GET | `/projects?page=1&limit=12` | JWT (`limit` 1 à 50, défaut 12) | `200 Page<ProjectSummary>`, du plus récemment modifié au plus ancien |
 | POST | `/projects` | `{title, origin: "create"\|"import", bpm?, key?}` + JWT | `201 Project` (révision 0, format 2) |
 | GET | `/projects/:id` | JWT (propriétaire) | `200 Project` |
+| POST | `/projects/:id/lyrics/generate` | JWT (propriétaire), thème et réglages ci-dessous | `200 {bpm, timeSignature, key, targetSyllables, lines}` |
 | PUT | `/projects/:id` | `{revision, title?, bpm?, key?, tracks?, patterns?, master?, vocal?}` + JWT | `200 Project` (révision + 1, réécrit au format 2) |
 | PATCH | `/projects/:id` | `{title}` + JWT | `200 Project` (renommage, révision + 1) |
 | DELETE | `/projects/:id` | JWT (propriétaire) | `204` (les fichiers `Track` référencés sont conservés) |
@@ -326,6 +327,28 @@ Schéma : `backend/src/models/MusicalProject.js` ; routes : `backend/src/routes/
 Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`, `tracks`, `patterns`, `master` et `vocal` sont copiés à la sauvegarde (liste blanche : `ownerId`, `origin`, `formatVersion`, `revision` envoyés sont ignorés) ; le document complet est validé avant écriture. Un `audioFileId` (prise, instrumentale **ou** `correction.audioFileId`) doit désigner un fichier `Track` de l'utilisateur authentifié, sinon la sauvegarde est refusée (`400 « Fichier audio inconnu ou non autorisé »`) : un projet ne peut pas servir à lire le fichier d'un autre compte. Aucun octet audio n'est accepté dans le JSON : les fichiers passent par `POST /tracks`. Erreurs : `400` validation, révision absente, fichier audio d'un autre compte ou JSON invalide ; `401` sans JWT ; `404` projet absent, identifiant mal formé **ou** projet d'un autre utilisateur ; `409 {message, revision}` si la révision envoyée n'est plus la révision actuelle (sauvegarde depuis un autre onglet : rien n'est écrasé) ; `413` corps JSON au-delà de 1 Mo ; `422` si le projet stocké a un `formatVersion` non pris en charge (il n'est pas réécrit).
 
 **Versions du format.** 1 (M1 à M9) et 2 (M10 : `vocal` et `clips[].correction`, tous deux facultatifs). Le serveur relit les deux ; un projet v1 est renvoyé tel quel par `GET` et réécrit au format 2 par sa prochaine sauvegarde. Le studio lit un projet v1 avec les réglages de correction par défaut et, s'il n'a pas encore de styles personnels sauvegardés, reprend ceux que l'ancien studio gardait dans le navigateur (`localStorage`, clé `zakat.vocalStyles.v1`), à sauvegarder. Un projet d'une version supérieure n'est pas ouvert par le studio (message) et sa sauvegarde est refusée (`422`).
+
+**Génération de paroles M12 (#31).** `POST /projects/:id/lyrics/generate` attend un corps JSON avec un `theme` de 1 à 200 caractères après suppression des espaces en bordure. Les autres réglages sont facultatifs. La première valeur de chaque ligne est celle par défaut.
+
+| Champ | Valeurs autorisées |
+|---|---|
+| `mood` | `neutral`, `dark`, `melancholic`, `egoTrip`, `festive` |
+| `language` | `fr`, `en` |
+| `structure` | `verse`, `chorus`, `bridge` |
+| `measures` | `8`, `4`, `16` (entiers) |
+| `flow` | `standard`, `relaxed`, `fast` |
+| `rhymeScheme` | `AABB`, `ABAB`, `internal` |
+| `languageLevel` | `standard`, `casual`, `formal` |
+
+Le serveur lit le BPM, la signature rythmique et la tonalité dans le projet enregistré. La cible `targetSyllables` correspond à la durée d’une mesure multipliée par la densité choisie, arrondie à l’entier le plus proche. Le serveur valide le nombre et l’ordre des mesures renvoyées par Groq. Il estime les syllabes et les rimes à partir du texte en français ou en anglais. Chaque entrée de `lines[]` contient `measure`, `text`, `syllables` et `rhyme` avec le groupe (`group`, `null` pour les rimes internes), les mots repérés (`words`) et le résultat estimé (`matches`). Le comptage dépend de la prononciation et les rimes sont approximées à partir des terminaisons. Les paroles sont renvoyées sans écriture dans le projet.
+
+`GROQ_API_KEY` est lu depuis l’environnement du backend. Chaque compte dispose de cinq tentatives envoyées à Groq par jour UTC, tous ses projets confondus. Les erreurs retournées après un appel utilisent une tentative. Le compteur est enregistré dans MongoDB et la limite est vérifiée avant l’appel. Dans le processus API, le délai `Retry-After` annoncé par Groq s’applique à tous les comptes.
+
+Le serveur bloque les demandes explicites d’imitation ou de copie qu’il reconnaît avant de consommer le quota. Groq reçoit aussi la consigne de refuser l’imitation d’un artiste réel, la reproduction de paroles existantes et la génération de textes haineux ou harcelants. Les formulations indirectes reposent sur le refus du modèle. Le serveur valide ce refus et renvoie un message invitant à choisir un thème original.
+
+Groq reçoit le thème, les réglages de génération et le contexte musical nécessaire. Pour cette route, le journal HTTP conserve la méthode, le modèle d’URL, le statut et la durée. Les erreurs de génération y figurent sous forme de codes ou messages génériques, sans le corps des requêtes ni celui des réponses.
+
+Erreurs possibles : `400` JSON, thème ou réglage invalide (le champ `field` identifie un réglage refusé), `401` sans JWT valide, `404` projet introuvable ou inaccessible, `413` corps trop volumineux, `422` demande de génération refusée ou version de projet non prise en charge, `429` quota journalier ou quota Groq, `500` erreur interne, `502` réponse indisponible ou invalide, `503` clé absente ou compteur indisponible, `504` délai dépassé. Pour un `429` avec délai connu, la réponse indique `retryAfterSeconds` et renseigne l’en-tête `Retry-After` en secondes.
 
 **Sauvegarde côté studio.** Bouton 💾 ou Ctrl + S, et sauvegarde automatique (case à cocher, active par défaut) 2 s après la dernière modification : une série de réglages part en une seule requête `PUT`. Jamais pendant l'envoi d'un fichier ni après un `409` ; après un échec, pas de nouvel essai automatique avant une nouvelle modification.
 
@@ -357,6 +380,22 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### M12 (#31) · Première étape de génération côté serveur
+
+La route protégée `POST /api/projects/:id/lyrics/generate` utilise la clé Groq du serveur et reprend le tempo, la signature et la tonalité du projet enregistré. La première étape génère huit mesures à partir d’un thème. Le quota par utilisateur et le panneau Paroles seront traités dans la suite de la #31.
+
+`npm test` dans `backend/` a réussi (48 tests). Une requête locale avec un projet de test en mémoire et un vrai appel Groq a renvoyé huit mesures numérotées à 90 BPM (`200`). Le même projet a renvoyé `401` sans JWT et `404` avec le JWT d’un autre compte.
+
+**Validation des réglages.** Le backend accepte 4, 8 ou 16 mesures et une liste de choix pour chaque option. Le français est la langue par défaut et l’anglais est également disponible. La cible de syllabes varie avec la durée de la mesure et le flow choisi. `npm test` a réussi (50 tests). Sur un projet de test à 140 BPM, la route a refusé 12 mesures (`400`) et un appel réel à Groq a renvoyé 16 mesures (`200`).
+
+**Réponse structurée.** Groq fournit les mesures numérotées et le texte. Le backend vérifie la structure, estime les syllabes à partir des mots et repère les rimes à partir des terminaisons. Les tests couvrent les lignes manquantes ou invalides, les comptes de syllabes et les schémas AABB, ABAB et internes. `npm test` a réussi (54 tests). Un appel réel à 90 BPM a renvoyé huit mesures, de 9 à 12 syllabes estimées pour une cible de 10. L’analyse a repéré deux des quatre paires de rimes demandées.
+
+**Quota et erreurs de génération.** La limite est de cinq tentatives par utilisateur et par jour UTC, avec un compteur MongoDB commun aux projets. La réservation atomique précède l’appel au fournisseur. Les `429` avec `Retry-After` de Groq suspendent les nouveaux appels dans le processus API jusqu’au délai indiqué. `npm test` a réussi (57 tests). Avec le stockage et Groq simulés, sept demandes en parallèle sur deux projets d’un compte ont donné cinq réponses `200` et deux `429`. Les tests vérifient aussi la remise à zéro à minuit UTC, l’accès d’un autre compte, le délai de reprise Groq, une réponse invalide et le délai dépassé. Le compteur reste à éprouver sur une instance MongoDB de test.
+
+**Demandes refusées.** Les formulations explicites testées sont bloquées avant l’appel et la réservation du quota. La réponse structurée de Groq distingue un refus sans paroles d’un couplet complet. `npm test` a réussi (60 tests), dont les demandes de copie, l’imitation et les thèmes originaux qui mentionnent un artiste. Sur un projet de test en mémoire, un appel réel a refusé une demande formulée « à la manière de » (`422`) et un autre a renvoyé huit mesures pour un thème original (`200`). Le refus des formulations indirectes dépend du modèle.
+
+**Confidentialité des journaux.** Pour la génération de paroles, les logs HTTP utilisent la route type `/api/projects/:id/lyrics/generate` sans paramètres d’URL. Les erreurs ne journalisent pas les corps et les détails privés. Le test HTTP vérifie qu’un thème, des paroles, une clé factice et des détails d’erreur injectés restent hors des journaux lors d’une génération, d’un JSON invalide, d’un corps trop volumineux et de pannes. Le contrat d’API décrit les réglages, les réponses et les erreurs. `npm test` a réussi (61 tests).
 
 ### Prototype de génération de paroles (#32)
 
@@ -398,7 +437,7 @@ Groq a annoncé 10 syllabes partout. À 90 BPM, le premier texte respecte deux p
 
 **Choix pour la #31.** Groq en offre gratuite, avec un budget de **0 € par mois**. À épuisement du quota gratuit, le studio affichera un message et suspendra les générations jusqu’au renouvellement du quota. Le faible nombre d’appels donne un premier aperçu. L’intégration devra traiter les erreurs et vérifier la cadence et les rimes avant de présenter le résultat comme conforme à la consigne.
 
-**Quota initial proposé.** Autoriser 5 générations par jour et par utilisateur connecté, régénérations comprises, dans la limite globale du compte Groq. Le backend devra afficher un message quand l’un des quotas est atteint. Ces limites seront mises en œuvre dans la #31. [Limites de l’offre gratuite Groq](https://console.groq.com/docs/rate-limits)
+**Quota initial.** Cinq tentatives de génération par jour UTC et par utilisateur connecté, régénérations comprises, dans la limite globale du compte Groq. L’API renvoie un message quand l’un des quotas est atteint. [Limites de l’offre gratuite Groq](https://console.groq.com/docs/rate-limits)
 
 ### 22 novembre 2026 — M10 : sauvegarde complète et export ; fin de la M9 (#16, #15)
 

@@ -2,6 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import { MusicalProject, PROJECT_FORMAT_VERSION, PROJECT_LIMITS, SUPPORTED_FORMAT_VERSIONS } from "../models/MusicalProject.js";
 import { Track } from "../models/Track.js";
+import { generateGroqLyrics, LyricsProviderError } from "../services/groq-lyrics.js";
 
 /*
  * Routes /api/projects (M1). Chaque requête est authentifiée et chaque accès
@@ -11,6 +12,16 @@ import { Track } from "../models/Track.js";
 
 const DEFAULT_PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 50;
+const MAX_LYRICS_THEME_LENGTH = 200;
+const LYRICS_OPTION_VALUES = {
+  mood: ["neutral", "dark", "melancholic", "egoTrip", "festive"],
+  language: ["fr", "en"],
+  structure: ["verse", "chorus", "bridge"],
+  measures: [4, 8, 16],
+  flow: ["relaxed", "standard", "fast"],
+  rhymeScheme: ["AABB", "ABAB", "internal"],
+  languageLevel: ["casual", "standard", "formal"],
+};
 /** Champs qu'un client peut écrire lors d'une sauvegarde (liste blanche). */
 const EDITABLE_FIELDS = ["title", "bpm", "key", "tracks", "patterns", "master", "vocal"];
 const ORIGINS = ["create", "import"];
@@ -42,6 +53,27 @@ function validTitle(value) {
     throw new RequestError(400, `Le titre doit contenir entre 1 et ${PROJECT_LIMITS.titleMaxLength} caractères`);
   }
   return title;
+}
+
+function validLyricsOptions(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new RequestError(400, "Paramètres de génération requis");
+  }
+  const theme = typeof body.theme === "string" ? body.theme.trim() : "";
+  if (!theme || theme.length > MAX_LYRICS_THEME_LENGTH) {
+    throw new RequestError(400, `Le thème doit contenir entre 1 et ${MAX_LYRICS_THEME_LENGTH} caractères`);
+  }
+  const {
+    mood = "neutral", language = "fr", structure = "verse", measures = 8,
+    flow = "standard", rhymeScheme = "AABB", languageLevel = "standard",
+  } = body;
+  const options = { mood, language, structure, measures, flow, rhymeScheme, languageLevel };
+  for (const [name, value] of Object.entries(options)) {
+    if (!LYRICS_OPTION_VALUES[name].includes(value)) {
+      throw new RequestError(400, "Réglage de génération invalide", { field: name });
+    }
+  }
+  return { theme, ...options };
 }
 
 /** Résumé affiché dans « Mes projets » : pas de pistes ni de patterns complets. */
@@ -97,11 +129,12 @@ function handle(context, operation) {
       await operation(req, res);
     } catch (error) {
       if (error instanceof RequestError) {
-        console.warn(`[projects] ${context} refusé (${error.status}) : ${error.message}`);
+        const log = `[projects] ${context} refusé (${error.status})`;
+        console.warn(res.locals.lyricsGeneration ? log : `${log} : ${error.message}`);
         return res.status(error.status).json({ message: error.message, ...error.extra });
       }
       // Les erreurs de validation Mongoose sont journalisées et traduites en 400 par le gestionnaire central.
-      if (error?.name !== "ValidationError") {
+      if (!res.locals.lyricsGeneration && error?.name !== "ValidationError") {
         console.error(`[projects] ${context} : erreur`, error);
       }
       next(error);
@@ -160,6 +193,39 @@ export function createProjectRouter(auth) {
         throw new RequestError(404, "Projet inconnu");
       }
       res.json(project.toPublic());
+    }),
+  );
+
+  router.post(
+    "/:id/lyrics/generate",
+    handle("génération de paroles", async (req, res) => {
+      const project = await MusicalProject.findOne(ownedFilter(req)).select("bpm timeSignature key formatVersion");
+      if (!project) {
+        throw new RequestError(404, "Projet inconnu");
+      }
+      if (!SUPPORTED_FORMAT_VERSIONS.includes(project.formatVersion)) {
+        throw new RequestError(422, "Format de projet non pris en charge par cette version du studio");
+      }
+
+      const options = validLyricsOptions(req.body);
+
+      try {
+        const { bpm } = project;
+        const { beatsPerBar, beatUnit } = project.timeSignature;
+        const { root, scale } = project.key;
+        const timeSignature = { beatsPerBar, beatUnit };
+        const key = { root, scale };
+        const { targetSyllables, lines } = await generateGroqLyrics({ userId: req.auth.sub, options, bpm, timeSignature, key });
+        res.json({ bpm, timeSignature, key, targetSyllables, lines });
+      } catch (error) {
+        if (error instanceof LyricsProviderError) {
+          const { status, message, retryAfterSeconds } = error;
+          if (retryAfterSeconds === undefined) throw new RequestError(status, message);
+          res.set("Retry-After", String(retryAfterSeconds));
+          throw new RequestError(status, message, { retryAfterSeconds });
+        }
+        throw error;
+      }
     }),
   );
 

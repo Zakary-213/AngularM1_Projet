@@ -4,9 +4,11 @@ import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { format } from "node:util";
 import { createApp } from "../src/app.js";
 import { MusicalProject } from "../src/models/MusicalProject.js";
 import { Track } from "../src/models/Track.js";
+import { LyricsQuota } from "../src/models/LyricsQuota.js";
 
 /*
  * Tests HTTP des routes /api/projects. MongoDB est remplacé par un stockage en
@@ -18,6 +20,7 @@ import { Track } from "../src/models/Track.js";
 const store = new Map();
 /** Fichiers audio de la bibliothèque : identifiant → propriétaire. */
 const audioFiles = new Map();
+const lyricsAttempts = new Map();
 /** Fichiers écrits sur disque par les tests d'upload, supprimés à la fin. */
 const uploadedNames = [];
 
@@ -75,6 +78,17 @@ function installFakeStore() {
     if (document) store.delete(String(document._id));
     return document ?? null;
   });
+  mock.method(LyricsQuota, "updateOne", async ({ _id, attempts }, update, { upsert } = {}) => {
+    const count = lyricsAttempts.get(_id);
+    if (count !== undefined && count < attempts.$lt) {
+      lyricsAttempts.set(_id, count + update.$inc.attempts);
+      return { matchedCount: 1, upsertedCount: 0 };
+    }
+    if (!upsert) return { matchedCount: 0, upsertedCount: 0 };
+    if (count !== undefined) throw Object.assign(new Error("Clé du compteur déjà présente"), { code: 11000 });
+    lyricsAttempts.set(_id, update.$inc.attempts);
+    return { matchedCount: 0, upsertedCount: 1 };
+  });
 }
 
 let server, base;
@@ -98,6 +112,7 @@ test.after(async () => {
 test.beforeEach(() => {
   store.clear();
   audioFiles.clear();
+  lyricsAttempts.clear();
 });
 
 async function call(user, method, path = "", body) {
@@ -105,7 +120,7 @@ async function call(user, method, path = "", body) {
   if (user) headers.Authorization = `Bearer ${jwt.sign({ sub: user }, secret)}`;
   const response = await fetch(base + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await response.text();
-  return { status: response.status, body: text ? JSON.parse(text) : null };
+  return { status: response.status, body: text ? JSON.parse(text) : null, retryAfter: response.headers.get("retry-after") };
 }
 
 const createProject = (user, title = "Minuit", origin = "create") => call(user, "POST", "", { title, origin });
@@ -375,4 +390,271 @@ test("M10 : un projet au format v1 s'ouvre tel quel et passe en v2 à la sauvega
   assert.equal(saved.status, 200);
   assert.equal(saved.body.formatVersion, 2);
   assert.equal(saved.body.bpm, 100);
+});
+
+const makeLyricLines = (count) => Array.from({ length: count }, (_, index) => ({
+  measure: index + 1,
+  text: `Texte fictif ${index + 1}`,
+  syllables: 10,
+}));
+const lyricLines = makeLyricLines(8);
+const groqLyricsReply = (lines, refused = false) => Response.json({
+  choices: [{ message: { content: JSON.stringify({ refused, lines }) } }],
+});
+
+function stubGroq(t, key, reply) {
+  const previousKey = process.env.GROQ_API_KEY;
+  process.env.GROQ_API_KEY = key;
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = previousKey;
+  });
+  const realFetch = globalThis.fetch;
+  const groq = t.mock.fn(reply);
+  t.mock.method(globalThis, "fetch", (url, options) =>
+    String(url).startsWith(base) ? realFetch(url, options) : groq(url, options),
+  );
+  return groq;
+}
+
+test("M12 : la génération exige un JWT et un projet appartenant au compte", async (t) => {
+  const groq = stubGroq(t, "test-key", () => assert.fail("Appel Groq interdit"));
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  assert.equal((await call(null, "POST", route, { theme: "La nuit" })).status, 401);
+  assert.equal((await call(bob, "POST", route, { theme: "La nuit", ownerId: alice })).status, 404);
+  assert.equal((await call(alice, "POST", "/invalide/lyrics/generate", { theme: "La nuit" })).status, 404);
+  assert.equal(groq.mock.callCount(), 0);
+});
+
+test("M12 : la route utilise la clé du serveur et les paramètres du projet", async (t) => {
+  const groq = stubGroq(t, "test-key", () => groqLyricsReply(lyricLines));
+  const { body: project } = await call(alice, "POST", "", { title: "Projet privé", origin: "create", bpm: 140 });
+  const response = await call(alice, "POST", `/${project.id}/lyrics/generate`, { theme: "  La nuit  ", bpm: 90, apiKey: "clé-client" });
+  const context = { bpm: 140, timeSignature: { beatsPerBar: 4, beatUnit: 4 }, key: { root: 9, scale: "minor" } };
+  assert.equal(response.status, 200);
+  assert.equal(response.body.targetSyllables, 6);
+  assert.deepEqual({ bpm: response.body.bpm, timeSignature: response.body.timeSignature, key: response.body.key }, context);
+  assert.deepEqual(response.body.lines.map(({ rhyme, ...line }) => line), lyricLines.map((line) => ({ ...line, syllables: 3 })));
+  assert.deepEqual(response.body.lines[0].rhyme, { group: "A", words: ["fictif"], matches: false });
+  assert.equal(groq.mock.callCount(), 1);
+  const [url, options] = groq.mock.calls[0].arguments;
+  assert.equal(url, "https://api.groq.com/openai/v1/chat/completions");
+  assert.equal(options.headers.Authorization, "Bearer test-key");
+  assert.deepEqual(JSON.parse(JSON.parse(options.body).messages[1].content), {
+    theme: "La nuit", mood: "neutral", language: "fr", structure: "verse", measures: 8,
+    flow: "standard", rhymeScheme: "AABB", languageLevel: "standard", targetSyllables: 6, ...context,
+  });
+});
+
+test("M12 : les réglages valides sont transmis avec le bon nombre de mesures et la densité demandée", async (t) => {
+  const groq = stubGroq(t, "test-key", (_url, options) => {
+    const request = JSON.parse(options.body);
+    const { measures } = JSON.parse(request.messages[1].content);
+    return groqLyricsReply(makeLyricLines(measures));
+  });
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  const options = { theme: "x".repeat(200), mood: "dark", language: "en", structure: "bridge", rhymeScheme: "ABAB", languageLevel: "casual" };
+
+  for (const [measures, flow, targetSyllables] of [[4, "relaxed", 7], [16, "fast", 14]]) {
+    const response = await call(alice, "POST", route, { ...options, measures, flow });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.targetSyllables, targetSyllables);
+    assert.deepEqual(response.body.lines.map(({ measure }) => measure), makeLyricLines(measures).map(({ measure }) => measure));
+    const request = JSON.parse(groq.mock.calls.at(-1).arguments[1].body);
+    assert.deepEqual(JSON.parse(request.messages[1].content), {
+      ...options, measures, flow, targetSyllables, bpm: 90,
+      timeSignature: { beatsPerBar: 4, beatUnit: 4 }, key: { root: 9, scale: "minor" },
+    });
+    const linesSchema = request.response_format.json_schema.schema.properties.lines;
+    assert.equal(linesSchema.minItems, 0);
+    assert.equal(linesSchema.maxItems, measures);
+  }
+  assert.equal(groq.mock.callCount(), 2);
+});
+
+test("M12 : une valeur hors contrat est rejetée avant tout appel à Groq", async (t) => {
+  const groq = stubGroq(t, "test-key", () => assert.fail("Appel Groq interdit"));
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  const rejected = [
+    ["mood", "surprise"], ["language", "es"], ["structure", "solo"], ["measures", "8"],
+    ["measures", 9], ["flow", null], ["rhymeScheme", "AAAA"], ["languageLevel", []],
+  ];
+  for (const [field, value] of rejected) {
+    const response = await call(alice, "POST", route, { theme: "La nuit", [field]: value });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.field, field);
+  }
+  assert.equal((await call(alice, "POST", route, [])).status, 400);
+  assert.equal((await call(alice, "POST", route, { theme: 42 })).status, 400);
+  assert.equal(groq.mock.callCount(), 0);
+});
+
+test("M12 : thème invalide ou clé factice, aucune demande à Groq", async (t) => {
+  const groq = stubGroq(t, "YOUR_GROQ_API_KEY", () => assert.fail("Appel Groq interdit"));
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  assert.equal((await call(alice, "POST", route, { theme: " " })).status, 400);
+  assert.equal((await call(alice, "POST", route, { theme: "x".repeat(201) })).status, 400);
+  assert.equal((await call(alice, "POST", route, { theme: "La nuit" })).status, 503);
+  assert.equal(groq.mock.callCount(), 0);
+  assert.equal(lyricsAttempts.size, 0);
+});
+
+test("M12 : les erreurs et réponses incomplètes de Groq donnent des messages sans contenu privé", async (t) => {
+  const responses = [
+    () => Response.json({ error: "contenu privé" }, { status: 429 }),
+    () => groqLyricsReply(lyricLines.slice(0, 7)),
+    () => groqLyricsReply([lyricLines[1], ...lyricLines.slice(1)]),
+    () => groqLyricsReply([{ measure: 1, text: "123 !" }, ...lyricLines.slice(1)]),
+    () => { throw new DOMException("contenu privé", "TimeoutError"); },
+  ];
+  stubGroq(t, "test-key", () => responses.shift()());
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  for (const expectedStatus of [429, 502, 502, 502, 504]) {
+    const { status, body } = await call(alice, "POST", route, { theme: "La nuit" });
+    assert.equal(status, expectedStatus);
+    assert.equal(typeof body.message, "string");
+    assert.doesNotMatch(body.message, /contenu privé/);
+  }
+});
+
+test("M12 : cinq tentatives par compte entre plusieurs projets, même en parallèle, puis remise à zéro à minuit UTC", async (t) => {
+  let now = Date.UTC(2026, 0, 1, 23, 55);
+  t.mock.method(Date, "now", () => now);
+  const groq = stubGroq(t, "test-key", () => groqLyricsReply(lyricLines));
+  const projectsOfAlice = [(await createProject(alice)).body, (await createProject(alice)).body];
+  const bobsProject = (await createProject(bob)).body;
+  const generate = (user, project) => call(user, "POST", `/${project.id}/lyrics/generate`, { theme: "La nuit" });
+
+  const results = await Promise.all(Array.from({ length: 7 }, (_, index) => generate(alice, projectsOfAlice[index % 2])));
+  assert.equal(results.filter(({ status }) => status === 200).length, 5);
+  const refused = results.filter(({ status }) => status === 429);
+  assert.equal(refused.length, 2);
+  assert.equal(groq.mock.callCount(), 5);
+  for (const response of refused) {
+    assert.equal(response.retryAfter, "300");
+    assert.equal(response.body.retryAfterSeconds, 300);
+  }
+  assert.equal((await generate(bob, bobsProject)).status, 200);
+  now += 300_000;
+  assert.equal((await generate(alice, projectsOfAlice[0])).status, 200);
+  assert.equal(groq.mock.callCount(), 7);
+});
+
+test("M12 : le délai Retry-After de Groq suspend les appels pour tous les comptes", async (t) => {
+  let now = Date.UTC(2026, 0, 1, 12);
+  t.mock.method(Date, "now", () => now);
+  let throttled = true;
+  const groq = stubGroq(t, "test-key", () => throttled
+    ? Response.json({ error: "contenu privé" }, { status: 429, headers: { "Retry-After": "30" } })
+    : groqLyricsReply(lyricLines),
+  );
+  const alicesProject = (await createProject(alice)).body;
+  const bobsProject = (await createProject(bob)).body;
+  const generate = (user, project) => call(user, "POST", `/${project.id}/lyrics/generate`, { theme: "La nuit" });
+  const initial = await generate(alice, alicesProject);
+  assert.equal(initial.status, 429);
+  assert.equal(initial.retryAfter, "30");
+  now += 5_000;
+  const suspended = await generate(bob, bobsProject);
+  assert.equal(suspended.status, 429);
+  assert.equal(suspended.retryAfter, "25");
+  assert.equal(suspended.body.retryAfterSeconds, 25);
+  assert.equal(groq.mock.callCount(), 1);
+  assert.deepEqual([...lyricsAttempts.values()], [1]);
+  now += 25_000;
+  throttled = false;
+  assert.equal((await generate(bob, bobsProject)).status, 200);
+  assert.equal(groq.mock.callCount(), 2);
+});
+
+test("M12 : les demandes explicites d’imitation et de copie sont refusées avant Groq et le quota", async (t) => {
+  const groq = stubGroq(t, "test-key", () => assert.fail("Appel Groq interdit"));
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  for (const theme of ["Imite la voix de Ninho", "Récite mot pour mot les paroles du refrain", "Copy the lyrics of the song", "Imitate the style of the singer"]) {
+    const response = await call(alice, "POST", route, { theme });
+    assert.equal(response.status, 422);
+    assert.match(response.body.message, /paroles originales/);
+  }
+  assert.equal(groq.mock.callCount(), 0);
+  assert.equal(lyricsAttempts.size, 0);
+});
+
+test("M12 : un thème original à propos d’un artiste et un genre de rap restent acceptés", async (t) => {
+  const groq = stubGroq(t, "test-key", () => groqLyricsReply(lyricLines));
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  const theme = "Le souvenir d’un concert de Ninho à Paris, dans un univers boom bap";
+  assert.equal((await call(alice, "POST", route, { theme })).status, 200);
+  const request = JSON.parse(groq.mock.calls[0].arguments[1].body);
+  assert.match(request.messages[0].content, /haineuses ou harcelantes/);
+  assert.equal(JSON.parse(request.messages[1].content).theme, theme);
+});
+
+test("M12 : l’API relaie un refus de Groq et écarte un refus accompagné de paroles", async (t) => {
+  const responses = [groqLyricsReply([], true), groqLyricsReply(lyricLines, true), groqLyricsReply([])];
+  stubGroq(t, "test-key", () => responses.shift());
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate`;
+  const response = await call(alice, "POST", route, { theme: "À la manière de Ninho" });
+  assert.equal(response.status, 422);
+  assert.deepEqual(response.body, { message: "Cette demande est refusée. Choisissez un thème pour des paroles originales" });
+  const malformed = await call(alice, "POST", route, { theme: "À la manière de Ninho" });
+  assert.equal(malformed.status, 502);
+  assert.deepEqual(malformed.body, { message: "Groq a renvoyé une réponse de génération invalide" });
+  const emptyGeneration = await call(alice, "POST", route, { theme: "La nuit" });
+  assert.equal(emptyGeneration.status, 502);
+  assert.deepEqual(emptyGeneration.body, { message: "Groq a renvoyé un nombre de mesures incorrect" });
+});
+
+test("M12 : thème, paroles et détails des erreurs restent hors des logs", async (t) => {
+  const theme = "theme-prive-m12";
+  const lyric = "Paroles confidentielles du refrain Mdouze";
+  const providerError = "erreur-brute-confidentielle-groq";
+  const databaseError = "erreur-interne-confidentielle-mongo";
+  const apiKey = "cle-privee-test-m12";
+  const invalidId = "identifiant-prive-test-m12";
+  const replies = [
+    groqLyricsReply([{ measure: 1, text: lyric }, ...lyricLines.slice(1)]),
+    Response.json({ error: { message: providerError } }, { status: 500 }),
+  ];
+  stubGroq(t, apiKey, () => replies.shift());
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}/lyrics/generate?theme=${theme}`;
+  const logs = [];
+  for (const level of ["log", "warn", "error"]) {
+    t.mock.method(console, level, (...args) => logs.push(format(...args)));
+  }
+
+  const generated = await call(alice, "POST", route, { theme });
+  assert.equal(generated.status, 200);
+  assert.equal(generated.body.lines[0].text, lyric);
+
+  const malformed = await fetch(base + route, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: `{"theme":"${theme}",`,
+  });
+  assert.equal(malformed.status, 400);
+  assert.deepEqual(await malformed.json(), { message: "JSON invalide" });
+  const tooLarge = await call(alice, "POST", route, { theme: theme + "x".repeat(1024 * 1024) });
+  assert.equal(tooLarge.status, 413);
+  assert.equal((await call(alice, "POST", route, { theme })).status, 502);
+  assert.equal((await call(null, "POST", `/${invalidId}/lyrics/generate`, { theme })).status, 401);
+
+  t.mock.method(MusicalProject, "findOne", () => { throw new Error(databaseError); });
+  const unexpected = await call(alice, "POST", route, { theme });
+  assert.equal(unexpected.status, 500);
+  assert.deepEqual(unexpected.body, { message: "Une erreur interne empêche la génération des paroles" });
+
+  const captured = logs.join("\n");
+  for (const marker of [theme, lyric, providerError, databaseError, apiKey, invalidId]) {
+    assert.equal(captured.includes(marker), false);
+  }
+  for (const status of [200, 400, 401, 413, 500, 502]) {
+    assert.ok(captured.includes(`POST /api/projects/:id/lyrics/generate -> ${status}`));
+  }
 });

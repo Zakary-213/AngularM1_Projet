@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import { projectLyricsSchema } from "./ProjectLyrics.js";
+import { analyzeLyrics } from "../services/lyrics-analysis.js";
 
 /*
  * Format de sauvegarde d'un projet musical, défini en M0 et utilisé par les
@@ -344,6 +346,7 @@ const schema = new mongoose.Schema(
     },
     // Absente des projets v1 : le studio reprend alors ses réglages par défaut.
     vocal: { type: vocalSchema, default: undefined },
+    lyrics: { type: projectLyricsSchema, default: undefined },
     // Incrémentée à chaque sauvegarde : une sauvegarde basée sur une révision
     // dépassée est refusée (409) au lieu d'écraser le travail d'un autre onglet.
     revision: { type: Number, default: 0, min: 0 },
@@ -355,6 +358,10 @@ schema.index({ ownerId: 1, updatedAt: -1 });
 
 schema.methods.toPublic = function () {
   const { _id, __v, ownerId, ...project } = this.toObject();
+  if (project.lyrics) {
+    const { options, lines } = project.lyrics.current;
+    project.lyricsAnalysis = analyzeLyrics(lines.map((text, index) => ({ text, measure: index + 1 })), options.language, options.rhymeScheme);
+  }
   return { id: String(_id), ownerId: String(ownerId), ...project };
 };
 

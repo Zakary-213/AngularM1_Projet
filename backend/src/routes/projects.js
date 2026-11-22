@@ -2,6 +2,8 @@ import express from "express";
 import mongoose from "mongoose";
 import { MusicalProject, PROJECT_FORMAT_VERSION, PROJECT_LIMITS, SUPPORTED_FORMAT_VERSIONS } from "../models/MusicalProject.js";
 import { Track } from "../models/Track.js";
+import { LYRICS_OPTION_VALUES, MAX_LYRICS_HISTORY, MAX_LYRICS_LINE_LENGTH, MAX_LYRICS_THEME_LENGTH } from "../models/ProjectLyrics.js";
+import { generateGroqLyrics, LyricsProviderError } from "../services/groq-lyrics.js";
 
 /*
  * Routes /api/projects (M1). Chaque requête est authentifiée et chaque accès
@@ -12,7 +14,7 @@ import { Track } from "../models/Track.js";
 const DEFAULT_PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 50;
 /** Champs qu'un client peut écrire lors d'une sauvegarde (liste blanche). */
-const EDITABLE_FIELDS = ["title", "bpm", "key", "tracks", "patterns", "master", "vocal"];
+const EDITABLE_FIELDS = ["title", "bpm", "key", "tracks", "patterns", "master", "vocal", "lyrics"];
 const ORIGINS = ["create", "import"];
 
 class RequestError extends Error {
@@ -42,6 +44,61 @@ function validTitle(value) {
     throw new RequestError(400, `Le titre doit contenir entre 1 et ${PROJECT_LIMITS.titleMaxLength} caractères`);
   }
   return title;
+}
+
+function validLyricsOptions(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new RequestError(400, "Paramètres de génération requis");
+  }
+  const theme = typeof body.theme === "string" ? body.theme.trim() : "";
+  if (!theme || theme.length > MAX_LYRICS_THEME_LENGTH) {
+    throw new RequestError(400, `Le thème doit contenir entre 1 et ${MAX_LYRICS_THEME_LENGTH} caractères`);
+  }
+  const {
+    mood = "neutral", language = "fr", structure = "verse", measures = 8,
+    flow = "standard", rhymeScheme = "AABB", languageLevel = "standard",
+  } = body;
+  const options = { mood, language, structure, measures, flow, rhymeScheme, languageLevel };
+  for (const [name, value] of Object.entries(options)) {
+    if (!LYRICS_OPTION_VALUES[name].includes(value)) {
+      throw new RequestError(400, "Réglage de génération invalide", { field: name });
+    }
+  }
+  return { theme, ...options };
+}
+
+function validLyricsLines(lines, measures) {
+  if (!Array.isArray(lines) || lines.length !== measures || lines.some(line =>
+    typeof line !== "string" || line.length > MAX_LYRICS_LINE_LENGTH || /[\r\n]/u.test(line),
+  )) {
+    throw new RequestError(400, "Les lignes de paroles ne correspondent pas au nombre de mesures ou dépassent la longueur autorisée");
+  }
+  return lines;
+}
+
+function validLyricsRange(regenerate, measures) {
+  if (regenerate === undefined) return undefined;
+  const { from, to, lines } = regenerate ?? {};
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from || to > measures) {
+    throw new RequestError(400, "La plage de mesures à régénérer est invalide");
+  }
+  return { from, to, lines: validLyricsLines(lines, measures) };
+}
+
+function validSavedLyrics(lyrics) {
+  if (!lyrics || !Array.isArray(lyrics.history) || lyrics.history.length > MAX_LYRICS_HISTORY) {
+    throw new RequestError(400, "Historique de paroles invalide");
+  }
+  const validateVersion = (version) => {
+    const options = validLyricsOptions(version?.options);
+    const { bpm, targetSyllables } = version;
+    if (!Number.isFinite(bpm) || bpm < PROJECT_LIMITS.minBpm || bpm > PROJECT_LIMITS.maxBpm ||
+        !Number.isInteger(targetSyllables) || targetSyllables < 1 || targetSyllables > 64) {
+      throw new RequestError(400, "Cadence des paroles invalide");
+    }
+    return { options, bpm, targetSyllables, lines: validLyricsLines(version.lines, options.measures) };
+  };
+  return { current: validateVersion(lyrics.current), history: lyrics.history.map(validateVersion) };
 }
 
 /** Résumé affiché dans « Mes projets » : pas de pistes ni de patterns complets. */
@@ -97,11 +154,12 @@ function handle(context, operation) {
       await operation(req, res);
     } catch (error) {
       if (error instanceof RequestError) {
-        console.warn(`[projects] ${context} refusé (${error.status}) : ${error.message}`);
+        const log = `[projects] ${context} refusé (${error.status})`;
+        console.warn(res.locals.lyricsGeneration ? log : `${log} : ${error.message}`);
         return res.status(error.status).json({ message: error.message, ...error.extra });
       }
       // Les erreurs de validation Mongoose sont journalisées et traduites en 400 par le gestionnaire central.
-      if (error?.name !== "ValidationError") {
+      if (!res.locals.lyricsGeneration && !res.locals.privateProjectLyrics && error?.name !== "ValidationError") {
         console.error(`[projects] ${context} : erreur`, error);
       }
       next(error);
@@ -163,11 +221,46 @@ export function createProjectRouter(auth) {
     }),
   );
 
+  router.post(
+    "/:id/lyrics/generate",
+    handle("génération de paroles", async (req, res) => {
+      const project = await MusicalProject.findOne(ownedFilter(req)).select("bpm timeSignature key formatVersion");
+      if (!project) {
+        throw new RequestError(404, "Projet inconnu");
+      }
+      if (!SUPPORTED_FORMAT_VERSIONS.includes(project.formatVersion)) {
+        throw new RequestError(422, "Format de projet non pris en charge par cette version du studio");
+      }
+
+      const options = validLyricsOptions(req.body);
+      const regenerate = validLyricsRange(req.body.regenerate, options.measures);
+
+      try {
+        const { bpm } = project;
+        const { beatsPerBar, beatUnit } = project.timeSignature;
+        const { root, scale } = project.key;
+        const timeSignature = { beatsPerBar, beatUnit };
+        const key = { root, scale };
+        const { targetSyllables, lines } = await generateGroqLyrics({ userId: req.auth.sub, options, bpm, timeSignature, key, regenerate });
+        res.json({ bpm, timeSignature, key, targetSyllables, lines });
+      } catch (error) {
+        if (error instanceof LyricsProviderError) {
+          const { status, message, retryAfterSeconds } = error;
+          if (retryAfterSeconds === undefined) throw new RequestError(status, message);
+          res.set("Retry-After", String(retryAfterSeconds));
+          throw new RequestError(status, message, { retryAfterSeconds });
+        }
+        throw error;
+      }
+    }),
+  );
+
   router.put(
     "/:id",
     handle("sauvegarde", async (req, res) => {
       const filter = ownedFilter(req);
       const body = req.body ?? {};
+      res.locals.privateProjectLyrics = body.lyrics !== undefined;
       if (!Number.isInteger(body.revision) || body.revision < 0) {
         throw new RequestError(400, "Révision requise");
       }
@@ -175,6 +268,7 @@ export function createProjectRouter(auth) {
       if (!existing) {
         throw new RequestError(404, "Projet inconnu");
       }
+      res.locals.privateProjectLyrics ||= existing.lyrics !== undefined;
       if (!SUPPORTED_FORMAT_VERSIONS.includes(existing.formatVersion)) {
         // Projet d'une version future : on refuse plutôt que de le réécrire et perdre des données.
         throw new RequestError(422, "Format de projet non pris en charge par cette version du studio");
@@ -187,6 +281,9 @@ export function createProjectRouter(auth) {
       const fields = pick(body, EDITABLE_FIELDS);
       if (fields.title !== undefined) {
         fields.title = validTitle(fields.title);
+      }
+      if (fields.lyrics !== undefined) {
+        fields.lyrics = validSavedLyrics(fields.lyrics);
       }
       const candidate = new MusicalProject({ ...existing, ...fields });
       await candidate.validate();

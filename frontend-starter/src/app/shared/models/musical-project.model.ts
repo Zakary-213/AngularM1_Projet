@@ -1,4 +1,5 @@
 import { ScaleName } from '../audio/pitch/musical-scale';
+import type { LyricsLine, ProjectLyrics } from './lyrics.model';
 
 /**
  * Version du format de sauvegarde comprise par ce studio (voir « Contrat d'API »).
@@ -15,6 +16,11 @@ export interface ProjectKeySignature {
   /** Fondamentale en demi-tons depuis do (0 à 11). */
   readonly root: number;
   readonly scale: ScaleName;
+}
+
+export interface ProjectTimeSignature {
+  readonly beatsPerBar: number;
+  readonly beatUnit: number;
 }
 
 export interface ProjectClip {
@@ -131,6 +137,7 @@ export interface ProjectContent {
   readonly master?: { readonly volume: number };
   /** Absente des projets v1. */
   readonly vocal?: ProjectVocal;
+  readonly lyrics?: ProjectLyrics;
 }
 
 export interface MusicalProject extends ProjectContent {
@@ -138,6 +145,8 @@ export interface MusicalProject extends ProjectContent {
   readonly ownerId: string;
   readonly formatVersion: number;
   readonly title: string;
+  readonly timeSignature?: ProjectTimeSignature;
+  readonly lyricsAnalysis?: readonly LyricsLine[];
   readonly origin: ProjectOrigin;
   readonly revision: number;
   readonly createdAt: string;

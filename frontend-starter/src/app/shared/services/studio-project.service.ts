@@ -8,6 +8,7 @@ import { migrateUserStyles } from '../audio/pitch/voice-correction-state';
 import { readStoredUserStylesJson } from '../audio/pitch/user-styles-storage';
 import { encodeWav } from '../audio/wav-encoder';
 import { MusicalProject, PROJECT_FORMAT_VERSION } from '../models/musical-project.model';
+import type { ProjectLyrics } from '../models/lyrics.model';
 import { ProjectService } from './project.service';
 import { TrackService } from './track.service';
 
@@ -47,6 +48,8 @@ export class StudioProjectService {
   private readonly session = inject(StudioSessionService);
 
   readonly project = signal<MusicalProject | null>(null);
+  readonly projectLoadVersion = signal(0);
+  readonly lyrics = signal<ProjectLyrics | undefined>(undefined);
   readonly loadState = signal<ProjectLoadState>('loading');
   readonly loadError = signal<string | null>(null);
   readonly saving = signal(false);
@@ -95,6 +98,7 @@ export class StudioProjectService {
     const loaded = this.session.instrumental();
     const bpm = this.session.bpm();
     return {
+      lyrics: this.lyrics(),
       bpm,
       key: this.session.projectKey(),
       patterns: this.session.patterns(),
@@ -153,6 +157,7 @@ export class StudioProjectService {
   }
 
   load(id: string): void {
+    this.projectLoadVersion.update(version => version + 1);
     this.loadState.set('loading');
     this.loadError.set(null);
     this.conflict.set(false);
@@ -543,6 +548,7 @@ export class StudioProjectService {
 
   private apply(project: MusicalProject): void {
     const state = fromProject(project);
+    this.lyrics.set(state.lyrics);
     this.session.setBpm(state.bpm);
     this.session.projectKey.set(state.key);
     this.session.loadPatterns(state.patterns);

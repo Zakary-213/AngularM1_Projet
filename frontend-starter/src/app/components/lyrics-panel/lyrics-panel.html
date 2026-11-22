@@ -1,0 +1,140 @@
+@if (studioProject.loadState() === 'loaded' && studioProject.project(); as project) {
+  <dl class="project-context" aria-label="Réglages musicaux du projet">
+    <div><dt>Tempo</dt><dd>{{ project.bpm }} BPM</dd></div>
+    <div><dt>Signature</dt><dd>{{ project.timeSignature?.beatsPerBar ?? beatsPerBar }}/{{ project.timeSignature?.beatUnit ?? 4 }}</dd></div>
+    <div><dt>Tonalité</dt><dd>{{ keyLabel(project.key) }}</dd></div>
+  </dl>
+
+  <form [formGroup]="form" (ngSubmit)="generate()" [attr.aria-busy]="generating()">
+    <label for="lyrics-theme">Thème</label>
+    <input id="lyrics-theme" type="text" formControlName="theme" [attr.maxlength]="maxThemeLength" required
+      [attr.aria-invalid]="form.controls.theme.touched && form.controls.theme.invalid"
+      [attr.aria-describedby]="form.controls.theme.touched && form.controls.theme.invalid ? 'lyrics-theme-error' : null" />
+    @if (form.controls.theme.touched && form.controls.theme.invalid) {
+      <p id="lyrics-theme-error" class="field-error">Saisissez un thème de 1 à {{ maxThemeLength }} caractères.</p>
+    }
+
+    <div class="lyrics-fields">
+      @for (field of selectFields; track field.name) {
+        <div>
+          <label [for]="'lyrics-' + field.name">{{ field.label }}</label>
+          <select [id]="'lyrics-' + field.name" [formControlName]="field.name">
+            @for (option of field.options; track option[0]) {
+              <option [ngValue]="option[0]">{{ option[1] }}</option>
+            }
+          </select>
+        </div>
+      }
+    </div>
+
+    @if (studioProject.conflict()) {
+      <p role="status">Rechargez le projet pour utiliser ses réglages enregistrés.</p>
+    } @else if (settingsChanged()) {
+      <p role="status">Sauvegardez le projet pour générer avec le tempo et la tonalité actuels.</p>
+    }
+
+    <button type="submit" class="button primary" [disabled]="generationBlocked()">
+      {{ generating() ? 'Génération en cours…' : 'Générer les paroles' }}
+    </button>
+  </form>
+
+  @if (error(); as message) {
+    <p class="field-error" role="alert">{{ message }}</p>
+  }
+
+  @if (proposal(); as lyrics) {
+    <section class="lyrics-proposal" aria-labelledby="lyrics-proposal-title">
+      <h2 id="lyrics-proposal-title">Proposition générée par IA</h2>
+      <p role="status">{{ lyrics.lines.length }} mesures à {{ lyrics.bpm }} BPM. Cible de {{ lyrics.targetSyllables }} syllabes par mesure.</p>
+      @if (rhymeSummary(); as summary) {
+        <p class="lyric-facts">
+          @if (lyrics.options.rhymeScheme === 'internal') {
+            Rimes internes · Mesures avec une rime {{ summary.matched }}/{{ summary.total }}
+          } @else {
+            Schéma demandé {{ lyrics.options.rhymeScheme }} · Paires de rimes repérées {{ summary.matched }}/{{ summary.total }}
+          }
+        </p>
+      }
+      <div class="lyric-actions">
+        <button type="button" class="button" (click)="undo()" [disabled]="!canUndo()">Annuler la dernière modification</button>
+        <button type="button" class="button" (click)="prompterVisible.set(!prompterVisible())" [attr.aria-expanded]="prompterVisible()" aria-controls="lyrics-prompter">
+          {{ prompterVisible() ? 'Masquer le prompteur' : 'Afficher le prompteur' }}
+        </button>
+      </div>
+
+      <section id="lyrics-prompter" class="prompter" aria-label="Prompteur de paroles" [hidden]="!prompterVisible()">
+        @let measure = currentMeasure();
+        @if (measure !== null && measure >= 1 && measure <= lyrics.lines.length) {
+          <span class="measure-label">Mesure {{ measure }} / {{ lyrics.lines.length }}</span>
+          <p class="prompter-line">{{ lyrics.lines[measure - 1] || 'Pause' }}</p>
+          @if (measure < lyrics.lines.length) {
+            <p class="prompter-next">Ensuite · {{ lyrics.lines[measure] || 'Pause' }}</p>
+          }
+        } @else {
+          <p>{{ measure === null ? 'Lancez la lecture pour suivre les paroles.' : 'Fin du texte. Revenez à une mesure du texte pour reprendre.' }}</p>
+        }
+      </section>
+
+      <ol>
+        @for (line of displayedLines(); track line.measure) {
+          <li [class.is-current]="currentMeasure() === line.measure" [attr.aria-current]="currentMeasure() === line.measure ? 'step' : null">
+            <span class="measure-label">Mesure {{ line.measure }}</span>
+            @if (editingMeasure() === line.measure) {
+              <form class="line-edit" (submit)="$event.preventDefault(); applyEdit()">
+                <label [for]="'lyrics-line-' + line.measure">Texte de la mesure {{ line.measure }}</label>
+                <input [id]="'lyrics-line-' + line.measure" type="text" [formControl]="editField" [attr.maxlength]="maxLineLength" />
+                <div class="lyric-actions">
+                  <button type="submit" class="button primary" [disabled]="editField.invalid">Appliquer</button>
+                  <button type="button" class="button" (click)="editingMeasure.set(null)">Annuler</button>
+                </div>
+              </form>
+            } @else {
+              <span class="lyric-text">@for (segment of line.segments; track $index) {
+                @if (segment.rhyme) {<mark>{{ segment.text }}</mark>} @else {<ng-container>{{ segment.text }}</ng-container>}
+              } @empty { <span class="measure-label">Pause</span> }</span>
+              <div>
+                <div class="lyric-facts">
+                  @if (line.analysis; as analysis) {
+                    {{ analysis.syllables }} syllabes estimées
+                    @if (analysis.rhyme.group; as group) { · Groupe {{ group }} }
+                    · {{ analysis.rhyme.matches ? 'Rime repérée' : 'Rime à vérifier' }}
+                  } @else {
+                    Analyse à la sauvegarde
+                  }
+                </div>
+                <div class="lyric-actions">
+                  <button type="button" class="button" (click)="edit(line.measure)" [disabled]="generating() || editingMeasure() !== null"
+                    [attr.aria-label]="'Modifier la mesure ' + line.measure">Modifier</button>
+                  <button type="button" class="button" (click)="regenerate(line.measure, line.measure)" [disabled]="generationBlocked()"
+                    [attr.aria-label]="'Régénérer la mesure ' + line.measure">Régénérer</button>
+                </div>
+              </div>
+            }
+          </li>
+        }
+      </ol>
+      <form class="block-form" (submit)="$event.preventDefault(); regenerateBlock()" aria-label="Régénération d’un bloc">
+        <div>
+          <label for="lyrics-block-start">Première mesure</label>
+          <select id="lyrics-block-start" [formControl]="blockStart">
+            @for (line of displayedLines(); track line.measure) { <option [ngValue]="line.measure">{{ line.measure }}</option> }
+          </select>
+        </div>
+        <div>
+          <label for="lyrics-block-end">Dernière mesure</label>
+          <select id="lyrics-block-end" [formControl]="blockEnd">
+            @for (line of displayedLines(); track line.measure) { <option [ngValue]="line.measure">{{ line.measure }}</option> }
+          </select>
+        </div>
+        <button type="submit" class="button" [disabled]="generationBlocked()">Régénérer le bloc</button>
+      </form>
+    </section>
+  }
+} @else if (!projectId()) {
+  <p>Ouvrez un projet enregistré pour générer des paroles.</p>
+  <a class="button" routerLink="/projects">Mes projets</a>
+} @else if (studioProject.loadState() === 'loading') {
+  <p role="status">Chargement du projet…</p>
+} @else {
+  <p>La génération sera disponible après le chargement du projet.</p>
+}

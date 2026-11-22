@@ -32,7 +32,7 @@
         }
       </p>
       <label class="autosave"><input type="checkbox" [checked]="studioProject.autoSave()" (change)="onAutoSaveChange($event)" /> Sauvegarde automatique</label>
-      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie, Piano Roll (notes et instruments), clips, mixeur et Master, réglages et styles de correction vocale ; l'instrumentale, les prises et la version corrigée de la prise active sont envoyées dans vos fichiers audio (les originaux ne sont jamais modifiés).</p>
+      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie, Piano Roll (notes et instruments), clips, mixeur et Master, paroles, réglages et styles de correction vocale ; l'instrumentale, les prises et la version corrigée de la prise active sont envoyées dans vos fichiers audio (les originaux ne sont jamais modifiés).</p>
     } @else {
       <p class="eyebrow">STUDIO / SESSION DE DÉMONSTRATION</p>
       <h1>Session libre<span>.</span></h1>
@@ -275,7 +275,16 @@
     }
     @case ('Mixeur') { <app-mixer-panel /> }
     @case ('Export') { <app-export-panel /> }
-    @default { <app-drum-rack-panel /> }
+    @case ('Batterie') { <app-drum-rack-panel /> }
+  }
+  @defer (when activeTab() === 'Paroles') {
+    <div class="editor-body" [hidden]="activeTab() !== 'Paroles'">
+      <app-lyrics-panel [projectId]="projectId" />
+    </div>
+  } @loading {
+    @if (activeTab() === 'Paroles') {
+      <p class="editor-body muted" role="status">Chargement du panneau Paroles…</p>
+    }
   }
 </section>
 }

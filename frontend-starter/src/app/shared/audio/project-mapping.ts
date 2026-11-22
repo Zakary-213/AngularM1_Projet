@@ -1,4 +1,5 @@
 import { DEFAULT_KIT, DEFAULT_PATTERN_ID, DRUM_KITS, DRUM_VOICES, DrumKit, DrumVoice, PatternEntry, createDemoPattern, createEmptyPattern } from './drum-pattern';
+import type { ProjectLyrics } from '../models/lyrics.model';
 
 export { createEmptyPattern } from './drum-pattern';
 import { BEATS_PER_BAR, DEFAULT_BPM, STEPS_PER_BAR, clampBpm } from './music-time';
@@ -63,6 +64,7 @@ export interface TakeCorrectionRef {
 }
 
 export interface StudioState {
+  readonly lyrics?: ProjectLyrics;
   readonly bpm: number;
   readonly key: ProjectKey;
   /** Bibliothèque de patterns (M3). */
@@ -141,6 +143,7 @@ function melodicPatternToProject(pattern: MelodicPattern): ProjectPattern {
 
 export function toProjectContent(state: StudioState): ProjectContent {
   return {
+    ...(state.lyrics ? { lyrics: state.lyrics } : {}),
     bpm: state.bpm,
     key: { root: state.key.root, scale: state.key.scale },
     // `steps` reste lisible par les versions antérieures ; `velocities` porte la force des frappes.
@@ -383,6 +386,7 @@ export function fromProject(project: MusicalProject): StudioState {
   const melodicPatterns = readMelodicPatterns(project);
   const vocal = readProjectVocal(project.vocal);
   return {
+    lyrics: project.lyrics,
     bpm,
     key: readKey(project),
     patterns,

@@ -29,6 +29,8 @@ try {
 
 // Ce secret reste côté serveur. Il ne doit jamais être copié dans Angular.
 const SECRET = process.env.JWT_SECRET || "tp1-development-secret";
+const LYRICS_GENERATION_LOG_PATH = "/api/projects/:id/lyrics/generate";
+const lyricsGenerationPath = /^\/api\/projects\/[^/]+\/lyrics\/generate\/?$/i;
 
 // La taille maximale d'un fichier audio est de 25 Mo. Les fichiers plus gros
 // sont refusés par Multer avant d'être écrits sur le disque.
@@ -132,7 +134,8 @@ function auth(req, res, next) {
     // "Authorization: Bearer <token>". Le préfixe "Bearer " est obligatoire pour que
     // le middleware sache qu'il s'agit d'un JWT et non d'un autre type de jeton.
   if (!raw?.startsWith("Bearer ")) {
-    console.warn(`[auth] Authorization absente pour ${req.method} ${req.path}`);
+    const logPath = res.locals.lyricsGeneration ? LYRICS_GENERATION_LOG_PATH : req.path;
+    console.warn(`[auth] Authorization absente pour ${req.method} ${logPath}`);
     return res.status(401).json({ message: "Authentification requise" });
   }
 
@@ -140,10 +143,11 @@ function auth(req, res, next) {
     // jwt.verify vérifie la signature et la date d'expiration du token.
     // On ne logue jamais sa valeur, car un JWT permettrait une usurpation.
     req.auth = jwt.verify(raw.slice(7), SECRET);
-    console.log(`[auth] Token accepté pour ${req.auth.sub}`);
+    if (!res.locals.lyricsGeneration) console.log(`[auth] Token accepté pour ${req.auth.sub}`);
     next();
   } catch (error) {
-    console.error("[auth] Token invalide ou expiré", error);
+    if (res.locals.lyricsGeneration) console.warn("[auth] Jeton invalide pour la génération de paroles");
+    else console.error("[auth] Token invalide ou expiré", error);
     return res.status(401).json({ message: "Jeton invalide ou expiré" });
   }
 }
@@ -202,10 +206,12 @@ export function createApp() {
   // Journaliser la fin de chaque requête permet de suivre méthode, URL,
   // statut et durée sans exposer les corps contenant des mots de passe.
   app.use((req, res, next) => {
+    res.locals.lyricsGeneration = lyricsGenerationPath.test(req.path);
+    const logPath = res.locals.lyricsGeneration ? LYRICS_GENERATION_LOG_PATH : req.originalUrl;
     const startedAt = Date.now();
     res.on("finish", () => {
       console.log(
-        `[http] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${Date.now() - startedAt} ms)`,
+        `[http] ${req.method} ${logPath} -> ${res.statusCode} (${Date.now() - startedAt} ms)`,
       );
     });
     next();
@@ -602,6 +608,23 @@ export function createApp() {
 
   /** Gestionnaire central des erreurs connues de l'application. */
   app.use((error, _req, res, next) => {
+    // Les erreurs de lecture du JSON peuvent retenir le corps brut de la requête.
+    if (error?.type === "entity.too.large") {
+      return res.status(413).json({ message: "Requête trop volumineuse" });
+    }
+    if (error?.type === "entity.parse.failed") {
+      return res.status(400).json({ message: "JSON invalide" });
+    }
+    if (res.locals.lyricsGeneration) {
+      console.error("[lyrics] Erreur interne de génération");
+      return res.status(500).json({ message: "Une erreur interne empêche la génération des paroles" });
+    }
+    if (res.locals.privateProjectLyrics) {
+      console.error("[projects] Erreur de sauvegarde du projet avec paroles");
+      const invalid = error?.name === "ValidationError";
+      return res.status(invalid ? 400 : 500).json({ message: invalid ? "Le contenu du projet est invalide" : "La sauvegarde a échoué" });
+    }
+
     console.error("[error] Erreur reçue par le gestionnaire central", error);
 
     if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE" && error.field === "avatar") {
@@ -613,12 +636,6 @@ export function createApp() {
       error?.message === "Format audio non accepté"
     ) {
       return res.status(400).json({ message: error.message });
-    }
-    if (error?.type === "entity.too.large") {
-      return res.status(413).json({ message: "Requête trop volumineuse" });
-    }
-    if (error?.type === "entity.parse.failed") {
-      return res.status(400).json({ message: "JSON invalide" });
     }
     if (error?.name === "ValidationError") {
       return res.status(400).json({ message: error.message });

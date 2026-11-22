@@ -358,6 +358,48 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
 
+### Prototype de génération de paroles (#32)
+
+L’essai compare [Gemini 3.1 Flash-Lite](https://aistudio.google.com/docs/models/gemini-3.1-flash-lite) et [GPT-OSS 20B sur Groq](https://console.groq.com/docs/model/openai/gpt-oss-20b) avec le même sujet fictif, « la nuit en ville ». Chaque commande fait deux demandes au fournisseur choisi, à 90 et à 140 BPM, avec 8 mesures, une cible fixe de 10 syllabes par mesure et des rimes par paires.
+
+Groq a été choisi comme deuxième fournisseur à tester pour son [offre API gratuite](https://console.groq.com/docs/rate-limits). L’accès à l’API Mistral demande d’activer la facturation selon [sa documentation](https://docs.mistral.ai/admin/billing-usage/usage-limits).
+
+Renseigner la clé du fournisseur dans `backend/.env`, puis lancer sa commande depuis la racine du dépôt.
+
+```bash
+node --env-file=backend/.env backend/scripts/compare-lyrics.mjs gemini
+node --env-file=backend/.env backend/scripts/compare-lyrics.mjs groq
+```
+
+Pour relancer un seul essai, ajouter `90` ou `140` à la fin de la commande.
+
+Le script vérifie les huit mesures numérotées, affiche le texte, le délai et les tokens consommés. Les syllabes annoncées viennent du modèle. Pour comparer les résultats, relire les lignes à voix haute, recompter les syllabes prononcées et noter l’écart moyen à la cible (la moyenne des écarts absolus sur les huit mesures). Relever aussi le français, les rimes et le coût d’après les tokens et le tarif du fournisseur.
+
+**Premier essai Gemini** (un appel par tempo, depuis le poste de développement). Les deux réponses contenaient 8 mesures au bon format et des rimes par paires.
+
+| Tempo | Délai | Tokens entrée / sortie | Syllabes recomptées, par mesure | Écart moyen à la cible |
+|---|---:|---:|---|---:|
+| 90 BPM | 2,19 s | 80 / 350 | 11, 11, 10, 10, 10, 10, 9, 11 | 0,50 syllabe |
+| 140 BPM | 8,21 s | 81 / 331 | 9, 10, 8, 9, 10, 8, 10, 10 | 0,75 syllabe |
+
+Le recomptage suit une prononciation naturelle, avec les `e` finaux muets. L’articulation en rappant peut faire varier le résultat. Aux [tarifs standard payants de Gemini](https://aistudio.google.com/docs/pricing#gemini-3.1-flash-lite), les tokens relevés représenteraient environ 0,00055 $ à 90 BPM et 0,00052 $ à 140 BPM. Une mesure par tempo donne un premier ordre de grandeur de la latence.
+
+**Essais Groq.** La première demande à 90 BPM a reçu un HTTP 400. Les deux appels suivants à 90 BPM ont renvoyé huit mesures au bon format. Le motif du premier refus reste inconnu.
+
+| Tempo | Délai | Tokens entrée / sortie | Syllabes recomptées, par mesure | Écart moyen à la cible |
+|---|---:|---:|---|---:|
+| 90 BPM, premier résultat | 0,69 s | 253 / 289 | 12, 12, 14, 13, 13, 15, 14, 15 | 3,50 syllabes |
+| 90 BPM, deuxième résultat | 0,54 s | 253 / 316 | 12, 13, 14, 13, 14, 12, 12, 13 | 2,88 syllabes |
+| 140 BPM | 0,60 s | 253 / 268 | 10, 10, 10, 10, 10, 10, 10, 10 | 0 syllabe |
+
+Groq a annoncé 10 syllabes partout. À 90 BPM, le premier texte respecte deux paires de rimes sur quatre et répète « béton » dans la même mesure. Le deuxième texte respecte une paire sur quatre. À 140 BPM, le texte atteint la cible de syllabes et aucune des quatre paires demandées ne rime. Gemini fournit quatre paires aux deux tempos dans ces essais. Aux [tarifs de GPT-OSS 20B sur Groq](https://console.groq.com/docs/models), les tokens relevés représenteraient entre 0,00010 $ et 0,00011 $ par génération.
+
+**Conditions et confidentialité.** Google demande d’utiliser ses services payants pour mettre un client de l’API Gemini à disposition d’utilisateurs dans l’EEE, dont la France. Dans ces services payants, Google indique que les consignes et réponses ne servent pas à améliorer ses produits. Groq autorise l’intégration dans une application et indique conserver les métadonnées d’usage, avec une conservation possible des entrées et sorties dans certains cas, notamment pour la fiabilité et la prévention des abus. Le prototype envoie uniquement un sujet fictif et des paramètres musicaux. [Conditions Gemini](https://aistudio.google.com/docs/terms#use-restrictions) · [Conditions Groq](https://console.groq.com/docs/legal/services-agreement) · [Traitement des données par Groq](https://console.groq.com/docs/your-data)
+
+**Choix pour la #31.** Groq en offre gratuite, avec un budget de **0 € par mois**. À épuisement du quota gratuit, le studio affichera un message et suspendra les générations jusqu’au renouvellement du quota. Le faible nombre d’appels donne un premier aperçu. L’intégration devra traiter les erreurs et vérifier la cadence et les rimes avant de présenter le résultat comme conforme à la consigne.
+
+**Quota initial proposé.** Autoriser 5 générations par jour et par utilisateur connecté, régénérations comprises, dans la limite globale du compte Groq. Le backend devra afficher un message quand l’un des quotas est atteint. Ces limites seront mises en œuvre dans la #31. [Limites de l’offre gratuite Groq](https://console.groq.com/docs/rate-limits)
+
 ### 22 novembre 2026 — M10 : sauvegarde complète et export ; fin de la M9 (#16, #15)
 
 - **Inventaire de départ** (code relu avant de cocher) : la sauvegarde v1 couvrait déjà pistes, BPM, tonalité, patterns de batterie et du Piano Roll, notes, clips, mixeur M7 et Master, instrumentale et prises (références de fichiers) avec états visibles, révision et refus des conflits (`409`) ; l'export WAV existait mais seulement sur 1 à 8 mesures. Manquaient la sauvegarde automatique, la correction vocale (réglages, styles personnels gardés dans le navigateur, version corrigée perdue à la fermeture) et l'export du morceau entier.

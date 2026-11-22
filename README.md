@@ -343,6 +343,15 @@ Règles : `ownerId` vient du JWT, jamais du corps ; seuls `title`, `bpm`, `key`,
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
 
+### 22 novembre 2026 — Vérifications de l’accueil 3D (#4)
+
+- Sur petit écran, les boutons de 44 px affichent les noms des trois étapes. La scène suit la hauteur visible du navigateur. En portrait, l’objectif s’élargit sur le trajet de caméra d’origine. Le plan « La session » cadre l’écran entier, avec un nom « Zakat Record » agrandi. Le numéro et le sous-titre de l’étape sont plus grands et ombrés. Sur un écran peu haut, les titres et les espacements s’adaptent pour garder les commandes visibles.
+- Le changement d’étape annonce son titre et sa légende. Avec les animations réduites, la caméra suit directement le défilement et les changements d’étape se font sans transition. Les boutons permettent aussi de parcourir les légendes lorsque WebGL est indisponible.
+- Au navigateur intégré, les trois étapes ont été parcourues à 360 × 800 px sans débordement horizontal ni espace sous la scène. À 640 × 400 px, les trois boutons, la légende finale, le lien vers le studio et la commande de son tenaient dans la fenêtre. La navigation clavier et les attributs d’accessibilité ont été vérifiés. Le comportement JavaScript en animations réduites a été testé avec une préférence simulée.
+- Sur ordinateur à 1280 × 800 px, onglet visible, les rappels de rendu ont été mesurés à 145–147 images/s sur des fenêtres de 3 s. Le premier rendu est intervenu entre 1,02 et 1,14 s après deux navigations locales. La création du décor et des textures a pris 453 ms sur le premier essai.
+- `npm test` a réussi (264/264) ainsi que `npm run build`.
+- Le test sur téléphone réel a permis d’ajuster le cadrage, la hauteur de la scène et la lisibilité du sous-titre. L’auteur a confirmé le rendu et donné un retour favorable sur la checklist après les essais sur téléphone et sur PC avec le Narrateur Windows. Le modèle du téléphone et les versions des navigateurs n’ont pas été relevés.
+
 ### 21 novembre 2026 — M7 : mixeur, égaliseur et effets (#13)
 
 - **Un seul graphe de mixage** (`shared/audio/mixer-graph.ts`) construit à l'identique pour l'écoute (`AudioContext`) et l'export (`OfflineAudioContext`) : par piste, égaliseur 3 bandes → fader (volume, mute, solo) → panoramique (`StereoPannerNode`) → Master, avec deux **envois post-fader** vers une **réverbération** et un **delay partagés** (2 effets au lieu de 10 ; une piste muette n'alimente plus les effets). Master : volume puis limiteur de sécurité. L'ancien égaliseur porté par le clip instrumental à l'export disparaît : l'égaliseur est désormais sur chaque piste, partout.

@@ -8,7 +8,7 @@ const SCREEN_INTENSITY = 0.75;
 /**
  * Wide computer screen showing a music session, on an aluminium stand, with a mouse. Origin: desk surface below the stand.
  */
-export function createComputer(): Group {
+export function createComputer(compactScreen: boolean): Group {
   const computer = new Group();
   const aluminium = new MeshStandardMaterial({ color: 0xb9bbc2, metalness: 1, roughness: 0.32 });
   const black = new MeshStandardMaterial({ color: 0x0c0c0e, roughness: 0.4, metalness: 0.2 });
@@ -27,7 +27,7 @@ export function createComputer(): Group {
   display.rotation.x = -0.05;
   const shell = new Mesh(new RoundedBoxGeometry(1.0, 0.44, 0.028, 4, 0.01), black);
   display.add(shell);
-  const texture = dawScreenTexture();
+  const texture = dawScreenTexture(compactScreen);
   const screen = new Mesh(
     new PlaneGeometry(0.97, 0.41),
     new MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: texture, emissiveIntensity: SCREEN_INTENSITY, roughness: 0.25, metalness: 0 }),

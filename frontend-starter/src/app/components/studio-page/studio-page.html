@@ -25,13 +25,14 @@
         <span class="status-dot" aria-hidden="true"></span>
         @switch (studioProject.saveState()) {
           @case ('saving') { Sauvegarde en cours… }
-          @case ('dirty') { Modifications non sauvegardées }
-          @case ('error') { Échec de la sauvegarde }
+          @case ('dirty') { Modifications non sauvegardées{{ studioProject.autoSave() ? (studioProject.uploading() ? ' · envoi d’un fichier en cours' : ' · sauvegarde automatique dans un instant') : '' }} }
+          @case ('error') { Erreur : la sauvegarde a échoué }
           @case ('conflict') { Conflit : projet modifié ailleurs }
           @default { Sauvegardé · révision {{ project.revision }} }
         }
       </p>
-      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie, Piano Roll (notes et instruments), mixeur, instrumentale et prises vocales (envoyées dans vos fichiers audio). La version corrigée d'une prise n'est pas encore sauvegardée (M10).</p>
+      <label class="autosave"><input type="checkbox" [checked]="studioProject.autoSave()" (change)="onAutoSaveChange($event)" /> Sauvegarde automatique</label>
+      <p class="muted save-note">Sauvegardés : tempo, tonalité, batterie, Piano Roll (notes et instruments), clips, mixeur et Master, réglages et styles de correction vocale ; l'instrumentale, les prises et la version corrigée de la prise active sont envoyées dans vos fichiers audio (les originaux ne sont jamais modifiés).</p>
     } @else {
       <p class="eyebrow">STUDIO / SESSION DE DÉMONSTRATION</p>
       <h1>Session libre<span>.</span></h1>

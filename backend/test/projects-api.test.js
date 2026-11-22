@@ -132,7 +132,7 @@ test("création : propriétaire tiré du JWT, ownerId du corps ignoré", async (
   assert.equal(body.origin, "import");
   assert.equal(body.bpm, 140);
   assert.equal(body.revision, 0);
-  assert.equal(body.formatVersion, 1);
+  assert.equal(body.formatVersion, 2);
 });
 
 test("création : titre, parcours et BPM validés", async () => {
@@ -194,7 +194,7 @@ test("sauvegarde : liste blanche, révision incrémentée, validation du contenu
   assert.equal(saved.body.key.scale, "harmonicMinor");
   assert.equal(saved.body.tracks[0].volumeDb, -3);
   assert.equal(saved.body.ownerId, alice);
-  assert.equal(saved.body.formatVersion, 1);
+  assert.equal(saved.body.formatVersion, 2);
   assert.equal(saved.body.origin, "create");
 
   const invalid = await call(alice, "PUT", `/${project.id}`, { revision: 1, tracks: [{ ...drumsTrack, volumeDb: 40 }] });
@@ -214,7 +214,7 @@ test("sauvegarde concurrente : 409 avec la révision actuelle, rien n'est écras
 test("format inconnu : 422 et projet non réécrit", async () => {
   const { body: project } = await createProject(alice);
   // Simule un projet enregistré par une version future du studio.
-  store.get(project.id).set("formatVersion", 2, { strict: false });
+  store.get(project.id).set("formatVersion", 3, { strict: false });
   const response = await call(alice, "PUT", `/${project.id}`, { revision: 0, bpm: 100 });
   assert.equal(response.status, 422);
   assert.equal(store.get(project.id).bpm, 90);
@@ -319,4 +319,60 @@ async function uploadTrack(user, bytes, type, name) {
 test("M8 : une prise WebM (MediaRecorder) est acceptée par l'upload, un fichier texte est refusé", async () => {
   assert.equal(await uploadTrack(alice, Buffer.from("webm"), "audio/webm", "Prise 1.webm"), 201);
   assert.equal(await uploadTrack(alice, Buffer.from("texte"), "text/plain", "notes.txt"), 400);
+});
+
+const vocalSettings = {
+  root: 2,
+  scale: "harmonicMinor",
+  allowedPitchClasses: [1, 2, 4, 5, 7, 9, 10],
+  strength: 0.9,
+  retuneMs: 20,
+  toleranceCents: 0,
+  transposeSemitones: 0,
+  eq: { lowCutHz: 150, bodyDb: -3, presenceDb: 6, airDb: 7 },
+  fx: { reverbMix: 0.45, reverbSeconds: 3.2, delayMix: 0.38, delayMs: 330, feedback: 0.5 },
+};
+
+test("M10 : la correction vocale et la version corrigée de la prise sont sauvegardées et relues", async () => {
+  const { body: project } = await createProject(alice);
+  const [take, corrected] = [new mongoose.Types.ObjectId().toString(), new mongoose.Types.ObjectId().toString()];
+  audioFiles.set(take, alice);
+  audioFiles.set(corrected, alice);
+  const clip = { id: "take-1", startBeat: 0, durationBeats: 8, audioFileId: take, label: "Prise 1", correction: { audioFileId: corrected, styleLabel: "Raï", enabled: true } };
+  const vocal = { styleId: "rai", dose: 0.8, userStyleName: "Mon raï", userStyles: [{ name: "Mon raï", basedOn: "rai", settings: vocalSettings }] };
+
+  const saved = await call(alice, "PUT", `/${project.id}`, { revision: 0, tracks: [voiceTrack([clip], "take-1")], vocal });
+  assert.equal(saved.status, 200);
+  const reopened = (await call(alice, "GET", `/${project.id}`)).body;
+  const savedClip = reopened.tracks[0].clips[0];
+  assert.equal(String(savedClip.correction.audioFileId), corrected);
+  assert.equal(savedClip.correction.enabled, true);
+  assert.equal(String(savedClip.audioFileId), take, "l'original reste référencé");
+  assert.equal(reopened.vocal.styleId, "rai");
+  assert.equal(reopened.vocal.userStyles[0].settings.fx.reverbSeconds, 3.2);
+
+  const invalid = await call(alice, "PUT", `/${project.id}`, { revision: 1, vocal: { ...vocal, dose: 3 } });
+  assert.equal(invalid.status, 400);
+});
+
+test("M10 : refuse une version corrigée qui désigne le fichier d'un autre compte", async () => {
+  const { body: project } = await createProject(alice);
+  const take = new mongoose.Types.ObjectId().toString();
+  const bobFile = new mongoose.Types.ObjectId().toString();
+  audioFiles.set(take, alice);
+  audioFiles.set(bobFile, bob);
+  const clip = { id: "take-1", startBeat: 0, durationBeats: 8, audioFileId: take, correction: { audioFileId: bobFile, enabled: true } };
+  const response = await call(alice, "PUT", `/${project.id}`, { revision: 0, tracks: [voiceTrack([clip], "take-1")] });
+  assert.equal(response.status, 400);
+  assert.match(response.body.message, /Fichier audio/);
+});
+
+test("M10 : un projet au format v1 s'ouvre tel quel et passe en v2 à la sauvegarde", async () => {
+  const { body: project } = await createProject(alice);
+  store.get(project.id).set("formatVersion", 1);
+  assert.equal((await call(alice, "GET", `/${project.id}`)).body.formatVersion, 1);
+  const saved = await call(alice, "PUT", `/${project.id}`, { revision: 0, bpm: 100 });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.formatVersion, 2);
+  assert.equal(saved.body.bpm, 100);
 });

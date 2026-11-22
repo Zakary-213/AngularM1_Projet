@@ -58,7 +58,10 @@ import { MixLevels } from './mixer-graph';
 import { PatternTransport, TrackClip } from './pattern-transport';
 import { NOTE_NAMES, SCALE_LABELS, midiToFrequency } from './pitch/musical-scale';
 import { DrumSound, playDrumHit } from './drum-synth';
-import { ProjectKey } from './pitch/vocal-styles';
+import { ProjectKey, UserVocalStyle } from './pitch/vocal-styles';
+import { DEFAULT_VOICE_CORRECTION, VoiceCorrectionState } from './pitch/voice-correction-state';
+import { readStoredUserStyles } from './pitch/user-styles-storage';
+import { exportLength } from './song-length';
 import { DEFAULT_LOOP_BARS, LoopBars, MAX_SONG_BARS, clampSongStep, loopStepRange, validateLoopBars } from './timeline-position';
 import {
   DEFAULT_DRUM_CLIPS,
@@ -131,6 +134,8 @@ export interface VocalTake {
 
 /** Version corrigée de la prise, produite par l'onglet Correction vocale (l'original reste intact). */
 export interface CorrectedTake {
+  /** Prise d'origine (une correction n'appartient qu'à une prise). */
+  readonly takeId: string;
   readonly buffer: AudioBuffer;
   /** Style appliqué, pour l'affichage (« Trap », « Personnalisé (basé sur Raï) »…). */
   readonly styleLabel: string;
@@ -159,6 +164,10 @@ export interface ArrangementSnapshot {
 export interface ExportReport {
   readonly seconds: number;
   readonly peakDb: number;
+  /** Version corrigée de la voix utilisée dans le fichier. */
+  readonly correctedVoice: boolean;
+  /** Morceau plus long que la durée maximale d'export : la fin est coupée. */
+  readonly truncated: boolean;
 }
 
 /**
@@ -269,8 +278,16 @@ export class StudioSessionService implements OnDestroy {
   readonly correctedTake = signal<CorrectedTake | null>(null);
   /** Lire la version corrigée sur la piste Voix (écoute et export) au lieu de l'originale. */
   readonly useCorrectedTake = signal(false);
+  /** Version corrigée effectivement jouée sur la piste Voix (« correction de hauteur activée »). */
+  readonly correctionActive = computed(() => this.useCorrectedTake() && this.correctedTake()?.takeId === this.activeTakeId());
+  /** Réglages de l'onglet Correction vocale (style, dose, personnalisé), gardés d'un onglet à l'autre. */
+  readonly voiceCorrection = signal<VoiceCorrectionState>(DEFAULT_VOICE_CORRECTION);
+  /** Styles personnels : ceux du projet, ou ceux du navigateur dans la session libre. */
+  readonly userVocalStyles = signal<readonly UserVocalStyle[]>(readStoredUserStyles());
 
   readonly exporting = signal(false);
+  /** Part du rendu effectuée (0 à 1), ou `null` si le navigateur ne la fournit pas. */
+  readonly exportProgress = signal<number | null>(null);
   readonly exportError = signal<string | null>(null);
   readonly exportReport = signal<ExportReport | null>(null);
 
@@ -1124,34 +1141,64 @@ export class StudioSessionService implements OnDestroy {
     this.inputLevel.set(SILENT_LEVEL);
   }
 
-  /** Rendu hors temps réel du mix écouté (pistes non muettes) puis téléchargement en WAV. */
-  async exportWav(bars: number): Promise<void> {
+  /** Durée du morceau à exporter : tous les clips placés, durée réelle des fichiers et traîne des effets. */
+  readonly exportPlan = computed(() => {
+    const mixer = this.mixer();
+    return exportLength({
+      bpm: this.bpm(),
+      patternEndBar: Math.max(drumClipsEndBar(this.drumClips()), instrumentClipsEndBar(this.instrumentClips())),
+      audio: this.trackClips(true).map(({ clip }) => ({ startSeconds: clip.startSeconds, durationSeconds: clip.buffer.duration })),
+      effectsActive: Object.values(mixer).some(track => !track.muted && (track.reverb.enabled || track.delay.enabled)),
+    });
+  });
+
+  /**
+   * Rendu hors temps réel du morceau entier, tel qu'il est écouté (pistes non muettes,
+   * voix corrigée si elle est choisie, effets et Master), puis téléchargement en WAV.
+   */
+  async exportWav(fileTitle = 'zakat-record'): Promise<void> {
     if (this.exporting()) {
       return;
     }
-    this.exporting.set(true);
+    const plan = this.exportPlan();
     this.exportError.set(null);
     this.exportReport.set(null);
+    if (!plan.ok) {
+      this.exportError.set('Rien à exporter : placez un clip, une instrumentale ou une prise sur la timeline.');
+      return;
+    }
+    this.exporting.set(true);
+    // Sans suspension du rendu hors temps réel (Firefox), l'avancement reste inconnu (null).
+    this.exportProgress.set(typeof OfflineAudioContext.prototype.suspend === 'function' ? 0 : null);
+    const correctedVoice = this.correctionActive();
+    const started = performance.now();
     try {
-      const rendered = await renderMix({
-        drumsAt: step => this.drumsAt(step),
-        bpm: this.bpm(),
-        bars,
-        // L'export suit l'arrangement : l'écoute seule d'un pattern n'y figure pas.
-        notesAt: step => notesAtSongStep(this.instrumentClips(), this.melodicPatterns(), step),
-        clips: this.trackClips(true),
-        mixer: this.mixer(),
-        masterVolume: this.masterVolume(),
-      });
+      const rendered = await renderMix(
+        {
+          drumsAt: step => this.drumsAt(step),
+          bpm: this.bpm(),
+          durationSeconds: plan.seconds,
+          // L'export suit l'arrangement : l'écoute seule d'un pattern n'y figure pas.
+          notesAt: step => notesAtSongStep(this.instrumentClips(), this.melodicPatterns(), step),
+          clips: this.trackClips(true),
+          mixer: this.mixer(),
+          masterVolume: this.masterVolume(),
+        },
+        undefined,
+        fraction => this.exportProgress.set(fraction),
+      );
+      this.exportProgress.set(1);
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
       const wav = new Blob([encodeWav(channels, rendered.sampleRate)], { type: 'audio/wav' });
-      downloadBlob(wav, `zakat-record-${this.bpm()}bpm.wav`);
-      this.exportReport.set({ seconds: rendered.duration, peakDb: gainToDecibels(peakLevel(channels)) });
+      downloadBlob(wav, `${safeFileName(fileTitle)}-${this.bpm()}bpm.wav`);
+      this.exportReport.set({ seconds: rendered.duration, peakDb: gainToDecibels(peakLevel(channels)), correctedVoice, truncated: plan.truncated });
+      console.log('[studio] export WAV', { seconds: rendered.duration, renderMs: Math.round(performance.now() - started), correctedVoice });
     } catch (error) {
       console.error('[studio] export impossible', error);
-      this.exportError.set("L'export a échoué. Réessayez avec moins de mesures.");
+      this.exportError.set("L'export a échoué (mémoire insuffisante ou rendu interrompu). Réessayez ou raccourcissez le morceau.");
     } finally {
       this.exporting.set(false);
+      this.exportProgress.set(null);
     }
   }
 
@@ -1200,7 +1247,7 @@ export class StudioSessionService implements OnDestroy {
     }
     const take = this.take();
     if (includeTake && take) {
-      const corrected = this.useCorrectedTake() ? this.correctedTake() : null;
+      const corrected = this.correctionActive() ? this.correctedTake() : null;
       // Même position que l'original : la correction conserve la durée de la prise.
       clips.push({ track: 'voice', clip: { buffer: corrected?.buffer ?? take.buffer, startSeconds: take.startSeconds, gain: TAKE_GAIN } });
     }
@@ -1227,6 +1274,18 @@ export class StudioSessionService implements OnDestroy {
     this.animationFrame = requestAnimationFrame(frame);
   }
 
+}
+
+/** Nom de fichier sûr à partir d'un titre de projet (lettres sans accents, chiffres, tirets). */
+export function safeFileName(title: string): string {
+  const slug = title
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return slug || 'zakat-record';
 }
 
 export function downloadBlob(blob: Blob, fileName: string): void {

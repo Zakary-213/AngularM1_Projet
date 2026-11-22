@@ -40,7 +40,7 @@ const shade = <T extends Mesh | InstancedMesh>(mesh: T, cast = true): T => {
  * speakers, synthesizer, audio interface and headphones; wood slats, fabric
  * acoustic panels, gold records, a plant and warm, low-glare lighting.
  */
-export function createStudioSet(shadowMapSize: number): StudioSet {
+export function createStudioSet(shadowMapSize: number, compactScreen: boolean): StudioSet {
   const group = new Group();
 
   // Floor: dark oak planks and a rug.
@@ -120,7 +120,7 @@ export function createStudioSet(shadowMapSize: number): StudioSet {
   group.add(strip);
 
   const deskTop = DESK.height;
-  const computer = createComputer();
+  const computer = createComputer(compactScreen);
   computer.position.set(0, deskTop, DESK.z - 0.15);
   group.add(computer);
 

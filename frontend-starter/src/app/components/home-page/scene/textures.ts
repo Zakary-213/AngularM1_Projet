@@ -76,7 +76,7 @@ export function fabricTexture(base: [number, number, number]): Texture {
  * Music session shown on the computer screen: transport bar, tracks with
  * coloured clips and waveforms, playhead and mixer meters. Drawn once.
  */
-export function dawScreenTexture(): Texture {
+export function dawScreenTexture(compactScreen: boolean): Texture {
   const width = 1600;
   const height = 680;
   const [element, ctx] = canvas(width, height);
@@ -85,19 +85,21 @@ export function dawScreenTexture(): Texture {
   ctx.fillRect(0, 0, width, height);
 
   // Top bar: session name and transport.
+  const barTextY = compactScreen ? 49 : 36;
+  const transportCenter = compactScreen ? 1020 : width / 2;
   ctx.fillStyle = '#1b1b21';
-  ctx.fillRect(0, 0, width, 56);
+  ctx.fillRect(0, 0, width, compactScreen ? 68 : 56);
   ctx.fillStyle = '#f5a623';
-  ctx.font = '600 22px "DM Sans", sans-serif';
-  ctx.fillText('ZAKAT RECORD', 28, 36);
+  ctx.font = `600 ${compactScreen ? 54 : 22}px "DM Sans", sans-serif`;
+  ctx.fillText('ZAKAT RECORD', 28, barTextY);
   ctx.fillStyle = '#9a9aa4';
   ctx.font = '18px "JetBrains Mono", monospace';
-  ctx.fillText('Session 001 — Minuit sur la ville', 230, 36);
+  ctx.fillText('Session 001 — Minuit sur la ville', compactScreen ? 490 : 230, barTextY);
   ctx.fillStyle = '#e8e3d8';
-  ctx.fillText('92 BPM   La mineur   01:24:310', width - 420, 36);
-  for (const [x, symbol] of [[width / 2 - 60, '■'], [width / 2 - 20, '▶'], [width / 2 + 20, '●']] as const) {
+  ctx.fillText('92 BPM   La mineur   01:24:310', width - 420, barTextY);
+  for (const [x, symbol] of [[transportCenter - 60, '■'], [transportCenter - 20, '▶'], [transportCenter + 20, '●']] as const) {
     ctx.fillStyle = symbol === '●' ? '#e0574a' : '#e8e3d8';
-    ctx.fillText(symbol, x, 37);
+    ctx.fillText(symbol, x, barTextY + 1);
   }
 
   // Track headers and lanes.

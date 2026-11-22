@@ -150,6 +150,7 @@
 .hero-stage {
   --u: min(calc(100vw / 1600), calc(100svh / 900));
   --cream: #f5efe2;
+  --hero-header-height: 88px;
   height: 420svh;
   position: relative;
   background: #050505;
@@ -157,8 +158,8 @@
 
 .hero-sticky {
   position: sticky;
-  top: 88px;
-  height: calc(100svh - 88px);
+  top: var(--hero-header-height);
+  height: calc(100dvh - var(--hero-header-height));
   min-height: 520px;
   overflow: hidden;
   color: var(--cream);
@@ -357,11 +358,50 @@
   .step-caption { left: 20px; right: 20px; bottom: 96px; }
   .step-caption h2 { font-size: clamp(52px, 16vw, 80px); }
   .step-caption > p:not(.step-number) { font-size: 15px; }
-  .step-nav { right: 12px; }
-  .step-nav .label { display: none; }
+  .step-caption h2, .step-caption > p:not(.step-number) {
+    text-shadow: 0 1px 4px #000, 0 2px 12px #000;
+  }
+  .step-number {
+    font: 600 13px/1.4 'DM Sans', sans-serif;
+    letter-spacing: .12em;
+    text-shadow: 0 1px 2px #000, 1px 0 2px #000, -1px 0 2px #000, 0 -1px 2px #000, 0 0 7px #000;
+  }
+  .step-number span { color: var(--cream); }
+  .step-nav {
+    inset: 12px 12px auto;
+    transform: none;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .step-nav button {
+    justify-content: center;
+    min-height: 44px;
+    padding: 6px;
+    border: 1px solid #f5efe273;
+    background: #15120f;
+    color: var(--cream);
+    font: 600 12px/1.2 'DM Sans', sans-serif;
+    letter-spacing: normal;
+    text-transform: none;
+  }
+  .step-nav .label { opacity: 1; transform: none; }
+  .step-nav .dot { display: none; }
+  .step-nav button.active { background: var(--accent); border-color: var(--accent); color: #15120f; }
   .hero-corner { left: 20px; right: 20px; bottom: 30px; justify-content: center; font-size: 11px; }
 }
 
 @media (max-width: 760px) {
-  .hero-sticky { top: 74px; height: calc(100svh - 74px); }
+  .hero-stage { --hero-header-height: 74px; }
+}
+
+@media (max-height: 600px) {
+  .hero-sticky { min-height: 0; }
+  .hero-center h1 { font-size: clamp(32px, 10dvh, 68px); }
+  .hero-caption { margin-top: 12px; }
+  .step-caption { bottom: 56px; }
+  .step-caption h2 { font-size: clamp(34px, 9dvh, 54px); }
+  .step-number { margin-bottom: 6px; }
+  .step-caption > p:not(.step-number) { margin-top: 6px; }
+  .step-cta { margin-top: 10px; }
+  .hero-corner { bottom: 4px; }
 }

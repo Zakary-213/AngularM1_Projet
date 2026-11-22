@@ -1,4 +1,4 @@
-import { Component, DestroyRef, ElementRef, afterNextRender, inject, signal, viewChild, viewChildren } from '@angular/core';
+import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, signal, viewChild, viewChildren } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { DEMO_PROJECTS } from '../../shared/models/demo-projects';
 import { AmbientSoundService } from '../../shared/services/ambient-sound.service';
@@ -33,6 +33,10 @@ export class HomePageComponent {
   readonly sceneError = signal<string | null>(null);
   readonly activeStep = signal(-1);
   readonly steps = JOURNEY_STEPS;
+  readonly stepAnnouncement = computed(() => {
+    const step = this.steps[this.activeStep()];
+    return step ? `${step.title}. ${step.text}` : '';
+  });
   readonly projects = DEMO_PROJECTS;
 
   readonly workflows = [
@@ -47,7 +51,7 @@ export class HomePageComponent {
   private readonly intro = viewChild.required<ElementRef<HTMLElement>>('intro');
   private readonly progressBar = viewChild.required<ElementRef<HTMLElement>>('progressBar');
   private readonly captions = viewChildren<ElementRef<HTMLElement>>('caption');
-  private readonly reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  private readonly motionPreference = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null;
   private scene: CinematicScene | null = null;
   private destroyed = false;
 
@@ -55,11 +59,16 @@ export class HomePageComponent {
     inject(DestroyRef).onDestroy(() => {
       this.destroyed = true;
       window.removeEventListener('scroll', this.updateScroll);
+      window.removeEventListener('resize', this.updateScroll);
       this.scene?.dispose();
       this.scene = null;
     });
     // Browser only, after the hero exists. three.js is loaded on demand so it stays out of the initial bundle.
-    afterNextRender(() => void this.startScene());
+    afterNextRender(() => {
+      window.addEventListener('scroll', this.updateScroll, { passive: true });
+      window.addEventListener('resize', this.updateScroll);
+      void this.startScene();
+    });
   }
 
   setMuffled(active: boolean): void {
@@ -79,7 +88,7 @@ export class HomePageComponent {
     const range = stage.offsetHeight - window.innerHeight;
     const step = this.steps[index];
     const top = stage.offsetTop + range * Math.min(1, (step.from + step.to) / 2);
-    window.scrollTo({ top, behavior: this.reducedMotion ? 'auto' : 'smooth' });
+    window.scrollTo({ top, behavior: this.motionPreference?.matches ? 'auto' : 'smooth' });
   }
 
   private async startScene(): Promise<void> {
@@ -87,12 +96,11 @@ export class HomePageComponent {
       const { CinematicScene } = await import('./scene/cinematic-scene');
       if (this.destroyed) return;
       this.scene = new CinematicScene(this.canvasHost().nativeElement, {
-        reducedMotion: this.reducedMotion,
+        reducedMotion: () => this.motionPreference?.matches ?? false,
         onFirstFrame: () => this.loaded.set(true),
         onIntroDone: () => this.uiVisible.set(true),
         onFrame: (progress, fade) => this.renderOverlay(progress, fade),
       });
-      window.addEventListener('scroll', this.updateScroll, { passive: true });
       this.updateScroll();
     } catch (error: unknown) {
       // WebGL unavailable or chunk failed: keep the page usable with the static background.
@@ -100,15 +108,16 @@ export class HomePageComponent {
       this.sceneError.set('L’animation 3D n’est pas disponible sur cet appareil.');
       this.loaded.set(true);
       this.uiVisible.set(true);
-      this.fade().nativeElement.style.opacity = '0';
+      this.updateScroll();
     }
   }
 
   /** Per-frame overlay update, written straight to the DOM to avoid a change detection per frame. */
   private renderOverlay(progress: number, fade: number): void {
+    const reduceMotion = this.motionPreference?.matches ?? false;
     this.fade().nativeElement.style.opacity = fade.toFixed(3);
 
-    const introOpacity = 1 - ramp(progress, 0.03, 0.1);
+    const introOpacity = reduceMotion ? Number(progress < 0.1) : 1 - ramp(progress, 0.03, 0.1);
     const introElement = this.intro().nativeElement;
     introElement.style.opacity = introOpacity.toFixed(3);
     introElement.style.visibility = introOpacity < 0.01 ? 'hidden' : 'visible';
@@ -116,11 +125,13 @@ export class HomePageComponent {
     let active = -1;
     this.captions().forEach((caption, index) => {
       const step = this.steps[index];
-      const opacity = ramp(progress, step.from - CAPTION_FADE, step.from) * (1 - ramp(progress, step.to, step.to + CAPTION_FADE));
+      const opacity = reduceMotion
+        ? Number(progress >= step.from && progress <= step.to)
+        : ramp(progress, step.from - CAPTION_FADE, step.from) * (1 - ramp(progress, step.to, step.to + CAPTION_FADE));
       if (opacity > 0.5) active = index;
       const element = caption.nativeElement;
       element.style.opacity = opacity.toFixed(3);
-      element.style.transform = `translateY(${((1 - opacity) * 18).toFixed(1)}px)`;
+      element.style.transform = reduceMotion ? 'none' : `translateY(${((1 - opacity) * 18).toFixed(1)}px)`;
       element.style.visibility = opacity < 0.01 ? 'hidden' : 'visible';
     });
     if (active !== this.activeStep()) this.activeStep.set(active);
@@ -130,6 +141,11 @@ export class HomePageComponent {
   private readonly updateScroll = (): void => {
     const bounds = this.stage().nativeElement.getBoundingClientRect();
     const range = bounds.height - window.innerHeight;
-    this.scene?.setScrollProgress(range > 0 ? -bounds.top / range : 0);
+    const progress = range > 0 ? Math.min(1, Math.max(0, -bounds.top / range)) : 0;
+    if (this.scene) {
+      this.scene.setScrollProgress(progress);
+    } else if (this.loaded()) {
+      this.renderOverlay(progress, 0);
+    }
   };
 }

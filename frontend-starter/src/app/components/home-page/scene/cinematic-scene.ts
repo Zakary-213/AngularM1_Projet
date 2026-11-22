@@ -11,12 +11,20 @@ const INTRO_SECONDS = 2;
 /** The camera reaches the screen at this scroll progress, then holds the shot. */
 const PATH_END = 0.9;
 const MOBILE_BREAKPOINT = 820;
+/** Portrait views widen the lens while keeping the same camera path and approach. */
+const PORTRAIT_FRAMING_ASPECT = 0.85;
+const PORTRAIT_CLOSE_UP_ASPECT = 0.98;
+const MIN_PORTRAIT_ZOOM = 0.5;
+/** Show both edges of the monitor as the session caption comes into view. */
+const SESSION_FRAMING_ASPECT = 1.74;
+const SESSION_REFRAME_START = 0.73;
+const SESSION_REFRAME_END = 0.86;
 /** Average frame time (seconds) above which the resolution is lowered to keep the page smooth. */
 const SLOW_FRAME_SECONDS = 1 / 28;
 const QUALITY_SAMPLE_FRAMES = 90;
 
 export interface CinematicSceneOptions {
-  reducedMotion: boolean;
+  reducedMotion: () => boolean;
   onFirstFrame: () => void;
   onIntroDone: () => void;
   /** Called every frame with the smoothed progress (0 → 1) and the black overlay opacity. */
@@ -54,6 +62,7 @@ export class CinematicScene {
   private introSent = false;
   private qualitySamples = 0;
   private qualityTotal = 0;
+  private mobileViewport = false;
 
   constructor(private readonly container: HTMLElement, private readonly options: CinematicSceneOptions) {
     const mobile = container.clientWidth < MOBILE_BREAKPOINT;
@@ -73,7 +82,7 @@ export class CinematicScene {
     room.dispose();
     pmrem.dispose();
 
-    this.set = createStudioSet(mobile ? 1024 : 1536);
+    this.set = createStudioSet(mobile ? 1024 : 1536, mobile);
     this.scene.add(this.set.group, this.camera);
     this.scene.environment = this.environment;
     this.scene.environmentIntensity = this.set.environmentIntensity;
@@ -152,6 +161,7 @@ export class CinematicScene {
   private resize(): void {
     const width = Math.max(1, this.container.clientWidth);
     const height = Math.max(1, this.container.clientHeight);
+    this.mobileViewport = width < MOBILE_BREAKPOINT;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height, false);
@@ -164,9 +174,12 @@ export class CinematicScene {
     const delta = Math.min(0.05, (now - this.lastTime) / 1000);
     this.lastTime = now;
     const time = (now - this.startTime) / 1000;
-    const motion = this.options.reducedMotion ? 0 : 1;
+    const reducedMotion = this.options.reducedMotion();
+    const motion = reducedMotion ? 0 : 1;
 
-    this.smoothProgress += (this.scrollProgress - this.smoothProgress) * (1 - Math.exp(-delta * 4));
+    this.smoothProgress = reducedMotion
+      ? this.scrollProgress
+      : this.smoothProgress + (this.scrollProgress - this.smoothProgress) * (1 - Math.exp(-delta * 4));
     this.smoothPointer.lerp(this.pointer, 1 - Math.exp(-delta * 3));
 
     // Camera along the paths, with a slow breathing and a light pointer parallax
@@ -180,10 +193,18 @@ export class CinematicScene {
     this.camera.position.copy(this.position);
     this.camera.lookAt(this.target);
     this.camera.fov = this.set.fov[0] + (this.set.fov[1] - this.set.fov[0]) * along;
+    const framingAspect = PORTRAIT_FRAMING_ASPECT + (PORTRAIT_CLOSE_UP_ASPECT - PORTRAIT_FRAMING_ASPECT) * along;
+    const closeUpZoom = Math.min(1, Math.max(MIN_PORTRAIT_ZOOM, this.camera.aspect / framingAspect));
+    this.camera.zoom = closeUpZoom;
+    if (this.mobileViewport && this.camera.aspect < 1) {
+      const reframe = clamp01((this.smoothProgress - SESSION_REFRAME_START) / (SESSION_REFRAME_END - SESSION_REFRAME_START));
+      const monitorZoom = this.camera.aspect / SESSION_FRAMING_ASPECT;
+      this.camera.zoom += (monitorZoom - closeUpZoom) * smoothstep(reframe);
+    }
     this.camera.updateProjectionMatrix();
     this.set.animate(motion ? time : 0);
 
-    const intro = this.options.reducedMotion ? 1 : clamp01(time / INTRO_SECONDS);
+    const intro = reducedMotion ? 1 : clamp01(time / INTRO_SECONDS);
     const fade = 1 - smoothstep(intro);
 
     this.composer.render(delta);
@@ -195,7 +216,7 @@ export class CinematicScene {
       this.options.onFirstFrame();
     }
     // Wall-clock check: throttled frames must not delay the interface.
-    if (!this.introSent && (this.options.reducedMotion || time >= INTRO_SECONDS * 0.6)) {
+    if (!this.introSent && (reducedMotion || time >= INTRO_SECONDS * 0.6)) {
       this.introSent = true;
       this.options.onIntroDone();
     }

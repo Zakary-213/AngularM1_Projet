@@ -1,0 +1,73 @@
+@if (studioProject.loadState() === 'loaded' && studioProject.project(); as project) {
+  <dl class="project-context" aria-label="Réglages musicaux du projet">
+    <div><dt>Tempo</dt><dd>{{ project.bpm }} BPM</dd></div>
+    <div><dt>Signature</dt><dd>{{ project.timeSignature?.beatsPerBar ?? beatsPerBar }}/{{ project.timeSignature?.beatUnit ?? 4 }}</dd></div>
+    <div><dt>Tonalité</dt><dd>{{ keyLabel(project.key) }}</dd></div>
+  </dl>
+
+  <form [formGroup]="form" (ngSubmit)="generate()" [attr.aria-busy]="generating()">
+    <label for="lyrics-theme">Thème</label>
+    <input id="lyrics-theme" type="text" formControlName="theme" [attr.maxlength]="maxThemeLength" required
+      [attr.aria-invalid]="form.controls.theme.touched && form.controls.theme.invalid"
+      [attr.aria-describedby]="form.controls.theme.touched && form.controls.theme.invalid ? 'lyrics-theme-error' : null" />
+    @if (form.controls.theme.touched && form.controls.theme.invalid) {
+      <p id="lyrics-theme-error" class="field-error">Saisissez un thème de 1 à {{ maxThemeLength }} caractères.</p>
+    }
+
+    <div class="lyrics-fields">
+      @for (field of selectFields; track field.name) {
+        <div>
+          <label [for]="'lyrics-' + field.name">{{ field.label }}</label>
+          <select [id]="'lyrics-' + field.name" [formControlName]="field.name">
+            @for (option of field.options; track option[0]) {
+              <option [ngValue]="option[0]">{{ option[1] }}</option>
+            }
+          </select>
+        </div>
+      }
+    </div>
+
+    @if (studioProject.conflict()) {
+      <p role="status">Rechargez le projet pour utiliser ses réglages enregistrés.</p>
+    } @else if (settingsChanged()) {
+      <p role="status">Sauvegardez le projet pour générer avec le tempo et la tonalité actuels.</p>
+    }
+
+    <button type="submit" class="button primary" [disabled]="generationBlocked()">
+      {{ generating() ? 'Génération en cours…' : 'Générer les paroles' }}
+    </button>
+  </form>
+
+  @if (error(); as message) {
+    <p class="field-error" role="alert">{{ message }}</p>
+  }
+
+  @if (proposal(); as lyrics) {
+    <section class="lyrics-proposal" aria-labelledby="lyrics-proposal-title">
+      <h2 id="lyrics-proposal-title">Proposition générée par IA</h2>
+      <p role="status">{{ lyrics.lines.length }} mesures à {{ lyrics.bpm }} BPM. Cible de {{ lyrics.targetSyllables }} syllabes par mesure.</p>
+      <ol>
+        @for (line of displayedLines(); track line.measure) {
+          <li>
+            <span class="measure-label">Mesure {{ line.measure }}</span>
+            <span class="lyric-text">@for (segment of line.segments; track $index) {
+              @if (segment.rhyme) {<mark>{{ segment.text }}</mark>} @else {<ng-container>{{ segment.text }}</ng-container>}
+            }</span>
+            <span class="lyric-facts">
+              {{ line.syllables }} syllabes estimées
+              @if (line.rhyme.group; as group) { · Groupe {{ group }} }
+              · {{ line.rhyme.matches ? 'Rime repérée' : 'Rime à vérifier' }}
+            </span>
+          </li>
+        }
+      </ol>
+    </section>
+  }
+} @else if (!projectId()) {
+  <p>Ouvrez un projet enregistré pour générer des paroles.</p>
+  <a class="button" routerLink="/projects">Mes projets</a>
+} @else if (studioProject.loadState() === 'loading') {
+  <p role="status">Chargement du projet…</p>
+} @else {
+  <p>La génération sera disponible après le chargement du projet.</p>
+}

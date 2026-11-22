@@ -17,6 +17,11 @@ export interface ProjectKeySignature {
   readonly scale: ScaleName;
 }
 
+export interface ProjectTimeSignature {
+  readonly beatsPerBar: number;
+  readonly beatUnit: number;
+}
+
 export interface ProjectClip {
   readonly id: string;
   /** Position et durée en temps (beats) : l'arrangement suit les changements de BPM. */
@@ -138,6 +143,7 @@ export interface MusicalProject extends ProjectContent {
   readonly ownerId: string;
   readonly formatVersion: number;
   readonly title: string;
+  readonly timeSignature?: ProjectTimeSignature;
   readonly origin: ProjectOrigin;
   readonly revision: number;
   readonly createdAt: string;

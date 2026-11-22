@@ -1,0 +1,49 @@
+:host { display: block; min-width: 0; }
+
+.project-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin: 0 0 18px;
+}
+.project-context dt, .measure-label, .lyric-facts { color: var(--muted, #aaa); font-size: 0.875rem; }
+.project-context dd { margin: 4px 0 0; }
+
+label { display: block; margin: 0 0 6px; }
+input, select {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #555;
+  border-radius: 5px;
+  background: #1c1c1c;
+  color: inherit;
+  font: inherit;
+}
+input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 3px solid #8bc8dd;
+  outline-offset: 2px;
+}
+.lyrics-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.lyrics-proposal { margin-top: 24px; }
+.lyrics-proposal h2 { font-size: 1rem; }
+.lyrics-proposal ol { list-style: none; margin: 0; padding: 0; }
+.lyrics-proposal li {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr) minmax(8rem, 12rem);
+  gap: 8px 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line, #444);
+}
+.lyric-text { overflow-wrap: anywhere; }
+mark { background: #f5a623; color: #171310; border-radius: 2px; padding: 0 2px; }
+
+@media (max-width: 650px) {
+  .lyrics-proposal li { grid-template-columns: 1fr; gap: 4px; }
+}

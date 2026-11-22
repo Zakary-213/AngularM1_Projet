@@ -275,7 +275,16 @@
     }
     @case ('Mixeur') { <app-mixer-panel /> }
     @case ('Export') { <app-export-panel /> }
-    @default { <app-drum-rack-panel /> }
+    @case ('Batterie') { <app-drum-rack-panel /> }
+  }
+  @defer (when activeTab() === 'Paroles') {
+    <div class="editor-body" [hidden]="activeTab() !== 'Paroles'">
+      <app-lyrics-panel [projectId]="projectId" />
+    </div>
+  } @loading {
+    @if (activeTab() === 'Paroles') {
+      <p class="editor-body muted" role="status">Chargement du panneau Paroles…</p>
+    }
   }
 </section>
 }

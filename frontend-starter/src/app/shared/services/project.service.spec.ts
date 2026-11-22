@@ -39,6 +39,15 @@ describe('ProjectService — contrat HTTP', () => {
     request.flush({});
   });
 
+  it('envoie les réglages de paroles sur le projet identifié', () => {
+    const options = { theme: 'La nuit en ville', mood: 'dark', language: 'fr', structure: 'verse', measures: 8,
+      flow: 'standard', rhymeScheme: 'ABAB', languageLevel: 'standard' } as const;
+    service.generateLyrics('p/1', options).subscribe();
+    const request = http.expectOne({ method: 'POST', url: '/api/projects/p%2F1/lyrics/generate' });
+    expect(request.request.body).toEqual(options);
+    request.flush({});
+  });
+
   it('renomme, ouvre et supprime en encodant l’identifiant', () => {
     service.rename('a/b', 'Nouveau').subscribe();
     const rename = http.expectOne('/api/projects/a%2Fb');

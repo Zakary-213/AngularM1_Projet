@@ -397,6 +397,12 @@ La route protégée `POST /api/projects/:id/lyrics/generate` utilise la clé Gro
 
 **Confidentialité des journaux.** Pour la génération de paroles, les logs HTTP utilisent la route type `/api/projects/:id/lyrics/generate` sans paramètres d’URL. Les erreurs ne journalisent pas les corps et les détails privés. Le test HTTP vérifie qu’un thème, des paroles, une clé factice et des détails d’erreur injectés restent hors des journaux lors d’une génération, d’un JSON invalide, d’un corps trop volumineux et de pannes. Le contrat d’API décrit les réglages, les réponses et les erreurs. `npm test` a réussi (61 tests).
 
+### M12 (#31) · Paramètres et aperçu des paroles dans le studio
+
+L’onglet Paroles est chargé à la demande dans le studio. Il permet de choisir le thème, l’ambiance, la langue, la structure, le nombre de mesures, la densité du flow, le schéma de rimes et le registre. Le panneau affiche le BPM, la signature et la tonalité du projet enregistré. Une modification du BPM ou de la tonalité doit être sauvegardée avant de générer. La proposition affiche les paroles par mesure avec les syllabes estimées, les indications de rime et la mention « Proposition générée par IA ».
+
+Les 290 tests Angular et le build de production ont réussi. Dans Edge, un appel réel à Groq sur un projet de test a renvoyé huit mesures. Le formulaire et les paroles ont été vérifiés à 360, 768 et 1280 px. La proposition reste visible après un changement d’onglet ou une erreur de quota simulée.
+
 ### Prototype de génération de paroles (#32)
 
 L’essai compare [Gemini 3.1 Flash-Lite](https://aistudio.google.com/docs/models/gemini-3.1-flash-lite) et [GPT-OSS 20B sur Groq](https://console.groq.com/docs/model/openai/gpt-oss-20b) avec le même sujet fictif, « la nuit en ville ». Chaque commande fait deux demandes au fournisseur choisi, à 90 et à 140 BPM, avec 8 mesures, une cible fixe de 10 syllabes par mesure et des rimes par paires.

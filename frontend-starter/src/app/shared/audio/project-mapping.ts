@@ -6,7 +6,7 @@ import { BEATS_PER_BAR, DEFAULT_BPM, STEPS_PER_BAR, clampBpm } from './music-tim
 import { SCALE_NAMES, ScaleName } from './pitch/musical-scale';
 import { ProjectKey, UserVocalStyle } from './pitch/vocal-styles';
 import { VoiceCorrectionState, readProjectVocal, toProjectVocal } from './pitch/voice-correction-state';
-import { STUDIO_TRACKS } from './studio-tracks';
+import { DEFAULT_VOCAL_TRACK, VocalTrack, studioTracks } from './studio-tracks';
 import { DEFAULT_DRUM_CLIPS, DrumClip } from './arrangement';
 import {
   DEFAULT_INSTRUMENT_PARAMS,
@@ -22,7 +22,7 @@ import {
   createDefaultMelodicPatterns,
 } from './melodic-pattern';
 import { InstrumentClips } from './note-scheduling';
-import { MixerState, TRACK_IDS, TrackId, TrackMix, clampMasterVolume, createDefaultMixer, sanitizeTrackMix } from './track-mix';
+import { MixerState, TrackId, TrackMix, VocalTrackId, clampMasterVolume, isVocalTrackId, sanitizeTrackMix } from './track-mix';
 import { MusicalProject, ProjectClip, ProjectContent, ProjectPattern, ProjectTrackType } from '../models/musical-project.model';
 
 /**
@@ -47,6 +47,7 @@ export interface InstrumentalRef {
 /** Prise vocale envoyée au serveur, telle qu'elle est référencée dans le projet. */
 export interface TakeRef {
   readonly id: string;
+  readonly trackId?: VocalTrackId;
   readonly fileId: string;
   readonly label: string;
   /** Position du début du fichier dans le morceau, en secondes (négative si la prise commence avant). */
@@ -64,6 +65,9 @@ export interface TakeCorrectionRef {
 }
 
 export interface StudioState {
+  readonly vocalTracks?: readonly VocalTrack[];
+  readonly armedVocalTrackId?: VocalTrackId;
+  readonly corrections?: readonly TakeCorrectionRef[];
   readonly lyrics?: ProjectLyrics;
   readonly bpm: number;
   readonly key: ProjectKey;
@@ -122,7 +126,7 @@ export function secondsToBeats(seconds: number, bpm: number): number {
 const DEFAULT_KEY: ProjectKey = { root: 9, scale: 'minor' };
 const DRUMS_CLIP_ID = 'clip-drums';
 const INSTRUMENTAL_CLIP_ID = 'clip-instrumental';
-const TRACK_TYPES: Readonly<Record<TrackId, ProjectTrackType>> = { drums: 'drum', melody: 'instrument', bass: 'instrument', instrumental: 'audio', voice: 'vocal' };
+const TRACK_TYPES: Readonly<Record<'drums' | 'melody' | 'bass' | 'instrumental', ProjectTrackType>> = { drums: 'drum', melody: 'instrument', bass: 'instrument', instrumental: 'audio' };
 
 function patternClipsToProject(clips: readonly DrumClip[]): ProjectClip[] {
   return clips.map(clip => ({ id: clip.id, startBeat: clip.startBar * BEATS_PER_BAR, durationBeats: clip.lengthBars * BEATS_PER_BAR, patternId: clip.patternId }));
@@ -142,7 +146,10 @@ function melodicPatternToProject(pattern: MelodicPattern): ProjectPattern {
 }
 
 export function toProjectContent(state: StudioState): ProjectContent {
+  const vocalTracks = state.vocalTracks ?? [{ ...DEFAULT_VOCAL_TRACK, activeTakeId: state.activeTakeId, settings: state.vocal }];
+  const corrections = new Map((state.corrections ?? (state.correction ? [state.correction] : [])).map(correction => [correction.takeId, correction]));
   return {
+    armedVocalTrackId: state.armedVocalTrackId ?? vocalTracks[0].id,
     ...(state.lyrics ? { lyrics: state.lyrics } : {}),
     bpm: state.bpm,
     key: { root: state.key.root, scale: state.key.scale },
@@ -156,13 +163,15 @@ export function toProjectContent(state: StudioState): ProjectContent {
       })),
       ...state.melodicPatterns.map(melodicPatternToProject),
     ],
-    tracks: STUDIO_TRACKS.map(info => {
+    tracks: studioTracks(vocalTracks).map(info => {
       const mix = state.mixer[info.id];
       const instrumental = info.id === 'instrumental' ? state.instrumental : null;
+      const vocalTrack = vocalTracks.find(track => track.id === info.id);
+      const takes = vocalTrack ? state.takes.filter(take => (take.trackId ?? 'voice') === vocalTrack.id) : [];
       return {
         id: info.id,
         name: info.name,
-        type: TRACK_TYPES[info.id],
+        type: isVocalTrackId(info.id) ? 'vocal' : TRACK_TYPES[info.id],
         color: info.color,
         volumeDb: mix.volumeDb,
         mute: mix.muted,
@@ -170,7 +179,10 @@ export function toProjectContent(state: StudioState): ProjectContent {
         pan: mix.pan,
         eq: { ...mix.eq },
         fx: { reverb: { ...mix.reverb }, delay: { ...mix.delay } },
-        ...(info.id === 'voice' && state.activeTakeId && state.takes.some(take => take.id === state.activeTakeId) ? { activeClipId: state.activeTakeId } : {}),
+        ...(vocalTrack ? {
+          vocal: toProjectVocal(vocalTrack.settings, state.userStyles),
+          ...(takes.some(take => take.id === vocalTrack.activeTakeId) ? { activeClipId: vocalTrack.activeTakeId! } : {}),
+        } : {}),
         // Le pattern d'une mesure joue en boucle sur la batterie ; l'instrumentale démarre au début du morceau.
         clips:
           info.id === 'drums'
@@ -179,24 +191,25 @@ export function toProjectContent(state: StudioState): ProjectContent {
               ? patternClipsToProject(state.instrumentClips[info.id])
               : instrumental
               ? [{ id: INSTRUMENTAL_CLIP_ID, startBeat: state.instrumentalStartBeat, durationBeats: instrumental.durationBeats, offsetSeconds: 0, audioFileId: instrumental.fileId, label: instrumental.label.slice(0, CLIP_LABEL_MAX_LENGTH) }]
-              : info.id === 'voice'
-                ? state.takes.map(take => ({
+              : takes.map(take => {
+                const correction = corrections.get(take.id);
+                return {
                     id: take.id,
                     ...takeClipPosition(take.startSeconds, state.bpm),
                     durationBeats: secondsToBeats(take.durationSeconds, state.bpm),
                     audioFileId: take.fileId,
                     label: take.label.slice(0, CLIP_LABEL_MAX_LENGTH),
-                    ...(state.correction?.takeId === take.id
+                    ...(correction
                       ? {
                           correction: {
-                            audioFileId: state.correction.fileId,
-                            styleLabel: state.correction.styleLabel.slice(0, STYLE_LABEL_MAX_LENGTH),
-                            enabled: state.correction.enabled,
+                            audioFileId: correction.fileId,
+                            styleLabel: correction.styleLabel.slice(0, STYLE_LABEL_MAX_LENGTH),
+                            enabled: correction.enabled,
                           },
                         }
                       : {}),
-                  }))
-                : [],
+                };
+              }),
       };
     }),
     master: { volume: state.masterVolume },
@@ -293,21 +306,20 @@ function readInstrumentClips(project: MusicalProject, patterns: readonly Melodic
 }
 
 /** Réglages du mixeur ; un projet antérieur à la M7 (sans pan, égaliseur ni effets) reste neutre sur ces réglages. */
-function readMixer(project: MusicalProject): MixerState {
-  const mixer: Record<TrackId, TrackMix> = { ...createDefaultMixer() };
-  for (const id of TRACK_IDS) {
-    const track = project.tracks?.find(candidate => candidate.id === id);
-    if (track) {
-      mixer[id] = sanitizeTrackMix({
-        volumeDb: track.volumeDb,
-        muted: track.mute,
-        solo: track.solo,
-        pan: track.pan,
-        eq: track.eq,
-        reverb: track.fx?.reverb,
-        delay: track.fx?.delay,
-      });
-    }
+function readMixer(project: MusicalProject, voices: readonly VocalTrack[], sourceIds: ReadonlyMap<VocalTrackId, string>): MixerState {
+  const mixer = {} as Record<TrackId, TrackMix>;
+  for (const { id } of studioTracks(voices)) {
+    const sourceId = isVocalTrackId(id) ? sourceIds.get(id) ?? id : id;
+    const track = project.tracks?.find(candidate => candidate.id === sourceId);
+    mixer[id] = sanitizeTrackMix({
+      volumeDb: track?.volumeDb,
+      muted: track?.mute,
+      solo: track?.solo,
+      pan: track?.pan,
+      eq: track?.eq,
+      reverb: track?.fx?.reverb,
+      delay: track?.fx?.delay,
+    });
   }
   return mixer;
 }
@@ -348,30 +360,26 @@ function readInstrumental(project: MusicalProject): { ref: InstrumentalRef | nul
   return { ref, startBeat: Math.max(0, Math.round(clip?.startBeat ?? 0)) };
 }
 
-function readTakes(project: MusicalProject, bpm: number): { takes: TakeRef[]; activeTakeId: string | null } {
-  const track = project.tracks?.find(candidate => candidate.id === 'voice');
-  const takes = (track?.clips ?? [])
+function readTakes(clips: readonly ProjectClip[], trackId: VocalTrackId, bpm: number): TakeRef[] {
+  return clips
     .filter(clip => typeof clip.audioFileId === 'string' && clip.audioFileId.length > 0)
     .map(clip => ({
       id: clip.id,
+      ...(trackId === 'voice' ? {} : { trackId }),
       fileId: clip.audioFileId!,
       label: clip.label || 'Prise',
       startSeconds: takeStartFromClip(clip.startBeat, clip.offsetSeconds ?? 0, bpm),
       durationSeconds: (Math.max(MIN_CLIP_BEATS, clip.durationBeats) * 60) / bpm,
     }));
-  const activeTakeId = takes.some(take => take.id === track?.activeClipId) ? track!.activeClipId! : (takes.at(-1)?.id ?? null);
-  return { takes, activeTakeId };
 }
 
-/** Version corrigée de la prise active ; celle d'une autre prise n'est pas reprise (le studio n'en joue qu'une). */
-function readCorrection(project: MusicalProject, activeTakeId: string | null): TakeCorrectionRef | null {
-  const clip = project.tracks?.find(candidate => candidate.id === 'voice')?.clips?.find(candidate => candidate.id === activeTakeId);
-  const correction = clip?.correction;
-  if (!activeTakeId || !correction || typeof correction.audioFileId !== 'string' || !correction.audioFileId) {
+function readCorrection(clip: ProjectClip): TakeCorrectionRef | null {
+  const correction = clip.correction;
+  if (!correction || typeof correction.audioFileId !== 'string' || !correction.audioFileId) {
     return null;
   }
   return {
-    takeId: activeTakeId,
+    takeId: clip.id,
     fileId: correction.audioFileId,
     styleLabel: typeof correction.styleLabel === 'string' ? correction.styleLabel.slice(0, STYLE_LABEL_MAX_LENGTH) : '',
     enabled: correction.enabled === true,
@@ -381,27 +389,59 @@ function readCorrection(project: MusicalProject, activeTakeId: string | null): T
 /** État du studio à partir d'un projet chargé ; les valeurs absentes ou invalides reprennent les défauts. */
 export function fromProject(project: MusicalProject): StudioState {
   const bpm = Number.isFinite(project.bpm) ? clampBpm(project.bpm) : DEFAULT_BPM;
-  const { takes, activeTakeId } = readTakes(project, bpm);
+  const vocalSources = (project.tracks ?? []).filter(track => track.type === 'vocal');
+  const sourceIds = new Map<VocalTrackId, string>();
+  const existingIds = new Set(vocalSources.map(track => track.id));
+  const takes: TakeRef[] = [];
+  const corrections: TakeCorrectionRef[] = [];
+  const vocal = readProjectVocal(project.vocal);
+  const vocalTracks = vocalSources.map((track, index): VocalTrack => {
+    let id: VocalTrackId;
+    if (isVocalTrackId(track.id)) {
+      id = track.id;
+    } else {
+      id = `voice-legacy-${index}`;
+      while (existingIds.has(id)) id = `${id}-legacy`;
+    }
+    sourceIds.set(id, track.id);
+    const references = readTakes(track.clips, id, bpm);
+    takes.push(...references);
+    for (const clip of track.clips) {
+      const correction = readCorrection(clip);
+      if (correction) corrections.push(correction);
+    }
+    return {
+      id,
+      name: track.name,
+      color: track.color ?? DEFAULT_VOCAL_TRACK.color,
+      activeTakeId: references.some(take => take.id === track.activeClipId) ? track.activeClipId! : references.at(-1)?.id ?? null,
+      settings: track.vocal ? readProjectVocal(track.vocal).state : index === 0 ? vocal.state : DEFAULT_VOCAL_TRACK.settings,
+    };
+  });
+  if (!vocalTracks.length) vocalTracks.push({ ...DEFAULT_VOCAL_TRACK, settings: vocal.state });
+  const armed = vocalTracks.find(track => sourceIds.get(track.id) === project.armedVocalTrackId && project.armedVocalTrackId) ?? vocalTracks[0];
   const patterns = readPatterns(project);
   const melodicPatterns = readMelodicPatterns(project);
-  const vocal = readProjectVocal(project.vocal);
   return {
+    vocalTracks,
+    armedVocalTrackId: armed.id,
+    corrections,
     lyrics: project.lyrics,
     bpm,
     key: readKey(project),
     patterns,
-    mixer: readMixer(project),
+    mixer: readMixer(project, vocalTracks, sourceIds),
     masterVolume: clampMasterVolume(Number(project.master?.volume)),
     instrumental: readInstrumental(project).ref,
     takes,
-    activeTakeId,
+    activeTakeId: armed.activeTakeId,
     drumClips: readDrumClips(project, patterns),
     instrumentalStartBeat: readInstrumental(project).startBeat,
     melodicPatterns,
     instrumentClips: readInstrumentClips(project, melodicPatterns),
-    vocal: vocal.state,
+    vocal: vocalTracks[0].settings,
     userStyles: vocal.userStyles,
-    correction: readCorrection(project, activeTakeId),
+    correction: corrections.find(correction => correction.takeId === armed.activeTakeId) ?? null,
   };
 }
 

@@ -2,6 +2,8 @@ import { Component, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { MAX_TAKES, StudioSessionService, TAKE_NAME_MAX_LENGTH, TAKE_NUDGE_SECONDS, VocalTake } from '../../shared/audio/studio-session.service';
 import { StudioProjectService } from '../../shared/services/studio-project.service';
+import { MAX_VOCAL_TRACKS, VOCAL_TRACK_NAME_MAX_LENGTH } from '../../shared/audio/studio-tracks';
+import { isVocalTrackId } from '../../shared/audio/track-mix';
 
 /**
  * Prises de la piste Voix : choix du micro, prise active, renommage, suppression
@@ -17,6 +19,8 @@ export class TakesPanelComponent {
   readonly session = inject(StudioSessionService);
   readonly studioProject = inject(StudioProjectService);
   readonly maxTakes = MAX_TAKES;
+  readonly maxVocalTracks = MAX_VOCAL_TRACKS;
+  readonly maxTrackName = VOCAL_TRACK_NAME_MAX_LENGTH;
   readonly nameMaxLength = TAKE_NAME_MAX_LENGTH;
   readonly nudgeSeconds = TAKE_NUDGE_SECONDS;
 
@@ -25,6 +29,9 @@ export class TakesPanelComponent {
   readonly renameControl = new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(TAKE_NAME_MAX_LENGTH)] });
   /** Un `<form>` réactif a besoin d'un FormGroup pour émettre `ngSubmit`. */
   readonly renameForm = new FormGroup({ name: this.renameControl });
+  readonly trackAction = signal<'rename' | 'remove' | null>(null);
+  readonly trackName = new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.pattern(/\S/u), Validators.maxLength(VOCAL_TRACK_NAME_MAX_LENGTH)] });
+  readonly trackForm = new FormGroup({ name: this.trackName });
 
   constructor() {
     void this.session.refreshInputDevices();
@@ -33,6 +40,36 @@ export class TakesPanelComponent {
   onInputChange(event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
     this.session.selectedInputId.set(value || null);
+  }
+
+  armTrack(event: Event): void {
+    const id = (event.target as HTMLSelectElement).value;
+    if (isVocalTrackId(id)) this.session.armVocalTrack(id);
+    this.trackAction.set(null);
+    this.renamingId.set(null);
+    this.confirmDeleteId.set(null);
+  }
+
+  addTrack(): void {
+    if (this.session.addVocalTrack()) {
+      this.trackAction.set(null);
+      this.renamingId.set(null);
+      this.confirmDeleteId.set(null);
+    }
+  }
+
+  startTrackRename(): void {
+    this.trackName.setValue(this.session.armedVocalTrack().name);
+    this.trackAction.set('rename');
+  }
+
+  renameTrack(): void {
+    if (this.session.renameVocalTrack(this.session.armedVocalTrack().id, this.trackName.value)) this.trackAction.set(null);
+    else this.trackName.markAsTouched();
+  }
+
+  removeTrack(): void {
+    if (this.studioProject.removeVocalTrack(this.session.armedVocalTrack().id)) this.trackAction.set(null);
   }
 
   startRename(take: VocalTake): void {
@@ -56,9 +93,10 @@ export class TakesPanelComponent {
 
   /** Prises du projet non récupérées (fichier supprimé, réseau) : affichées avec leur erreur. */
   missingTakes(): { id: string; message: string }[] {
-    const loaded = new Set(this.session.takes().map(take => take.id));
+    const loaded = new Set(this.session.armedTakes().map(take => take.id));
+    const references = new Set(this.studioProject.takeRefs().filter(ref => (ref.trackId ?? 'voice') === this.session.armedVocalTrack().id).map(ref => ref.id));
     return Object.entries(this.studioProject.takeErrors())
-      .filter(([id]) => !loaded.has(id))
+      .filter(([id]) => references.has(id) && !loaded.has(id))
       .map(([id, message]) => ({ id, message }));
   }
 

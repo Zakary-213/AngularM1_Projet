@@ -1,6 +1,6 @@
 <section class="takes" aria-labelledby="takes-title">
   <div class="takes-head">
-    <h3 id="takes-title">Prises vocales <small>{{ session.takes().length }} / {{ maxTakes }}</small></h3>
+    <h3 id="takes-title">Pistes vocales <small>{{ session.vocalTracks().length }} / {{ maxVocalTracks }}</small></h3>
     <div class="field">
       <label for="take-input">Micro</label>
       <select id="take-input" (change)="onInputChange($event)" [disabled]="session.micState() !== 'idle'" aria-describedby="take-input-help">
@@ -13,16 +13,48 @@
     </div>
   </div>
 
+  <div class="track-controls">
+    <div class="field">
+      <label for="armed-voice">Piste armée pour le micro</label>
+      <select id="armed-voice" (change)="armTrack($event)" [disabled]="session.micState() !== 'idle'">
+        @for (track of session.vocalTracks(); track track.id) {
+          <option [value]="track.id" [selected]="session.armedVocalTrackId() === track.id">{{ track.name }}</option>
+        }
+      </select>
+    </div>
+    <div class="actions" aria-label="Gestion des pistes vocales">
+      <button type="button" (click)="addTrack()" [disabled]="session.micState() !== 'idle' || session.vocalTracks().length >= maxVocalTracks">Ajouter une piste vocale</button>
+      <button type="button" (click)="startTrackRename()">Renommer la piste</button>
+      <button type="button" (click)="trackAction.set('remove')" [disabled]="session.micState() !== 'idle' || studioProject.uploading() || session.vocalTracks().length <= 1">Supprimer la piste</button>
+    </div>
+    @if (trackAction() === 'rename') {
+      <form class="rename" [formGroup]="trackForm" (ngSubmit)="renameTrack()">
+        <label for="vocal-track-name">Nom de la piste</label>
+        <input id="vocal-track-name" type="text" formControlName="name" [maxlength]="maxTrackName" required />
+        <button type="submit" class="button primary" [disabled]="trackName.invalid">Enregistrer</button>
+        <button type="button" (click)="trackAction.set(null)">Annuler</button>
+        @if (trackName.touched && trackName.invalid) { <span class="error">Saisissez un nom de piste.</span> }
+      </form>
+    } @else if (trackAction() === 'remove') {
+      <div class="confirm" role="group" aria-label="Confirmer le retrait de la piste">
+        Retirer « {{ session.armedVocalTrack().name }} » et ses prises du projet ? Les fichiers restent dans la bibliothèque.
+        <button type="button" class="danger" (click)="removeTrack()" [disabled]="studioProject.uploading() || session.micState() !== 'idle'">Retirer la piste</button>
+        <button type="button" (click)="trackAction.set(null)">Annuler</button>
+      </div>
+    }
+  </div>
+
+  <h4 class="track-takes-title">{{ session.armedVocalTrack().name }} · Prises {{ session.armedTakes().length }} / {{ maxTakes }}</h4>
   @if (studioProject.takesLoading() > 0) { <p role="status" class="muted">Récupération des prises du projet…</p> }
   @for (missing of missingTakes(); track missing.id) {
     <p class="error" role="alert">{{ missing.message }} <button type="button" (click)="studioProject.removeTake(missing.id)">Retirer du projet</button></p>
   }
 
-  @if (session.takes().length === 0 && studioProject.takesLoading() === 0) {
+  @if (session.armedTakes().length === 0 && studioProject.takesLoading() === 0) {
     <p class="muted">Aucune prise. Appuyez sur ● pour enregistrer pendant la lecture de la prod.</p>
   } @else {
-    <ul class="take-list" role="radiogroup" aria-label="Prise jouée sur la piste Voix">
-      @for (take of session.takes(); track take.id) {
+    <ul class="take-list" role="radiogroup" [attr.aria-label]="'Prise jouée sur ' + session.armedVocalTrack().name">
+      @for (take of session.armedTakes(); track take.id) {
         @let progress = uploadProgress(take.id);
         @let uploadMessage = uploadError(take.id);
         <li class="take" [class.active]="session.activeTakeId() === take.id">
@@ -35,7 +67,7 @@
             </form>
           } @else {
             <label class="choice">
-              <input type="radio" name="active-take" [checked]="session.activeTakeId() === take.id" (change)="studioProject.selectTake(take.id)" />
+              <input type="radio" name="active-take" [checked]="session.activeTakeId() === take.id" [disabled]="session.micState() !== 'idle'" (change)="studioProject.selectTake(take.id)" />
               <span><b>{{ take.name }}</b> <small>{{ formatSeconds(take.buffer.duration) }} · début {{ formatSeconds(take.startSeconds) }}</small></span>
             </label>
             <span class="state">

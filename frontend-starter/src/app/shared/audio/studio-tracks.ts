@@ -1,4 +1,5 @@
-import { TrackId } from './track-mix';
+import { TrackId, VocalTrackId } from './track-mix';
+import { DEFAULT_VOICE_CORRECTION, VoiceCorrectionState } from './pitch/voice-correction-state';
 
 /** Présentation fixe des pistes du studio (nom, type, couleur), partagée par la timeline et le mixeur. */
 export interface StudioTrackInfo {
@@ -16,3 +17,29 @@ export const STUDIO_TRACKS: readonly StudioTrackInfo[] = [
   { id: 'instrumental', name: 'Instrumentale', type: 'Audio importé', color: '#bda4fa', className: 'clip-purple' },
   { id: 'voice', name: 'Voix principale', type: 'Prise micro', color: '#8bc8dd', className: 'clip-blue' },
 ];
+
+export const MAX_VOCAL_TRACKS = 8;
+export const VOCAL_TRACK_NAME_MAX_LENGTH = 40;
+
+export interface VocalTrack {
+  readonly id: VocalTrackId;
+  readonly name: string;
+  readonly color: string;
+  readonly activeTakeId: string | null;
+  readonly settings: VoiceCorrectionState;
+}
+
+export const DEFAULT_VOCAL_TRACK: VocalTrack = {
+  id: 'voice',
+  name: 'Voix principale',
+  color: '#8bc8dd',
+  activeTakeId: null,
+  settings: DEFAULT_VOICE_CORRECTION,
+};
+
+export function studioTracks(vocalTracks: readonly VocalTrack[]): StudioTrackInfo[] {
+  return [
+    ...STUDIO_TRACKS.filter(track => track.id !== 'voice'),
+    ...vocalTracks.map(({ id, name, color }) => ({ id, name, color, type: 'Prise micro', className: 'clip-blue' })),
+  ];
+}

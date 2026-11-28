@@ -149,7 +149,7 @@ test("création : propriétaire tiré du JWT, ownerId du corps ignoré", async (
   assert.equal(body.origin, "import");
   assert.equal(body.bpm, 140);
   assert.equal(body.revision, 0);
-  assert.equal(body.formatVersion, 2);
+  assert.equal(body.formatVersion, 3);
 });
 
 test("création : titre, parcours et BPM validés", async () => {
@@ -211,7 +211,7 @@ test("sauvegarde : liste blanche, révision incrémentée, validation du contenu
   assert.equal(saved.body.key.scale, "harmonicMinor");
   assert.equal(saved.body.tracks[0].volumeDb, -3);
   assert.equal(saved.body.ownerId, alice);
-  assert.equal(saved.body.formatVersion, 2);
+  assert.equal(saved.body.formatVersion, 3);
   assert.equal(saved.body.origin, "create");
 
   const invalid = await call(alice, "PUT", `/${project.id}`, { revision: 1, tracks: [{ ...drumsTrack, volumeDb: 40 }] });
@@ -231,7 +231,7 @@ test("sauvegarde concurrente : 409 avec la révision actuelle, rien n'est écras
 test("format inconnu : 422 et projet non réécrit", async () => {
   const { body: project } = await createProject(alice);
   // Simule un projet enregistré par une version future du studio.
-  store.get(project.id).set("formatVersion", 3, { strict: false });
+  store.get(project.id).set("formatVersion", 4, { strict: false });
   const response = await call(alice, "PUT", `/${project.id}`, { revision: 0, bpm: 100 });
   assert.equal(response.status, 422);
   assert.equal(store.get(project.id).bpm, 90);
@@ -384,14 +384,51 @@ test("M10 : refuse une version corrigée qui désigne le fichier d'un autre comp
   assert.match(response.body.message, /Fichier audio/);
 });
 
-test("M10 : un projet au format v1 s'ouvre tel quel et passe en v2 à la sauvegarde", async () => {
+test("M10 : un projet au format v1 s'ouvre tel quel et passe en v3 à la sauvegarde", async () => {
   const { body: project } = await createProject(alice);
   store.get(project.id).set("formatVersion", 1);
   assert.equal((await call(alice, "GET", `/${project.id}`)).body.formatVersion, 1);
   const saved = await call(alice, "PUT", `/${project.id}`, { revision: 0, bpm: 100 });
   assert.equal(saved.status, 200);
-  assert.equal(saved.body.formatVersion, 2);
+  assert.equal(saved.body.formatVersion, 3);
   assert.equal(saved.body.bpm, 100);
+});
+
+test("#64 : trois pistes vocales gardent leurs prises, leur mix, leur correction et la piste armée", async () => {
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}`;
+  const tracks = ["Voix principale", "Backs", "Ad-libs"].map((name, index) => {
+    const fileId = new mongoose.Types.ObjectId().toString();
+    const correctedId = new mongoose.Types.ObjectId().toString();
+    audioFiles.set(fileId, alice);
+    audioFiles.set(correctedId, alice);
+    return {
+      ...voiceTrack([{ id: `take-${index}`, startBeat: index * 4, durationBeats: 4, audioFileId: fileId,
+        correction: { audioFileId: correctedId, styleLabel: "Trap", enabled: index === 1 } }], `take-${index}`),
+      id: index === 0 ? "voice" : `voice-${index}`, name, volumeDb: -index * 3, pan: index / 3,
+      solo: index === 0, mute: index === 2, fx: { reverb: { enabled: index === 1, amount: 0.3 } },
+      vocal: { styleId: ["natural", "trap", "drill"][index], dose: 0.3 + index * 0.2 },
+    };
+  });
+  const saved = await call(alice, "PUT", route, { revision: 0, tracks, armedVocalTrackId: "voice-1" });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.formatVersion, 3);
+  const reopened = (await call(alice, "GET", route)).body;
+  assert.deepEqual(reopened.tracks, saved.body.tracks);
+  assert.equal(reopened.armedVocalTrackId, "voice-1");
+  assert.deepEqual(reopened.tracks.map(track => track.vocal.styleId), ["natural", "trap", "drill"]);
+  assert.deepEqual(reopened.tracks.map(track => track.clips[0].correction.enabled), [false, true, false]);
+
+  const duplicate = { ...tracks[1], activeClipId: tracks[0].activeClipId, clips: tracks[0].clips };
+  assert.equal((await call(alice, "PUT", route, { revision: 1, tracks: [tracks[0], duplicate, tracks[2]] })).status, 400);
+  assert.equal((await call(alice, "PUT", route, { revision: 1, armedVocalTrackId: "bass" })).status, 400);
+  assert.equal((await call(alice, "PUT", route, { revision: 1, tracks: [{ ...tracks[0], activeClipId: "take-1" }, ...tracks.slice(1)] })).status, 400);
+  assert.equal((await call(alice, "PUT", route, { revision: 1, tracks: [tracks[0], tracks[0], ...tracks.slice(1)] })).status, 400);
+  const foreign = new mongoose.Types.ObjectId().toString();
+  audioFiles.set(foreign, bob);
+  const unsafe = { ...tracks[1], clips: [{ ...tracks[1].clips[0], audioFileId: foreign }] };
+  assert.equal((await call(alice, "PUT", route, { revision: 1, tracks: [tracks[0], unsafe, tracks[2]] })).status, 400);
+  assert.equal((await call(alice, "GET", route)).body.revision, 1);
 });
 
 const makeLyricLines = (count) => Array.from({ length: count }, (_, index) => ({

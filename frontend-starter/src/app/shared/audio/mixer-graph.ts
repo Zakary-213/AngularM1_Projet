@@ -2,7 +2,7 @@ import { createLimiter } from './mix-graph';
 import { StereoMeter } from './stereo-meter';
 import { createEchoLoop, createReverbConvolver, tempoDelayMs } from './pitch/voice-fx';
 import { EqChain, createEqChain } from './three-band-eq';
-import { MixerState, TRACK_IDS, TrackId, clampMasterVolume, clampPan, effectiveTrackGains, sendGain } from './track-mix';
+import { MixerState, TrackId, clampMasterVolume, clampPan, effectiveTrackGains, mixerTrackIds, sendGain } from './track-mix';
 
 /**
  * Graphe du mixeur (M7), construit à l'identique pour l'écoute (AudioContext) et
@@ -52,6 +52,7 @@ export class MixerGraph {
   /** Entrée de chaque piste, où brancher sources, frappes et notes. */
   readonly trackInputs: Readonly<Record<TrackId, AudioNode>>;
   private readonly strips: Record<TrackId, TrackStrip>;
+  private readonly trackIds: readonly TrackId[];
   private readonly master: GainNode;
   private readonly delay: DelayNode;
   private readonly trackMeters: Partial<Record<TrackId, StereoMeter>> = {};
@@ -81,7 +82,8 @@ export class MixerGraph {
     const gains = effectiveTrackGains(settings.mixer);
     const strips = {} as Record<TrackId, TrackStrip>;
     const inputs = {} as Record<TrackId, AudioNode>;
-    for (const id of TRACK_IDS) {
+    this.trackIds = mixerTrackIds(settings.mixer);
+    for (const id of this.trackIds) {
       const mix = settings.mixer[id];
       const eq = createEqChain(context, mix.eq);
       const fader = context.createGain();
@@ -113,7 +115,7 @@ export class MixerGraph {
   apply(mixer: MixerState, masterVolume: number): void {
     const now = this.context.currentTime;
     const gains = effectiveTrackGains(mixer);
-    for (const id of TRACK_IDS) {
+    for (const id of this.trackIds) {
       const strip = this.strips[id];
       const mix = mixer[id];
       strip.eq.apply(mix.eq);
@@ -136,7 +138,7 @@ export class MixerGraph {
       return null;
     }
     const tracks = {} as Record<TrackId, number>;
-    for (const id of TRACK_IDS) {
+    for (const id of this.trackIds) {
       tracks[id] = this.trackMeters[id]?.peak() ?? 0;
     }
     return { tracks, master: this.masterMeter.peak() };

@@ -14,7 +14,7 @@ import { generateGroqLyrics, LyricsProviderError } from "../services/groq-lyrics
 const DEFAULT_PAGE_SIZE = 12;
 const MAX_PAGE_SIZE = 50;
 /** Champs qu'un client peut écrire lors d'une sauvegarde (liste blanche). */
-const EDITABLE_FIELDS = ["title", "bpm", "key", "tracks", "patterns", "master", "vocal", "lyrics"];
+const EDITABLE_FIELDS = ["title", "bpm", "key", "tracks", "patterns", "master", "vocal", "lyrics", "armedVocalTrackId"];
 const ORIGINS = ["create", "import"];
 
 class RequestError extends Error {

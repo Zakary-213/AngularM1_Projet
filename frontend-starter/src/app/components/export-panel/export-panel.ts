@@ -1,6 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
 import { MAX_EXPORT_SECONDS } from '../../shared/audio/song-length';
+import { isTrackAudible } from '../../shared/audio/track-mix';
 import { StudioProjectService } from '../../shared/services/studio-project.service';
 
 /**
@@ -18,19 +19,22 @@ export class ExportPanelComponent {
   readonly maxMinutes = MAX_EXPORT_SECONDS / 60;
 
   readonly plan = this.session.exportPlan;
+  readonly audioLoading = computed(() => (this.studioProject?.takesLoading() ?? 0) > 0 || this.studioProject?.download() === 'loading');
   readonly progressPercent = computed(() => {
     const progress = this.session.exportProgress();
     return progress === null ? null : Math.round(progress * 100);
   });
-  /** Ce qui sera entendu sur la piste Voix dans le fichier. */
+  /** Les pistes vocales audibles dans le fichier. */
   readonly voiceSource = computed(() => {
-    if (!this.session.take()) {
-      return 'aucune prise';
-    }
-    return this.session.correctionActive() ? `version corrigée (${this.session.correctedTake()?.styleLabel})` : 'prise originale';
+    const mixer = this.session.mixer();
+    const voices = this.session.vocalTracks()
+      .filter(track => this.session.activeTakeFor(track.id) && isTrackAudible(mixer, track.id))
+      .map(track => track.name);
+    return voices.join(', ') || 'Aucune piste vocale audible';
   });
 
   exportWav(): void {
+    if (this.audioLoading()) return;
     void this.session.exportWav(this.studioProject?.project()?.title ?? 'zakat-record');
   }
 

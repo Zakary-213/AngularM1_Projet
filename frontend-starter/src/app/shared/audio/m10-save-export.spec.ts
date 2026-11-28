@@ -125,9 +125,9 @@ describe('M10 : version corrigée de la prise', () => {
   it('relit la version corrigée de la prise active et son choix « corrigée sur la piste Voix »', () => {
     const loaded = fromProject(v1Project({ formatVersion: 2, tracks: [voice] }));
     expect(loaded.correction).toEqual({ takeId: 'take-2', fileId: 'c2', styleLabel: 'Trap', enabled: false });
-    // Seule la prise active la garde : le studio ne joue qu'une version corrigée.
+    // Chaque prise garde sa version corrigée, même si elle n'est pas sélectionnée.
     const clips = toProjectContent(loaded).tracks.find(track => track.id === 'voice')!.clips;
-    expect(clips.map(clip => clip.correction?.audioFileId)).toEqual([undefined, 'c2']);
+    expect(clips.map(clip => clip.correction?.audioFileId)).toEqual(['c1', 'c2']);
     expect(clips[1].audioFileId).toBe('f2');
   });
 });

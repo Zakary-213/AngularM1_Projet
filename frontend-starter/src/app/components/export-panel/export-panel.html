@@ -1,4 +1,4 @@
-<p class="muted">Rendu hors temps réel du morceau entier, exactement comme à l'écoute : batterie, mélodie, basse, instrumentale et prise vocale non muettes, aux positions de la timeline, avec le mixeur (volumes, panoramique, égaliseurs, réverbération, delay) et le Master. L'écoute seule d'un pattern du Piano Roll et le métronome ne sont pas exportés.</p>
+<p class="muted">Le WAV rassemble les pistes audibles à leur position dans la timeline, avec le mixeur et le volume Master. Chaque piste vocale utilise sa prise active et sa correction, si elle est activée.</p>
 
 <dl class="facts">
   <div>
@@ -19,13 +19,15 @@
 }
 
 <div class="row">
-  <button type="button" class="button" (click)="exportWav()" [disabled]="session.exporting() || !plan().ok">
+  <button type="button" class="button" (click)="exportWav()" [disabled]="session.exporting() || audioLoading() || !plan().ok">
     {{ session.exporting() ? 'Rendu en cours…' : '⬇ Exporter en WAV' }}
   </button>
 </div>
 
 <div role="status" class="status">
-  @if (session.exporting()) {
+  @if (audioLoading()) {
+    <p>Chargement des fichiers audio du projet…</p>
+  } @else if (session.exporting()) {
     @let percent = progressPercent();
     <!-- 0 % est une progression connue : ne pas le confondre avec « non fournie » (null). -->
     @if (percent !== null) {
@@ -35,7 +37,7 @@
       <p>Rendu en cours… (avancement non fourni par ce navigateur)</p>
     }
   } @else if (session.exportReport(); as report) {
-    <p>Fichier téléchargé : {{ formatSeconds(report.seconds) }}, crête {{ formatDecibels(report.peakDb) }}, voix {{ report.correctedVoice ? 'corrigée' : 'originale' }}.</p>
+    <p>Fichier téléchargé · {{ formatSeconds(report.seconds) }} · crête {{ formatDecibels(report.peakDb) }}.</p>
   }
 </div>
 @if (session.exportError(); as message) { <p class="error" role="alert">{{ message }}</p> }

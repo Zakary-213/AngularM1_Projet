@@ -1,7 +1,7 @@
 import { Component, DestroyRef, ElementRef, afterNextRender, computed, inject, signal } from '@angular/core';
 import { isClipHeld, meterFraction, nextClipTime } from '../../shared/audio/level-meter';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
-import { STUDIO_TRACKS, StudioTrackInfo } from '../../shared/audio/studio-tracks';
+import { StudioTrackInfo } from '../../shared/audio/studio-tracks';
 import { EqBand, FLAT_THREE_BAND_EQ, MAX_BAND_DB, isFlatEq } from '../../shared/audio/three-band-eq';
 import {
   FxSend,
@@ -10,7 +10,9 @@ import {
   MIN_MASTER_DB,
   MIN_TRACK_DB,
   TrackId,
+  VocalTrackId,
   isTrackAudible,
+  isVocalTrackId,
   masterDbToVolume,
   masterVolumeToDb,
 } from '../../shared/audio/track-mix';
@@ -33,7 +35,8 @@ type FxKind = 'reverb' | 'delay';
 export class MixerPanelComponent {
   readonly session = inject(StudioSessionService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  readonly tracks = STUDIO_TRACKS;
+  readonly tracks = this.session.studioTracks;
+  readonly isVocalTrackId = isVocalTrackId;
   readonly minDb = MIN_TRACK_DB;
   readonly maxDb = MAX_TRACK_DB;
   readonly minMasterDb = MIN_MASTER_DB;
@@ -56,14 +59,14 @@ export class MixerPanelComponent {
   /** Pistes rendues inaudibles par le solo d'une autre piste (affiché en texte, pas seulement en couleur). */
   readonly silencedBySolo = computed(() => {
     const mixer = this.session.mixer();
-    return new Set(this.tracks.filter(track => !mixer[track.id].muted && !isTrackAudible(mixer, track.id)).map(track => track.id));
+    return new Set(this.tracks().filter(track => !mixer[track.id].muted && !isTrackAudible(mixer, track.id)).map(track => track.id));
   });
 
   /** Une version corrigée de la prise active existe (onglet Correction vocale) : elle peut être activée ici. */
-  readonly hasCorrection = computed(() => {
-    const corrected = this.session.correctedTake();
-    return corrected !== null && corrected.takeId === this.session.activeTakeId();
-  });
+  correctionEnabled(id: VocalTrackId): boolean {
+    const correction = this.session.correctionFor(id);
+    return correction !== null && this.session.enabledCorrections()[correction.takeId] === true;
+  }
 
   private readonly lastClipAt: Partial<Record<MeterId, number | null>> = {};
   private frame = 0;
@@ -74,8 +77,8 @@ export class MixerPanelComponent {
   }
 
   /** « Correction de hauteur » de la piste Voix : version corrigée ou prise originale, à l'écoute et à l'export. */
-  toggleCorrection(event: Event): void {
-    this.session.useCorrectedTake.set((event.target as HTMLInputElement).checked && this.hasCorrection());
+  toggleCorrection(id: VocalTrackId, event: Event): void {
+    this.session.setUseCorrectedTake((event.target as HTMLInputElement).checked, id);
   }
 
   onVolume(track: StudioTrackInfo, event: Event): void {
@@ -147,17 +150,25 @@ export class MixerPanelComponent {
    */
   private startMeters(): void {
     const bars = new Map<MeterId, HTMLElement>();
-    this.host.nativeElement.querySelectorAll<HTMLElement>('[data-meter]').forEach(element => bars.set(element.dataset['meter'] as MeterId, element));
+    let lastTracks: ReturnType<typeof this.tracks> | null = null;
     let idle = false;
     const draw = () => {
+      const tracks = this.tracks();
+      if (lastTracks !== tracks) {
+        lastTracks = tracks;
+        bars.clear();
+        this.host.nativeElement.querySelectorAll<HTMLElement>('[data-meter]').forEach(element => bars.set(element.dataset['meter'] as MeterId, element));
+        idle = false;
+      }
       const levels = this.session.readLevels();
       const now = performance.now();
       if (levels || !idle) {
         const peaks: Record<MeterId, number> = { ...(levels?.tracks ?? { drums: 0, melody: 0, bass: 0, instrumental: 0, voice: 0 }), master: levels?.master ?? 0 };
         const clipping = new Set<MeterId>();
         for (const [id, bar] of bars) {
-          bar.style.transform = `scaleX(${meterFraction(peaks[id])})`;
-          this.lastClipAt[id] = nextClipTime(this.lastClipAt[id] ?? null, peaks[id], now);
+          const peak = peaks[id] ?? 0;
+          bar.style.transform = `scaleX(${meterFraction(peak)})`;
+          this.lastClipAt[id] = nextClipTime(this.lastClipAt[id] ?? null, peak, now);
           if (isClipHeld(this.lastClipAt[id] ?? null, now)) {
             clipping.add(id);
           }

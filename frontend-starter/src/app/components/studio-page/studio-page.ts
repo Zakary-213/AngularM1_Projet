@@ -15,7 +15,8 @@ import { AUDIO_FILE_ACCEPT } from '../../shared/audio/audio-file';
 import { BEATS_PER_BAR, DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../../shared/audio/music-time';
 import { InstrumentTrackId } from '../../shared/audio/melodic-pattern';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
-import { STUDIO_TRACKS, StudioTrackInfo } from '../../shared/audio/studio-tracks';
+import { StudioTrackInfo } from '../../shared/audio/studio-tracks';
+import { isVocalTrackId } from '../../shared/audio/track-mix';
 import { TrackMix } from '../../shared/audio/track-mix';
 import { layoutClip, dragUnits } from '../../shared/audio/timeline-layout';
 import { DEFAULT_LOOP_BARS, MAX_SONG_BARS, describePosition, stepAfterKey, stepFromFraction, validateLoopBars } from '../../shared/audio/timeline-position';
@@ -182,10 +183,10 @@ export class StudioPageComponent implements LeaveConfirmation {
     const visibleSeconds = barsToSeconds(this.visibleBars(), bpm);
     const barSeconds = barsToSeconds(1, bpm);
     const instrumental = this.session.instrumental();
-    const take = this.session.take();
     const mixer = this.session.mixer();
-    return STUDIO_TRACKS.map(info => {
+    return this.session.studioTracks().map(info => {
       const clips: TimelineClip[] = [];
+      const take = isVocalTrackId(info.id) ? this.session.activeTakeFor(info.id) : null;
       if (info.id === 'melody' || info.id === 'bass') {
         const names = new Map(this.session.melodicPatterns().map(entry => [entry.id, entry.name]));
         for (const clip of this.session.instrumentClips()[info.id]) {
@@ -220,7 +221,7 @@ export class StudioPageComponent implements LeaveConfirmation {
             waveform: { buffer: instrumental.buffer, toSeconds: Math.max(0.01, Math.min(instrumental.buffer.duration, visibleSeconds - start)) },
           });
         }
-      } else if (info.id === 'voice' && take) {
+      } else if (take) {
         const box = layoutClip(take.startSeconds, take.buffer.duration, visibleSeconds);
         if (box) {
           const visibleTakeSeconds = Math.max(0.01, Math.min(take.buffer.duration, visibleSeconds - Math.max(0, take.startSeconds)));
@@ -526,7 +527,11 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   toggleRecording(): void {
     // L'arrêt passe par le projet : la nouvelle prise y est aussitôt envoyée.
-    void (this.session.micState() === 'recording' ? this.studioProject.stopRecording() : this.session.startRecording());
+    if (this.session.micState() === 'recording') {
+      void this.studioProject.stopRecording();
+    } else if (this.studioProject.takesLoading() === 0) {
+      void this.session.startRecording();
+    }
   }
 
   zoom(direction: 'in' | 'out'): void {

@@ -72,15 +72,15 @@
     <button type="button" class="button secondary" (click)="download()" [disabled]="!result() || processing()">⬇ WAV corrigé</button>
   </div>
 
-  @if (source()?.fromStudioTake) {
+  @if (source()?.takeId && source()?.takeId === session.activeTakeId()) {
     <div class="row track-row">
       @if (correctedOnTrack()) {
-        <p class="small" role="status">Piste Voix : <b>version corrigée ({{ session.correctedTake()?.styleLabel }})</b>, à l'écoute et à l'export.</p>
+        <p class="small" role="status">{{ session.armedVocalTrack().name }} · <b>version corrigée ({{ session.correctedTake().styleLabel }})</b>, à l'écoute et à l'export.</p>
         <button type="button" class="button secondary" (click)="applyToVoiceTrack()" [disabled]="!result() || processing()">Mettre à jour avec ce réglage</button>
         <button type="button" class="button secondary" (click)="useOriginalOnTrack()">Revenir à l'originale</button>
       } @else {
-        <p class="small" role="status">Piste Voix : prise originale.</p>
-        <button type="button" class="button" (click)="applyToVoiceTrack()" [disabled]="!result() || processing()">Utiliser la version corrigée sur la piste Voix</button>
+        <p class="small" role="status">{{ session.armedVocalTrack().name }} · prise originale.</p>
+        <button type="button" class="button" (click)="applyToVoiceTrack()" [disabled]="!result() || processing()">Utiliser la version corrigée</button>
       }
     </div>
     @if (studioProject?.correctionUpload(); as upload) {
@@ -92,6 +92,8 @@
     } @else if (inProject() && correctedOnTrack()) {
       <p class="small muted">La version corrigée est un fichier à part (vos fichiers audio) : elle est sauvegardée avec le projet, la prise originale reste intacte.</p>
     }
+  } @else if (source()?.fromStudioTake) {
+    <p class="small">Sélectionnez « Prise active du studio » pour charger la prise de la piste armée.</p>
   }
   @if (studioProject?.correctionError(); as message) { <p class="error" role="alert">{{ message }}</p> }
 

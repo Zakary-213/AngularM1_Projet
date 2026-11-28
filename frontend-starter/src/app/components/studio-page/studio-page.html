@@ -44,6 +44,7 @@
       <button type="button" class="button primary" (click)="studioProject.save()" [disabled]="!studioProject.canSave()" aria-keyshortcuts="Control+S Meta+S">
         {{ studioProject.saving() ? 'Sauvegarde…' : '💾 Sauvegarder' }}
       </button>
+      <button type="button" class="button" (click)="publishOpen.set(!publishOpen())" [attr.aria-expanded]="publishOpen()" aria-controls="publish-panel">↗ Publier le son</button>
       <a class="button secondary" routerLink="/projects">Mes projets</a>
     } @else {
       <a class="button secondary" routerLink="/collaborations">♧ Collaborer</a>
@@ -51,6 +52,9 @@
     <button type="button" (click)="activeTab.set('Export')">↗ Exporter</button>
   </div>
 </section>
+@if (publishOpen() && studioProject.project()) {
+  <app-publish-panel id="publish-panel" (closed)="publishOpen.set(false)" />
+}
 @if (studioProject.saveError(); as message) {
   <div class="panel save-alert" role="alert"><p>{{ message }}</p><button type="button" (click)="studioProject.save()">Réessayer</button></div>
 }

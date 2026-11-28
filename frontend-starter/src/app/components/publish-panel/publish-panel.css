@@ -1,0 +1,28 @@
+:host { display: block; min-width: 0; scroll-margin-top: 80px; }
+
+.publish { margin-bottom: 14px; }
+.publish-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.publish-head h2 { margin: 0 0 4px; font-size: 18px; }
+.muted { color: var(--muted); font-size: 12px; margin: 0; max-width: 70ch; }
+.close { min-width: 44px; min-height: 44px; flex-shrink: 0; }
+
+form { max-width: 640px; }
+label { margin: 14px 0 4px; }
+input, textarea { width: 100%; box-sizing: border-box; }
+textarea {
+  padding: 12px;
+  border: 1px solid #555;
+  border-radius: 5px;
+  background: #1c1c1c;
+  color: white;
+  font: inherit;
+  resize: vertical;
+}
+small { display: block; min-height: 1em; font-size: 12px; }
+.facts { margin-top: 10px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.progress { margin-top: 10px; }
+.progress label { margin: 0; }
+progress { width: 100%; max-width: 320px; }
+.retry { margin-left: 8px; }
+.success { margin-top: 12px; }

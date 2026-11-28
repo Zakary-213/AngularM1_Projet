@@ -1,4 +1,4 @@
-# Guide de développement — Studio musical collaboratif
+# Guide de développement — Studio musical
 
 Ce fichier s’applique à tout le dépôt, aux étudiants comme aux assistants de programmation. Le but est de produire une application compréhensible, utilisable et démontrable, sans construire une architecture disproportionnée pour un projet étudiant.
 
@@ -19,13 +19,13 @@ Si un fichier de consignes requis est absent ou illisible, signaler précisémen
 
 ## 1. Comprendre le projet avant de modifier le code
 
-- Le produit est un studio musical dans le navigateur : composition avec instruments, édition multipiste, import et enregistrement audio, BPM, tonalité, effets, sauvegarde, export, publication et travail à plusieurs sur un même projet.
-- La collaboration vise le partage des modifications du projet en direct. Jouer ensemble à distance avec une latence musicale faible constitue un sujet distinct qui nécessite une validation technique.
-- Procéder par petites fonctionnalités utilisables. Réaliser des prototypes courts pour les risques audio : synchronisation, correction vocale, export et collaboration.
+- Le produit est un studio musical dans le navigateur : composition avec instruments, édition multipiste, import et enregistrement audio, BPM, tonalité, effets, sauvegarde, export et publication du mix final.
+- La V1 inclut la publication du mix final à partir d'un projet privé (#20, #80). Les sessions partagées et l'édition à plusieurs en direct sont hors périmètre de la V1 (#66).
+- Procéder par petites fonctionnalités utilisables. Réaliser des prototypes courts pour les risques audio : synchronisation, correction vocale et export.
 - Ne pas présenter une transposition simple comme une correction automatique de justesse, ni une modification de vitesse comme un changement de tempo préservant la hauteur.
 - Lire les fichiers concernés, les `AGENTS.md` et `best-practices.md` du sous-dossier, ainsi que la section « Contrat d'API » de `README.md`, avant une modification pertinente.
 - Conserver la structure existante `frontend-starter/` et `backend/`. Ne pas recréer le projet ou renommer ses dossiers sans nécessité.
-- Le cahier `MISSIONS_STUDIO_RAP_ANGULAR.md` exclut encore la collaboration et la plateforme sociale : cette partie doit être alignée avec les demandes de publication et de collaboration avant leur développement. Ne pas supprimer ces objectifs silencieusement.
+- Aligner les évolutions du périmètre avec le cahier `MISSIONS_STUDIO_RAP_ANGULAR.md` et le README.
 - Les instructions explicites de l’utilisateur priment. Signaler les contradictions entre documents ; résoudre les choix courants sans demander une validation à chaque étape.
 
 ## 2. Code simple et compréhensible
@@ -62,7 +62,7 @@ Si un fichier de consignes requis est absent ou illisible, signaler précisémen
 - Donner un nom accessible aux boutons à icône et aux réglages audio. Ne pas transmettre une information uniquement par la couleur.
 - Prévoir des cibles tactiles suffisamment grandes, des contrastes lisibles et le respect de la préférence de réduction des animations.
 - Les raccourcis ne doivent pas perturber la saisie dans les champs. Expliquer les raccourcis disponibles.
-- Afficher clairement l’état du micro, de l’enregistrement, de la sauvegarde et de la connexion collaborative.
+- Afficher clairement l’état du micro, de l’enregistrement et de la sauvegarde.
 
 ## 5. Application légère et réactive
 
@@ -105,6 +105,8 @@ Si un fichier de consignes requis est absent ou illisible, signaler précisémen
 - Mettre à jour la section « Contrat d'API » de `README.md` avec toute évolution : méthode, URL, authentification, paramètres, corps, réponses et erreurs. Documenter aussi les événements collaboratifs.
 
 ## 8. Collaboration et protection du travail
+
+Les règles sur les abonnements, la présence et les échanges entre collaborateurs s'appliquent si les sessions partagées entrent dans une version ultérieure. En V1, protéger les projets privés et gérer les sauvegardes concurrentes, par exemple depuis deux onglets.
 
 - Le serveur vérifie les permissions de chaque opération et de chaque abonnement à un projet, y compris après une révocation d’accès.
 - Définir une stratégie explicite pour les modifications concurrentes : révision du projet, verrou ciblé ou fusion selon la complexité réelle. Ne pas écraser silencieusement le travail d’un autre utilisateur.

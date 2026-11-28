@@ -46,8 +46,6 @@
       </button>
       <button type="button" class="button" (click)="publishOpen.set(!publishOpen())" [attr.aria-expanded]="publishOpen()" aria-controls="publish-panel">↗ Publier le son</button>
       <a class="button secondary" routerLink="/projects">Mes projets</a>
-    } @else {
-      <a class="button secondary" routerLink="/collaborations">♧ Collaborer</a>
     }
     <button type="button" (click)="openExportPanel()">↗ Exporter</button>
   </div>

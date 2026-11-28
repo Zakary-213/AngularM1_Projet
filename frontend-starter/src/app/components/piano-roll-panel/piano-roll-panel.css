@@ -24,6 +24,10 @@ button.danger { background: #b3261e; border-color: #b3261e; color: #ffffff; }
 .audition.on { border-color: var(--accent); color: var(--accent); }
 .error { color: #ff8a80; font-size: 12px; }
 .help { max-width: 72ch; }
+.roll-intro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+.roll-intro .muted { margin: 0; }
+.add-instrument { min-height: 44px; padding: 8px 16px; font-size: 13px; font-weight: 700; background: #f5a623; border-color: #f5a623; color: #111; }
+.notice { font-size: 13px; padding: 8px 12px; border-left: 3px solid #f5a623; background: #1a1712; margin: 0 0 12px; }
 button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 2px; }
 
 /* La grille défile dans son cadre, dans les deux sens, sans élargir la page. */

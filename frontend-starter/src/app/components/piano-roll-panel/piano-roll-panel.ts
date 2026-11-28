@@ -28,6 +28,7 @@ import { MAX_PATTERNS, PATTERN_NAME_MAX_LENGTH } from '../../shared/audio/drum-p
 import { STEPS_PER_BAR, STEPS_PER_BEAT } from '../../shared/audio/music-time';
 import { instrumentClipsUsing } from '../../shared/audio/note-scheduling';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
+import { InstrumentPickerComponent } from '../instrument-picker/instrument-picker';
 
 /** Taille d'une case de la grille, en pixels (piano-roll-panel.css s'y réfère par variables CSS). */
 const STEP_WIDTH_PX = 28;
@@ -59,7 +60,7 @@ interface NoteDrag {
  */
 @Component({
   selector: 'app-piano-roll-panel',
-  imports: [ReactiveFormsModule],
+  imports: [ReactiveFormsModule, InstrumentPickerComponent],
   templateUrl: './piano-roll-panel.html',
   styleUrl: './piano-roll-panel.css',
 })
@@ -100,6 +101,8 @@ export class PianoRollPanelComponent {
   private drag: NoteDrag | null = null;
 
   readonly message = signal<string | null>(null);
+  /** Confirmation affichée après l'ajout d'un instrument (distincte des erreurs). */
+  readonly notice = signal<string | null>(null);
   readonly renaming = signal(false);
   readonly confirmDelete = signal(false);
   readonly renameControl = new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(PATTERN_NAME_MAX_LENGTH)] });
@@ -185,6 +188,29 @@ export class PianoRollPanelComponent {
   delete(): void {
     this.confirmDelete.set(false);
     this.message.set(this.session.deleteMelodicPattern(this.pattern().id));
+  }
+
+  /** Ajoute l'instrument choisi : nouvelle partie ouverte ici et placée sur sa piste. */
+  addInstrument(instrument: InstrumentId): void {
+    this.resetPanels();
+    const result = this.session.addInstrument(instrument);
+    if (!result) {
+      this.message.set(`${MAX_PATTERNS} patterns maximum (batterie et instruments) : supprimez-en un pour ajouter un instrument.`);
+      return;
+    }
+    this.session.instrumentPickerOpen.set(false);
+    const trackName = result.track === 'bass' ? 'Basse' : 'Mélodie';
+    const bar = result.startBar + 1;
+    this.notice.set(
+      result.clipId
+        ? `Instrument ajouté : ${INSTRUMENT_LABELS[instrument]}, sur la piste ${trackName} à la mesure ${bar}. Cliquez dans la grille ci-dessous pour poser des notes.`
+        : `Partie créée pour : ${INSTRUMENT_LABELS[instrument]}, mais la piste ${trackName} est pleine : supprimez un clip puis « Placer sur la piste ».`,
+    );
+  }
+
+  togglePicker(): void {
+    this.resetPanels();
+    this.session.instrumentPickerOpen.update(open => !open);
   }
 
   /** Place le pattern sur sa piste, à la mesure de la tête de lecture. */
@@ -389,6 +415,7 @@ export class PianoRollPanelComponent {
   }
 
   private resetPanels(): void {
+    this.notice.set(null);
     this.renaming.set(false);
     this.confirmDelete.set(false);
     this.message.set(null);

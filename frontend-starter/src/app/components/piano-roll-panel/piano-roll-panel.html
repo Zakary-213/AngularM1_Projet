@@ -1,7 +1,18 @@
 @let current = pattern();
-<div class="roll-toolbar" role="group" aria-label="Patterns mélodiques du projet">
+<div class="roll-intro">
+  <button type="button" class="add-instrument" (click)="togglePicker()" [attr.aria-expanded]="session.instrumentPickerOpen()">
+    {{ session.instrumentPickerOpen() ? 'Fermer le choix' : '＋ Ajouter un instrument' }}
+  </button>
+  <span class="muted">Guitare, cordes, basse, orgue… 12 instruments, placés sur la timeline en un clic.</span>
+</div>
+@if (session.instrumentPickerOpen()) {
+  <app-instrument-picker (picked)="addInstrument($event)" (closed)="session.instrumentPickerOpen.set(false)" />
+}
+@if (notice(); as text) { <p class="notice" role="status">{{ text }}</p> }
+
+<div class="roll-toolbar" role="group" aria-label="Parties d’instrument du projet">
   <div class="field">
-    <label for="melodic-select">Pattern affiché</label>
+    <label for="melodic-select">Partie affichée</label>
     <select id="melodic-select" (change)="onPatternChange($event)">
       @for (entry of session.melodicPatterns(); track entry.id) {
         <option [value]="entry.id" [selected]="entry.id === current.id">{{ entry.name }} · {{ instrumentLabels[entry.instrument] }}</option>
@@ -9,7 +20,7 @@
     </select>
   </div>
   <div class="field">
-    <label for="melodic-instrument">Instrument</label>
+    <label for="melodic-instrument">Changer l’instrument</label>
     <select id="melodic-instrument" (change)="onInstrumentChange($event)">
       @for (family of families; track family) {
         <optgroup [label]="familyLabels[family]">
@@ -28,7 +39,7 @@
       }
     </select>
   </div>
-  <button type="button" (click)="create()" [disabled]="patternCount() >= maxPatterns" aria-label="Nouveau pattern mélodique">＋ Nouveau</button>
+  <button type="button" (click)="create()" [disabled]="patternCount() >= maxPatterns" aria-label="Nouvelle partie vide avec le même instrument">＋ Partie vide</button>
   <button type="button" (click)="duplicate()" [disabled]="patternCount() >= maxPatterns" aria-label="Dupliquer le pattern mélodique">Dupliquer</button>
   <button type="button" (click)="startRename()" aria-label="Renommer le pattern mélodique">Renommer</button>
   <button type="button" (click)="askDelete()" [disabled]="session.melodicPatterns().length <= 1" aria-label="Supprimer le pattern mélodique">Supprimer</button>

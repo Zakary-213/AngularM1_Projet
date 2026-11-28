@@ -21,6 +21,7 @@ import {
 import { playInstrumentNote } from './instrument-synth';
 import {
   DEFAULT_MELODY_PATTERN_ID,
+  INSTRUMENT_LABELS,
   INSTRUMENT_RANGES,
   InstrumentId,
   InstrumentParams,
@@ -68,6 +69,7 @@ import {
   DrumClip,
   UndoHistory,
   addDrumClip,
+  freeStartBar,
   createDrumClipId,
   drumClipsEndBar,
   clipsUsingPattern,
@@ -466,6 +468,32 @@ export class StudioSessionService implements OnDestroy {
     const count = this.melodicPatterns().length + 1;
     const prefix = defaultTrackFor(instrument) === 'bass' ? 'Basse' : 'Mélodie';
     return this.insertMelodicPattern(createMelodicPattern(createMelodicPatternId(), `${prefix} ${String(count).padStart(2, '0')}`, instrument));
+  }
+
+  /** Sélecteur d'instruments ouvert dans le Piano Roll (aussi ouvert depuis une piste vide de la timeline). */
+  readonly instrumentPickerOpen = signal(false);
+
+  /**
+   * Ajout en un geste : crée une partie vide nommée d'après l'instrument, l'ouvre dans
+   * le Piano Roll et la place sur sa piste (Mélodie ou Basse) à la mesure de la tête de lecture.
+   */
+  addInstrument(instrument: InstrumentId): { patternId: string; track: InstrumentTrackId; clipId: string | null; startBar: number } | null {
+    const sameInstrument = this.melodicPatterns().filter(entry => entry.instrument === instrument).length;
+    const name = `${INSTRUMENT_LABELS[instrument]} ${String(sameInstrument + 1).padStart(2, '0')}`.slice(0, PATTERN_NAME_MAX_LENGTH);
+    const patternId = this.insertMelodicPattern(createMelodicPattern(createMelodicPatternId(), name, instrument));
+    if (!patternId) {
+      return null;
+    }
+    const track = defaultTrackFor(instrument);
+    // Un seul clip joue à la fois sur une piste : on ne recouvre pas une partie existante.
+    const startBar = freeStartBar(this.instrumentClips()[track], Math.floor(this.songStep() / STEPS_PER_BAR));
+    const clipId = `${track}-${crypto.randomUUID()}`;
+    const next = addDrumClip(this.instrumentClips()[track], startBar, clipId, patternId);
+    if (!next) {
+      return { patternId, track, clipId: null, startBar };
+    }
+    this.changeArrangement(() => this.setInstrumentClips(track, next));
+    return { patternId, track, clipId, startBar: next.find(clip => clip.id === clipId)!.startBar };
   }
 
   duplicateMelodicPattern(id: string): string | null {

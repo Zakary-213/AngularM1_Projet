@@ -97,6 +97,15 @@ export function addDrumClip(clips: readonly DrumClip[], startBar: number, newId:
   return sorted([...clips, { id: newId, startBar: clampStart(startBar, NEW_DRUM_CLIP_BARS), lengthBars: NEW_DRUM_CLIP_BARS, patternId }]);
 }
 
+/**
+ * Mesure où poser un nouveau clip de `lengthBars` mesures sans en masquer un autre :
+ * `wantedBar` si la place est libre, sinon juste après le dernier clip de la piste.
+ */
+export function freeStartBar(clips: readonly DrumClip[], wantedBar: number, lengthBars: number = NEW_DRUM_CLIP_BARS): number {
+  const overlaps = clips.some(clip => wantedBar < clip.startBar + clip.lengthBars && clip.startBar < wantedBar + lengthBars);
+  return overlaps ? drumClipsEndBar(clips) : wantedBar;
+}
+
 export function removeDrumClip(clips: readonly DrumClip[], id: string): DrumClip[] {
   return clips.filter(clip => clip.id !== id);
 }

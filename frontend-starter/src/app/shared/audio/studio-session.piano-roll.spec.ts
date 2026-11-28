@@ -82,4 +82,38 @@ describe('StudioSessionService — Piano Roll et pistes d’instruments (M4)', (
     expect(session.patterns().length + session.melodicPatterns().length).toBe(MAX_PATTERNS);
     expect(session.createMelodicPattern()).toBeNull();
   });
+
+  it('ajoute un instrument en un geste : partie nommée, ouverte et placée sur la bonne piste', () => {
+    const guitar = session.addInstrument('acousticGuitar')!;
+    expect(guitar.track).toBe('melody');
+    expect(guitar.clipId).not.toBeNull();
+    expect(session.editedMelodicPattern()).toMatchObject({ id: guitar.patternId, name: 'Guitare acoustique 01', instrument: 'acousticGuitar' });
+    expect(session.instrumentClips().melody.map(clip => clip.patternId)).toEqual([guitar.patternId]);
+
+    const bass = session.addInstrument('electricBass')!;
+    expect(bass.track).toBe('bass');
+    expect(session.instrumentClips().bass.map(clip => clip.patternId)).toEqual([bass.patternId]);
+    expect(session.addInstrument('acousticGuitar')!.patternId).not.toBe(guitar.patternId);
+    expect(session.editedMelodicPattern().name).toBe('Guitare acoustique 02');
+  });
+
+  it('ne recouvre pas une partie déjà placée : le nouvel instrument va après le dernier clip de la piste', () => {
+    const piano = session.addInstrument('piano')!;
+    expect(piano.startBar).toBe(0);
+    const strings = session.addInstrument('strings')!;
+    expect(strings.startBar).toBe(4);
+    expect(session.instrumentClips().melody.map(clip => [clip.patternId, clip.startBar])).toEqual([
+      [piano.patternId, 0],
+      [strings.patternId, 4],
+    ]);
+    // Autre piste : la basse démarre à la tête de lecture.
+    expect(session.addInstrument('bass808')!.startBar).toBe(0);
+  });
+
+  it('refuse d’ajouter un instrument quand la limite de patterns est atteinte', () => {
+    while (session.createMelodicPattern()) {
+      // remplit jusqu'à la limite partagée
+    }
+    expect(session.addInstrument('flute')).toBeNull();
+  });
 });

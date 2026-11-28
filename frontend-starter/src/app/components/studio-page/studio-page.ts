@@ -104,6 +104,14 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   readonly editorTabs: readonly EditorTab[] = ['Batterie', 'Piano Roll', 'Correction vocale', 'Paroles', 'Mixeur', 'Export'];
   readonly activeTab = signal<EditorTab>('Batterie');
+
+  /** Depuis une piste Mélodie ou Basse vide : ouvre le Piano Roll avec le choix d'instrument. */
+  openInstrumentPicker(event: Event): void {
+    // Le clic ne doit pas aussi déplacer la tête de lecture (gestionnaire de la piste).
+    event.stopPropagation();
+    this.session.instrumentPickerOpen.set(true);
+    this.activeTab.set('Piano Roll');
+  }
   readonly audioAccept = AUDIO_FILE_ACCEPT;
   readonly minBpm = MIN_BPM;
   readonly maxBpm = MAX_BPM;

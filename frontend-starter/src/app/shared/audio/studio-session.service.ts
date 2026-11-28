@@ -19,6 +19,7 @@ import {
   toggleStep,
 } from './drum-pattern';
 import { playInstrumentNote } from './instrument-synth';
+import { NoteClipboard, PasteResult, copyNotes, moveNotes, pasteNotes, removeNotes, resizeNotes, setNotesVelocity, shiftNotesVelocity } from './note-selection';
 import {
   DEFAULT_MELODY_PATTERN_ID,
   INSTRUMENT_LABELS,
@@ -585,6 +586,53 @@ export class StudioSessionService implements OnDestroy {
 
   removeNote(noteId: string): void {
     this.updateMelodicPattern(this.editedMelodicPattern().id, pattern => removeNote(pattern, noteId));
+  }
+
+  // ——— Plusieurs notes à la fois (sélection du Piano Roll) ———
+
+  /** Presse-papiers du Piano Roll, partagé entre les parties (copier la guitare vers les cordes). */
+  readonly noteClipboard = signal<NoteClipboard | null>(null);
+
+  /** Déplace et transpose la sélection du pattern affiché, dans la tessiture de son instrument. */
+  moveNotes(ids: ReadonlySet<string>, deltaSteps: number, deltaPitch: number): void {
+    const pattern = this.editedMelodicPattern();
+    this.updateMelodicPattern(pattern.id, () => moveNotes(pattern, ids, deltaSteps, deltaPitch, INSTRUMENT_RANGES[pattern.instrument]));
+  }
+
+  resizeNotes(ids: ReadonlySet<string>, deltaSteps: number): void {
+    this.updateMelodicPattern(this.editedMelodicPattern().id, pattern => resizeNotes(pattern, ids, deltaSteps));
+  }
+
+  setNotesVelocity(ids: ReadonlySet<string>, velocity: number): void {
+    this.updateMelodicPattern(this.editedMelodicPattern().id, pattern => setNotesVelocity(pattern, ids, velocity));
+  }
+
+  shiftNotesVelocity(ids: ReadonlySet<string>, delta: number): void {
+    this.updateMelodicPattern(this.editedMelodicPattern().id, pattern => shiftNotesVelocity(pattern, ids, delta));
+  }
+
+  removeNotes(ids: ReadonlySet<string>): void {
+    this.updateMelodicPattern(this.editedMelodicPattern().id, pattern => removeNotes(pattern, ids));
+  }
+
+  /** Copie la sélection ; renvoie le nombre de notes copiées. */
+  copyNotes(ids: ReadonlySet<string>): number {
+    const clipboard = copyNotes(this.editedMelodicPattern(), ids);
+    if (clipboard) {
+      this.noteClipboard.set(clipboard);
+    }
+    return clipboard?.notes.length ?? 0;
+  }
+
+  /** Colle le presse-papiers dans le pattern affiché à partir du pas `atStep`. */
+  pasteNotes(atStep: number, clipboard: NoteClipboard | null = this.noteClipboard()): PasteResult | null {
+    if (!clipboard) {
+      return null;
+    }
+    const pattern = this.editedMelodicPattern();
+    const result = pasteNotes(pattern, clipboard, atStep, INSTRUMENT_RANGES[pattern.instrument]);
+    this.updateMelodicPattern(pattern.id, () => result.pattern);
+    return result;
   }
 
   /** Fait entendre une note avec l'instrument et les réglages du pattern affiché. */

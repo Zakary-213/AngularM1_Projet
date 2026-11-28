@@ -388,6 +388,16 @@ Erreurs possibles : `400` JSON, thème ou réglage invalide (le champ `field` id
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
 
+### 28 novembre 2026 — Piano Roll : sélection multiple, copier, coller (#77)
+
+- **Sélection** : Ctrl ou Maj + clic ajoute ou retire une note ; glisser sur une zone vide trace un rectangle de sélection (Ctrl ou Maj : ajoute à la sélection) ; Ctrl + A sélectionne tout. Un simple clic sur une note d'une sélection la garde seule.
+- **Actions groupées** : glisser une note sélectionnée déplace toute la sélection ; flèches (Ctrl : un temps ou une octave), Maj + ←/→ pour la longueur, + / − et curseur pour la vélocité, Suppr. Le groupe reste dans le pattern et la tessiture sans déformer les accords ; s'il recouvrirait une autre note, rien ne bouge et un message l'explique.
+- **Copier / couper / coller / dupliquer** (Ctrl + C, X, V, D, et boutons) : le collage se fait juste après la sélection (coller plusieurs fois enchaîne les copies), ou à la place d'origine si rien n'est sélectionné. Le presse-papiers est partagé entre les parties : une phrase de guitare se colle dans les cordes, ramenée dans leur tessiture si besoin. Les notes hors du pattern ou sur une note existante sont ignorées, avec leur nombre.
+- **Clavier et accessibilité** : la grille est une zone focalisable (raccourcis disponibles après une suppression) ; le focus suit les notes collées ; barre d'édition toujours visible avec l'état de la sélection ; aide des raccourcis mise à jour.
+- **Code** : logique pure dans `shared/audio/note-selection.ts` (déplacement, longueur, vélocité, suppression, copie, collage, rectangle) ; la session expose les opérations et le presse-papiers.
+- **Vérifications** : `npm test` 340/340 (15 nouveaux tests : groupe borné, refus des chevauchements, copie relative, collage, tessiture, rectangle, presse-papiers entre parties) ; `npm run build` réussi. Navigateur avec vraie souris et vrai clavier : accord sélectionné au rectangle, Ctrl/Maj + clic, Ctrl + C puis deux Ctrl + V (3 accords aux pas 1, 5 et 9), Ctrl + A puis Ctrl + ↑ (une octave), glisser de deux notes ensemble, Suppr ; pas de débordement à 360 px.
+- **Limite** : pas d'annulation (Ctrl + Z) des modifications de notes, comme avant ; le rectangle de sélection n'existe pas au doigt (le glisser fait défiler la grille).
+
 ### 28 novembre 2026 — Ajouter un instrument en un clic (#75)
 
 - **Problème** : après #65, ajouter une guitare demandait trois étapes peu claires (créer un pattern, changer son instrument dans une liste, « Placer sur la piste »).

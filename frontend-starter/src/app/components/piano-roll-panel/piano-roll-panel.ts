@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, ElementRef, Injector, afterNextRender, computed, effect, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import {
   DEFAULT_NOTE_LENGTH,
@@ -28,6 +28,7 @@ import { MAX_PATTERNS, PATTERN_NAME_MAX_LENGTH } from '../../shared/audio/drum-p
 import { STEPS_PER_BAR, STEPS_PER_BEAT } from '../../shared/audio/music-time';
 import { instrumentClipsUsing } from '../../shared/audio/note-scheduling';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
+import { PasteResult, copyNotes, notesInBox, notesSpan } from '../../shared/audio/note-selection';
 import { InstrumentPickerComponent } from '../instrument-picker/instrument-picker';
 
 /** Taille d'une case de la grille, en pixels (piano-roll-panel.css s'y réfère par variables CSS). */
@@ -47,10 +48,21 @@ const NOTE_LENGTH_LABELS: Readonly<Record<(typeof NOTE_LENGTH_CHOICES)[number], 
 /** Glissement en cours : déplacement de la note, ou redimensionnement par sa poignée droite. */
 interface NoteDrag {
   readonly note: MidiNote;
+  /** Notes déplacées ensemble (la sélection au moment de l'appui). */
+  readonly ids: ReadonlySet<string>;
   readonly mode: 'move' | 'resize';
   readonly pointerId: number;
   readonly startX: number;
   readonly startY: number;
+}
+
+/** Début d'un rectangle de sélection (pixels dans la grille). */
+interface LassoStart {
+  readonly x: number;
+  readonly y: number;
+  readonly pointerId: number;
+  /** Ctrl ou Maj : le rectangle ajoute à la sélection au lieu de la remplacer. */
+  readonly additive: boolean;
 }
 
 /**
@@ -66,6 +78,8 @@ interface NoteDrag {
 })
 export class PianoRollPanelComponent {
   readonly session = inject(StudioSessionService);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
 
   readonly families = INSTRUMENT_FAMILIES;
   readonly familyLabels = INSTRUMENT_FAMILY_LABELS;
@@ -94,11 +108,22 @@ export class PianoRollPanelComponent {
   readonly patternCount = computed(() => this.session.patterns().length + this.session.melodicPatterns().length);
   readonly auditioning = computed(() => this.session.auditionPatternId() === this.pattern().id && this.session.playing());
 
-  readonly selectedNoteId = signal<string | null>(null);
-  readonly selectedNote = computed(() => this.pattern().notes.find(note => note.id === this.selectedNoteId()) ?? null);
-  /** Aperçu du glissement : décalage en pas et en demi-tons, ou allongement en pas. */
-  readonly dragPreview = signal<{ readonly id: string; readonly steps: number; readonly pitch: number; readonly mode: 'move' | 'resize' } | null>(null);
+  /** Notes sélectionnées (identifiants). Les actions d'édition s'appliquent à toutes. */
+  readonly selectedIds = signal<ReadonlySet<string>>(new Set());
+  readonly selectedNotes = computed(() => this.pattern().notes.filter(note => this.selectedIds().has(note.id)));
+  /** La note sélectionnée quand il n'y en a qu'une (nom affiché dans la barre). */
+  readonly selectedNote = computed(() => (this.selectedNotes().length === 1 ? this.selectedNotes()[0] : null));
+  readonly hasClipboard = computed(() => this.session.noteClipboard() !== null);
+  /** Aperçu du glissement : décalage en pas et en demi-tons de toute la sélection, ou allongement en pas. */
+  readonly dragPreview = signal<{ readonly ids: ReadonlySet<string>; readonly steps: number; readonly pitch: number; readonly mode: 'move' | 'resize' } | null>(null);
+  /** Rectangle de sélection en cours, en pixels dans la grille. */
+  readonly lasso = signal<{ readonly left: number; readonly top: number; readonly width: number; readonly height: number } | null>(null);
   private drag: NoteDrag | null = null;
+  private lassoStart: LassoStart | null = null;
+  /** Le clic qui suit un rectangle de sélection ne doit pas poser de note. */
+  private skipNextGridClick = false;
+  /** Pas où coller sans sélection : la place d'origine du bloc copié. */
+  private copiedFromStep = 0;
 
   readonly message = signal<string | null>(null);
   /** Confirmation affichée après l'ajout d'un instrument (distincte des erreurs). */
@@ -224,8 +249,11 @@ export class PianoRollPanelComponent {
 
   /** Clic dans une case vide : pose une note de la longueur choisie. */
   onGridClick(event: MouseEvent): void {
-    const grid = event.currentTarget as HTMLElement;
-    const rect = grid.getBoundingClientRect();
+    if (this.skipNextGridClick) {
+      this.skipNextGridClick = false;
+      return;
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     const cell = cellAtPoint(event.clientX - rect.left, event.clientY - rect.top, {
       stepWidth: STEP_WIDTH_PX,
       rowHeight: ROW_HEIGHT_PX,
@@ -254,7 +282,7 @@ export class PianoRollPanelComponent {
       this.message.set(result.error);
     } else {
       this.message.set(null);
-      this.selectedNoteId.set(result.id);
+      this.selectOnly(result.id);
     }
   }
 
@@ -262,61 +290,130 @@ export class PianoRollPanelComponent {
     return describeNote(note);
   }
 
+  isSelected(note: MidiNote): boolean {
+    return this.selectedIds().has(note.id);
+  }
+
   /** Position de la note dans la grille (px), en tenant compte de l'aperçu de glissement. */
   noteBox(note: MidiNote): { left: number; top: number; width: number } {
     const preview = this.dragPreview();
-    const dragged = preview?.id === note.id ? preview : null;
+    const dragged = preview?.ids.has(note.id) ? preview : null;
     const startStep = note.startStep + (dragged?.mode === 'move' ? dragged.steps : 0);
     const pitch = note.pitch + (dragged?.mode === 'move' ? dragged.pitch : 0);
     const duration = Math.max(1, note.durationSteps + (dragged?.mode === 'resize' ? dragged.steps : 0));
     return { left: startStep * STEP_WIDTH_PX, top: (this.range().high - pitch) * ROW_HEIGHT_PX, width: duration * STEP_WIDTH_PX };
   }
 
-  selectNote(note: MidiNote, event?: Event): void {
-    event?.stopPropagation();
-    this.selectedNoteId.set(note.id);
+  // ——— Sélection ———
+
+  selectOnly(id: string): void {
+    this.selectedIds.set(new Set([id]));
+  }
+
+  clearSelection(): void {
+    this.selectedIds.set(new Set());
+  }
+
+  selectAll(): void {
+    this.selectedIds.set(new Set(this.pattern().notes.map(note => note.id)));
+  }
+
+  private toggleInSelection(id: string): void {
+    this.selectedIds.update(current => {
+      const next = new Set(current);
+      if (!next.delete(id)) {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  /** Clic sur une note. Au clavier (Entrée, Espace), la note devient la seule sélectionnée. */
+  onNoteClick(note: MidiNote, event: MouseEvent): void {
+    event.stopPropagation();
+    if (event.detail === 0) {
+      this.selectOnly(note.id);
+    }
+  }
+
+  /** Sans sélection, la note qui a le focus devient la sélection (Tab puis flèches). */
+  onNoteKeydown(note: MidiNote): void {
+    if (this.selectedIds().size === 0) {
+      this.selectOnly(note.id);
+    }
   }
 
   /**
-   * Clavier, quand une note a le focus : ←/→ déplacer d'un pas (Ctrl : d'un temps),
-   * ↑/↓ d'un demi-ton (Ctrl : d'une octave), Maj + ←/→ raccourcir/allonger,
-   * + / − vélocité, Suppr supprimer, Échap désélectionner.
+   * Raccourcis du Piano Roll, quand une note ou la grille a le focus : Ctrl + A/C/X/V/D,
+   * Suppr, flèches (Ctrl : un temps ou une octave), Maj + ←/→ longueur, + / − vélocité, Échap.
    */
-  onNoteKey(event: KeyboardEvent, note: MidiNote): void {
-    const big = event.ctrlKey || event.metaKey;
+  onRollKey(event: KeyboardEvent): void {
+    if ((event.target as HTMLElement).closest('input, select, textarea')) {
+      return;
+    }
+    const command = event.ctrlKey || event.metaKey;
     let handled = true;
-    this.selectedNoteId.set(note.id);
-    switch (event.key) {
-      case 'ArrowLeft':
-      case 'ArrowRight': {
-        const direction = event.key === 'ArrowLeft' ? -1 : 1;
-        if (event.shiftKey) {
-          this.session.resizeNote(note.id, direction);
-        } else {
-          this.session.moveNote(note.id, direction * (big ? STEPS_PER_BEAT : 1), 0);
-        }
-        break;
+    if (command && !event.altKey) {
+      switch (event.key.toLowerCase()) {
+        case 'a':
+          this.selectAll();
+          break;
+        case 'c':
+          this.copySelection();
+          break;
+        case 'x':
+          this.cutSelection();
+          break;
+        case 'v':
+          this.paste();
+          break;
+        case 'd':
+          this.duplicateSelection();
+          break;
+        case 'arrowleft':
+        case 'arrowright':
+          this.moveSelected((event.key === 'ArrowLeft' ? -1 : 1) * STEPS_PER_BEAT, 0);
+          break;
+        case 'arrowup':
+        case 'arrowdown':
+          this.moveSelected(0, event.key === 'ArrowUp' ? 12 : -12);
+          break;
+        default:
+          handled = false;
       }
-      case 'ArrowUp':
-      case 'ArrowDown':
-        this.session.moveNote(note.id, 0, (event.key === 'ArrowUp' ? 1 : -1) * (big ? 12 : 1));
-        break;
-      case '+':
-      case '=':
-        this.session.setNoteVelocity(note.id, note.velocity + 0.1);
-        break;
-      case '-':
-        this.session.setNoteVelocity(note.id, note.velocity - 0.1);
-        break;
-      case 'Delete':
-      case 'Backspace':
-        this.removeSelected();
-        break;
-      case 'Escape':
-        this.selectedNoteId.set(null);
-        break;
-      default:
-        handled = false;
+    } else {
+      switch (event.key) {
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+          const direction = event.key === 'ArrowLeft' ? -1 : 1;
+          if (event.shiftKey) {
+            this.resizeSelected(direction);
+          } else {
+            this.moveSelected(direction, 0);
+          }
+          break;
+        }
+        case 'ArrowUp':
+        case 'ArrowDown':
+          this.moveSelected(0, event.key === 'ArrowUp' ? 1 : -1);
+          break;
+        case '+':
+        case '=':
+          this.session.shiftNotesVelocity(this.selectedIds(), 0.1);
+          break;
+        case '-':
+          this.session.shiftNotesVelocity(this.selectedIds(), -0.1);
+          break;
+        case 'Delete':
+        case 'Backspace':
+          this.removeSelected();
+          break;
+        case 'Escape':
+          this.clearSelection();
+          break;
+        default:
+          handled = false;
+      }
     }
     if (handled) {
       event.preventDefault();
@@ -325,42 +422,117 @@ export class PianoRollPanelComponent {
   }
 
   moveSelected(deltaSteps: number, deltaPitch: number): void {
-    const note = this.selectedNote();
-    if (note) {
-      this.session.moveNote(note.id, deltaSteps, deltaPitch);
+    const ids = this.selectedIds();
+    if (ids.size === 0) {
+      return;
+    }
+    const before = this.pattern();
+    this.session.moveNotes(ids, deltaSteps, deltaPitch);
+    if (this.pattern() === before) {
+      this.message.set('Déplacement impossible : la sélection recouvrirait une autre note, ou est déjà au bord du pattern.');
+      return;
+    }
+    this.message.set(null);
+    if (deltaPitch !== 0 && ids.size === 1) {
+      void this.session.previewNote(this.selectedNotes()[0].pitch);
     }
   }
 
   resizeSelected(deltaSteps: number): void {
-    const note = this.selectedNote();
-    if (note) {
-      this.session.resizeNote(note.id, deltaSteps);
-    }
+    this.session.resizeNotes(this.selectedIds(), deltaSteps);
   }
 
   onVelocity(event: Event): void {
-    const note = this.selectedNote();
-    if (note) {
-      this.session.setNoteVelocity(note.id, Number((event.target as HTMLInputElement).value) / 100);
-    }
+    this.session.setNotesVelocity(this.selectedIds(), Number((event.target as HTMLInputElement).value) / 100);
   }
 
   removeSelected(): void {
-    const note = this.selectedNote();
-    if (note) {
-      this.session.removeNote(note.id);
-      this.selectedNoteId.set(null);
+    const ids = this.selectedIds();
+    if (ids.size > 0) {
+      this.session.removeNotes(ids);
+      this.clearSelection();
+      // La note qui avait le focus a disparu : la grille le reprend pour garder les raccourcis.
+      this.host.nativeElement.querySelector<HTMLElement>('.roll-scroll')?.focus({ preventScroll: true });
     }
   }
+
+  // ——— Copier, couper, coller, dupliquer ———
+
+  copySelection(): void {
+    const span = notesSpan(this.selectedNotes());
+    const count = this.session.copyNotes(this.selectedIds());
+    if (!span || count === 0) {
+      this.message.set('Sélectionnez d’abord des notes à copier (clic, Ctrl + clic ou rectangle).');
+      return;
+    }
+    this.copiedFromStep = span.start;
+    this.message.set(null);
+    this.notice.set(`${count} note${count > 1 ? 's' : ''} copiée${count > 1 ? 's' : ''}. Ctrl + V colle juste après la sélection, ou à la même place si rien n’est sélectionné.`);
+  }
+
+  cutSelection(): void {
+    if (this.selectedIds().size === 0) {
+      this.message.set('Sélectionnez d’abord des notes à couper.');
+      return;
+    }
+    this.copySelection();
+    this.removeSelected();
+  }
+
+  /** Colle juste après la sélection ; sans sélection, à la place d'origine du bloc copié. */
+  paste(): void {
+    const span = notesSpan(this.selectedNotes());
+    this.applyPaste(this.session.pasteNotes(span ? span.end : this.copiedFromStep), 'coller');
+  }
+
+  /** Recopie la sélection juste après elle, sans toucher au presse-papiers. */
+  duplicateSelection(): void {
+    const span = notesSpan(this.selectedNotes());
+    const block = copyNotes(this.pattern(), this.selectedIds());
+    if (!span || !block) {
+      this.message.set('Sélectionnez d’abord des notes à dupliquer.');
+      return;
+    }
+    this.applyPaste(this.session.pasteNotes(span.end, block), 'dupliquer');
+  }
+
+  private applyPaste(result: PasteResult | null, verb: string): void {
+    if (!result) {
+      this.message.set('Rien à coller : copiez d’abord des notes (Ctrl + C).');
+      return;
+    }
+    if (result.ids.length === 0) {
+      this.message.set(`Impossible de ${verb} : plus de place à cet endroit du pattern (allongez-le ou sélectionnez plus tôt).`);
+      return;
+    }
+    this.selectedIds.set(new Set(result.ids));
+    this.focusNote(result.ids[0]);
+    const skipped = result.skipped;
+    this.message.set(skipped > 0 ? `${skipped} note${skipped > 1 ? 's' : ''} ignorée${skipped > 1 ? 's' : ''} : hors du pattern ou sur une note existante.` : null);
+  }
+
+  /** Le focus suit les notes collées : les raccourcis suivants s'appliquent à elles. */
+  private focusNote(id: string): void {
+    afterNextRender(() => this.host.nativeElement.querySelector<HTMLElement>(`[data-note-id="${id}"]`)?.focus({ preventScroll: true }), { injector: this.injector });
+  }
+
+  // ——— Souris : glisser des notes, rectangle de sélection ———
 
   onNotePointerDown(event: PointerEvent, note: MidiNote): void {
     if (event.button !== 0) {
       return;
     }
     event.stopPropagation();
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      this.toggleInSelection(note.id);
+      return;
+    }
+    if (!this.selectedIds().has(note.id)) {
+      this.selectOnly(note.id);
+    }
     const resize = (event.target as HTMLElement).classList.contains('resize-handle');
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    this.drag = { note, mode: resize ? 'resize' : 'move', pointerId: event.pointerId, startX: event.clientX, startY: event.clientY };
+    this.drag = { note, ids: this.selectedIds(), mode: resize ? 'resize' : 'move', pointerId: event.pointerId, startX: event.clientX, startY: event.clientY };
   }
 
   onNotePointerMove(event: PointerEvent): void {
@@ -375,7 +547,7 @@ export class PianoRollPanelComponent {
     }
     // Aperçu calé sur la grille ; vers le haut = plus aigu.
     this.dragPreview.set({
-      id: drag.note.id,
+      ids: drag.ids,
       mode: drag.mode,
       steps: Math.round(dx / STEP_WIDTH_PX),
       pitch: drag.mode === 'move' ? -Math.round(dy / ROW_HEIGHT_PX) : 0,
@@ -390,20 +562,73 @@ export class PianoRollPanelComponent {
     const preview = this.dragPreview();
     this.drag = null;
     this.dragPreview.set(null);
-    this.selectedNoteId.set(drag.note.id);
     if (!preview) {
-      return; // simple clic : sélection
+      // Simple clic sur une note d'une sélection multiple : elle devient la seule sélectionnée.
+      this.selectOnly(drag.note.id);
+      return;
     }
     if (preview.mode === 'resize') {
-      this.session.resizeNote(drag.note.id, preview.steps);
+      this.session.resizeNotes(drag.ids, preview.steps);
     } else {
-      this.session.moveNote(drag.note.id, preview.steps, preview.pitch);
+      this.moveSelected(preview.steps, preview.pitch);
     }
   }
 
   onNotePointerCancel(): void {
     this.drag = null;
     this.dragPreview.set(null);
+  }
+
+  /** Appui sur une case vide : début possible d'un rectangle de sélection. */
+  onGridPointerDown(event: PointerEvent): void {
+    if (event.button !== 0 || (event.target as HTMLElement).closest('.note')) {
+      return;
+    }
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.lassoStart = { x: event.clientX - rect.left, y: event.clientY - rect.top, pointerId: event.pointerId, additive: event.ctrlKey || event.metaKey || event.shiftKey };
+  }
+
+  onGridPointerMove(event: PointerEvent): void {
+    const start = this.lassoStart;
+    if (!start || start.pointerId !== event.pointerId) {
+      return;
+    }
+    const grid = event.currentTarget as HTMLElement;
+    const rect = grid.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    if (!this.lasso()) {
+      if (Math.abs(x - start.x) < DRAG_THRESHOLD_PX && Math.abs(y - start.y) < DRAG_THRESHOLD_PX) {
+        return;
+      }
+      grid.setPointerCapture?.(event.pointerId);
+    }
+    this.lasso.set({ left: Math.min(x, start.x), top: Math.min(y, start.y), width: Math.abs(x - start.x), height: Math.abs(y - start.y) });
+  }
+
+  onGridPointerUp(event: PointerEvent): void {
+    const start = this.lassoStart;
+    const box = this.lasso();
+    this.lassoStart = null;
+    this.lasso.set(null);
+    if (!start || !box || start.pointerId !== event.pointerId) {
+      return;
+    }
+    this.skipNextGridClick = true;
+    const { high } = this.range();
+    const found = notesInBox(
+      this.pattern(),
+      Math.floor(box.left / STEP_WIDTH_PX),
+      Math.floor((box.left + box.width) / STEP_WIDTH_PX),
+      high - Math.floor((box.top + box.height) / ROW_HEIGHT_PX),
+      high - Math.floor(box.top / ROW_HEIGHT_PX),
+    );
+    this.selectedIds.update(current => new Set(start.additive ? [...current, ...found] : found));
+  }
+
+  onGridPointerCancel(): void {
+    this.lassoStart = null;
+    this.lasso.set(null);
   }
 
   formatTone(tone: number): string {
@@ -419,6 +644,6 @@ export class PianoRollPanelComponent {
     this.renaming.set(false);
     this.confirmDelete.set(false);
     this.message.set(null);
-    this.selectedNoteId.set(null);
+    this.clearSelection();
   }
 }

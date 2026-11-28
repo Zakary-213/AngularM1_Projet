@@ -78,9 +78,10 @@
 @if (message(); as text) { <p class="error" role="alert">{{ text }}</p> }
 
 <p class="muted help" id="roll-help">
-  Instruments synthétisés, sans sample. Cliquez une case pour poser une note (longueur choisie ci-dessous), les touches du clavier à gauche font entendre la hauteur.
-  Glissez une note pour la déplacer, sa poignée droite pour l’allonger. Au clavier, sur une note : ←/→ un pas (Ctrl : un temps), ↑/↓ un demi-ton (Ctrl : une octave),
-  Maj + ←/→ raccourcir/allonger, + / − vélocité, Suppr pour supprimer. Les modifications s’entendent pendant la lecture.
+  Cliquez une case pour poser une note ; les touches du clavier à gauche font entendre la hauteur. Glissez une note pour la déplacer, sa poignée droite pour l’allonger.
+  <b>Sélection</b> : Ctrl ou Maj + clic pour ajouter une note, glissez sur une zone vide pour tracer un rectangle, Ctrl + A pour tout. Glisser une note sélectionnée déplace toute la sélection.
+  <b>Raccourcis</b> : Ctrl + C copier, Ctrl + X couper, Ctrl + V coller (après la sélection), Ctrl + D dupliquer, Suppr supprimer ; ←/→ un pas (Ctrl : un temps), ↑/↓ un demi-ton (Ctrl : une octave),
+  Maj + ←/→ raccourcir/allonger, + / − vélocité, Échap pour désélectionner.
 </p>
 
 <form class="roll-toolbar add-form" [formGroup]="addForm" (ngSubmit)="addFromForm()" aria-label="Ajouter une note au clavier">
@@ -107,25 +108,43 @@
   <button type="submit">Ajouter la note</button>
 </form>
 
-@if (selectedNote(); as note) {
-  <div class="roll-toolbar note-tools" role="group" aria-label="Note sélectionnée">
-    <span role="status">Note : <b>{{ noteLabel(note) }}</b></span>
+@let count = selectedNotes().length;
+<div class="roll-toolbar note-tools" role="group" aria-label="Édition des notes">
+  <span role="status" class="selection-status">
+    @if (selectedNote(); as note) {
+      Note : <b>{{ noteLabel(note) }}</b>
+    } @else if (count > 1) {
+      <b>{{ count }} notes</b> sélectionnées
+    } @else {
+      Aucune note sélectionnée
+    }
+  </span>
+  <button type="button" (click)="selectAll()" [disabled]="current.notes.length === 0">Tout sélectionner</button>
+  <button type="button" (click)="copySelection()" [disabled]="count === 0" aria-keyshortcuts="Control+C">Copier</button>
+  <button type="button" (click)="cutSelection()" [disabled]="count === 0" aria-keyshortcuts="Control+X">Couper</button>
+  <button type="button" (click)="paste()" [disabled]="!hasClipboard()" aria-keyshortcuts="Control+V">Coller</button>
+  <button type="button" (click)="duplicateSelection()" [disabled]="count === 0" aria-keyshortcuts="Control+D">Dupliquer</button>
+  @if (count > 0) {
     <button type="button" (click)="moveSelected(-1, 0)" aria-label="Un pas plus tôt">◀</button>
     <button type="button" (click)="moveSelected(1, 0)" aria-label="Un pas plus tard">▶</button>
     <button type="button" (click)="moveSelected(0, 1)" aria-label="Un demi-ton plus haut">▲</button>
     <button type="button" (click)="moveSelected(0, -1)" aria-label="Un demi-ton plus bas">▼</button>
+    <button type="button" (click)="moveSelected(0, 12)" aria-label="Une octave plus haut">+ 8ve</button>
+    <button type="button" (click)="moveSelected(0, -12)" aria-label="Une octave plus bas">− 8ve</button>
     <button type="button" (click)="resizeSelected(-1)" aria-label="Raccourcir d’un pas">− 1 pas</button>
     <button type="button" (click)="resizeSelected(1)" aria-label="Allonger d’un pas">+ 1 pas</button>
     <label class="velocity-field">Vélocité
-      <input type="range" min="5" max="100" step="5" aria-label="Vélocité de la note" [value]="note.velocity * 100" (input)="onVelocity($event)" [attr.aria-valuetext]="formatTone(note.velocity)" />
+      <input type="range" min="5" max="100" step="5" [attr.aria-label]="count > 1 ? 'Vélocité des notes sélectionnées' : 'Vélocité de la note'"
+        [value]="selectedNotes()[0].velocity * 100" (input)="onVelocity($event)" [attr.aria-valuetext]="formatTone(selectedNotes()[0].velocity)" />
     </label>
-    <button type="button" class="danger" (click)="removeSelected()">Supprimer la note</button>
-    <button type="button" (click)="selectedNoteId.set(null)">Désélectionner</button>
-  </div>
-}
+    <button type="button" class="danger" (click)="removeSelected()">Supprimer</button>
+    <button type="button" (click)="clearSelection()">Désélectionner</button>
+  }
+</div>
 
 <!-- Seule cette zone défile (dans les deux sens) : la page ne déborde pas. -->
-<div class="roll-scroll" [style.--step-width.px]="stepWidth" [style.--row-height.px]="rowHeight">
+<div class="roll-scroll" [style.--step-width.px]="stepWidth" [style.--row-height.px]="rowHeight" (keydown)="onRollKey($event)"
+  tabindex="0" role="region" aria-label="Grille du Piano Roll" aria-describedby="roll-help">
   <div class="roll">
     <div class="keys" aria-label="Clavier : écouter une hauteur" role="group">
       @for (pitch of rows(); track pitch) {
@@ -134,19 +153,23 @@
         </button>
       }
     </div>
-    <div class="note-grid" [style.width.px]="steps() * stepWidth" [style.height.px]="rows().length * rowHeight" (click)="onGridClick($event)" aria-describedby="roll-help">
+    <div class="note-grid" [style.width.px]="steps() * stepWidth" [style.height.px]="rows().length * rowHeight" (click)="onGridClick($event)" aria-describedby="roll-help"
+      (pointerdown)="onGridPointerDown($event)" (pointermove)="onGridPointerMove($event)" (pointerup)="onGridPointerUp($event)" (pointercancel)="onGridPointerCancel()">
       @for (pitch of rows(); track pitch) {
         <div class="pitch-row" [class.black]="isBlackKey(pitch)" aria-hidden="true"></div>
       }
       @if (session.melodicStep() >= 0) {
         <span class="playhead" [style.left.px]="session.melodicStep() * stepWidth" aria-hidden="true"></span>
       }
+      @if (lasso(); as box) {
+        <span class="lasso" [style.left.px]="box.left" [style.top.px]="box.top" [style.width.px]="box.width" [style.height.px]="box.height" aria-hidden="true"></span>
+      }
       @for (note of current.notes; track note.id) {
         @let box = noteBox(note);
-        <button type="button" class="note" [class.selected]="note.id === selectedNoteId()" [class.dragging]="dragPreview()?.id === note.id"
+        <button type="button" class="note" [class.selected]="isSelected(note)" [class.dragging]="isSelected(note) && dragPreview() !== null"
           [style.left.px]="box.left" [style.top.px]="box.top" [style.width.px]="box.width" [style.opacity]="0.45 + note.velocity * 0.55"
-          [attr.aria-label]="noteLabel(note)" [attr.aria-pressed]="note.id === selectedNoteId()" aria-describedby="roll-help"
-          (click)="selectNote(note, $event)" (keydown)="onNoteKey($event, note)"
+          [attr.aria-label]="noteLabel(note)" [attr.aria-pressed]="isSelected(note)" [attr.data-note-id]="note.id" aria-describedby="roll-help"
+          (click)="onNoteClick(note, $event)" (keydown)="onNoteKeydown(note)"
           (pointerdown)="onNotePointerDown($event, note)" (pointermove)="onNotePointerMove($event)" (pointerup)="onNotePointerUp($event)" (pointercancel)="onNotePointerCancel()">
           <span class="note-name" aria-hidden="true">{{ noteName(note.pitch) }}</span>
           <span class="resize-handle" aria-hidden="true"></span>

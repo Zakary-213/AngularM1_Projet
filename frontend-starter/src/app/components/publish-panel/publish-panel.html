@@ -1,0 +1,86 @@
+<section class="panel publish" aria-labelledby="publish-heading">
+  <div class="publish-head">
+    <div>
+      <h2 id="publish-heading">Publier le son</h2>
+      <p class="muted">Le morceau est rendu comme à l'export puis mis en ligne sur la page Publications, où tout le monde peut l'écouter. Votre projet, vos prises et vos fichiers restent privés.</p>
+    </div>
+    <button type="button" class="close" (click)="close()" [disabled]="state().step === 'rendering'"
+      [attr.aria-label]="state().step === 'uploading' ? 'Annuler l’envoi et fermer' : 'Fermer'">✕</button>
+  </div>
+
+  @switch (state().step) {
+    @case ('done') {
+      <div class="success" role="status">
+        <p><b>Morceau publié.</b> Il apparaît maintenant sur la page Publications.</p>
+        <div class="actions">
+          <a class="button primary" routerLink="/publications">Voir les publications</a>
+          <button type="button" (click)="close()">Fermer</button>
+        </div>
+      </div>
+    }
+    @default {
+      <form [formGroup]="form" (ngSubmit)="publish()" novalidate>
+        <label for="publish-title">Titre du morceau
+          <input id="publish-title" type="text" formControlName="title" [maxlength]="limits.titleMaxLength" autocomplete="off"
+            aria-describedby="publish-title-error" [attr.aria-invalid]="form.controls.title.invalid && form.controls.title.touched" />
+        </label>
+        <small id="publish-title-error" class="error">
+          @if (form.controls.title.touched && form.controls.title.invalid) { Donnez un titre de 1 à {{ limits.titleMaxLength }} caractères. }
+        </small>
+
+        <label for="publish-description">Description <span class="muted">(facultative)</span>
+          <textarea id="publish-description" formControlName="description" rows="3" [maxlength]="limits.descriptionMaxLength"
+            aria-describedby="publish-description-count"></textarea>
+        </label>
+        <small id="publish-description-count" class="muted">{{ form.controls.description.value.length }} / {{ limits.descriptionMaxLength }} caractères</small>
+
+        @if (publishedTracks(); as tracks) {
+          <p class="facts">Pistes publiées : <b>{{ tracks }}</b> <span class="muted hint">(les pistes muettes dans le mixeur restent silencieuses)</span></p>
+        }
+        <p class="muted facts">Tempo et tonalité du projet sauvegardé · WAV stéréo 16 bits · {{ maxMegabytes }} Mo maximum (environ 5 min 50 s).</p>
+
+        @if (blocker(); as reason) {
+          <p class="error" role="status">{{ reason }}</p>
+          @if (studioProject.saveState() === 'dirty' || studioProject.saveState() === 'error') {
+            <button type="button" (click)="studioProject.save()" [disabled]="!studioProject.canSave()">💾 Sauvegarder maintenant</button>
+          }
+        }
+
+        <div class="actions">
+          <button type="submit" class="button primary" [disabled]="busy() || blocker() !== null">
+            @switch (state().step) {
+              @case ('rendering') { Rendu du morceau… }
+              @case ('uploading') { Envoi en cours… }
+              @default { ↗ Publier le son }
+            }
+          </button>
+        </div>
+
+        <div role="status" class="progress">
+          @if (state().step === 'rendering') {
+            @let render = renderPercent();
+            @if (render !== null) {
+              <label for="publish-render">Rendu : {{ render }} %
+                <progress id="publish-render" max="100" [value]="render"></progress>
+              </label>
+            } @else { <p>Rendu du morceau…</p> }
+          }
+          @if (state(); as current) {
+            @if (current.step === 'uploading') {
+              @if (current.percent !== null) {
+                <label for="publish-upload">Envoi : {{ current.percent }} %
+                  <progress id="publish-upload" max="100" [value]="current.percent"></progress>
+                </label>
+              } @else { <p>Envoi en cours…</p> }
+            }
+          }
+        </div>
+        @if (state(); as current) {
+          @if (current.step === 'error') {
+            <p class="error" role="alert">{{ current.message }} <button type="submit" class="retry">Réessayer</button></p>
+          }
+        }
+      </form>
+    }
+  }
+</section>

@@ -56,6 +56,7 @@ import {
 import { InputDevice, MicrophoneRecorder, describeMicrophoneError, takeStartSeconds, toInputDevices } from './microphone-recorder';
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm, stepDurationSeconds } from './music-time';
 import { renderMix } from './offline-render';
+import { tracksWithContent } from './track-content';
 import { MixLevels } from './mixer-graph';
 import { PatternTransport, TrackClip } from './pattern-transport';
 import { NOTE_NAMES, SCALE_LABELS, midiToFrequency } from './pitch/musical-scale';
@@ -1217,6 +1218,18 @@ export class StudioSessionService implements OnDestroy {
     this.inputLevel.set(SILENT_LEVEL);
   }
 
+  /** Pistes qui contiennent du son (#80) : il en faut au moins une pour publier. */
+  readonly tracksWithContent = computed(() =>
+    tracksWithContent({
+      drumClips: this.drumClips(),
+      drumPatterns: this.patterns(),
+      instrumentClips: this.instrumentClips(),
+      melodicPatterns: this.melodicPatterns(),
+      hasInstrumental: this.instrumental() !== null,
+      hasTake: this.take() !== null,
+    }),
+  );
+
   /** Durée du morceau à exporter : tous les clips placés, durée réelle des fichiers et traîne des effets. */
   readonly exportPlan = computed(() => {
     const mixer = this.mixer();
@@ -1233,15 +1246,27 @@ export class StudioSessionService implements OnDestroy {
    * voix corrigée si elle est choisie, effets et Master), puis téléchargement en WAV.
    */
   async exportWav(fileTitle = 'zakat-record'): Promise<void> {
+    const result = await this.renderWav();
+    if (result) {
+      downloadBlob(result.wav, `${safeFileName(fileTitle)}-${this.bpm()}bpm.wav`);
+    }
+  }
+
+  /**
+   * Rendu du mix en WAV, partagé par l'export et la publication (#80) : le fichier
+   * publié est exactement celui qu'on téléchargerait. Renvoie null si rien n'est rendu ;
+   * l'erreur est alors dans exportError.
+   */
+  async renderWav(): Promise<{ readonly wav: Blob; readonly report: ExportReport } | null> {
     if (this.exporting()) {
-      return;
+      return null;
     }
     const plan = this.exportPlan();
     this.exportError.set(null);
     this.exportReport.set(null);
     if (!plan.ok) {
       this.exportError.set('Rien à exporter : placez un clip, une instrumentale ou une prise sur la timeline.');
-      return;
+      return null;
     }
     this.exporting.set(true);
     // Sans suspension du rendu hors temps réel (Firefox), l'avancement reste inconnu (null).
@@ -1266,12 +1291,14 @@ export class StudioSessionService implements OnDestroy {
       this.exportProgress.set(1);
       const channels = Array.from({ length: rendered.numberOfChannels }, (_, index) => rendered.getChannelData(index));
       const wav = new Blob([encodeWav(channels, rendered.sampleRate)], { type: 'audio/wav' });
-      downloadBlob(wav, `${safeFileName(fileTitle)}-${this.bpm()}bpm.wav`);
-      this.exportReport.set({ seconds: rendered.duration, peakDb: gainToDecibels(peakLevel(channels)), correctedVoice, truncated: plan.truncated });
-      console.log('[studio] export WAV', { seconds: rendered.duration, renderMs: Math.round(performance.now() - started), correctedVoice });
+      const report: ExportReport = { seconds: rendered.duration, peakDb: gainToDecibels(peakLevel(channels)), correctedVoice, truncated: plan.truncated };
+      this.exportReport.set(report);
+      console.log('[studio] rendu WAV', { seconds: rendered.duration, renderMs: Math.round(performance.now() - started), correctedVoice });
+      return { wav, report };
     } catch (error) {
       console.error('[studio] export impossible', error);
       this.exportError.set("L'export a échoué (mémoire insuffisante ou rendu interrompu). Réessayez ou raccourcissez le morceau.");
+      return null;
     } finally {
       this.exporting.set(false);
       this.exportProgress.set(null);

@@ -68,7 +68,7 @@ flowchart LR
 
 ### Hors périmètre (V1)
 
-Génération **audio** par IA (instrumentales), séparation de voix, clonage vocal et correction de hauteur **en direct** pendant la prise. La collaboration temps réel et la publication sont envisagées mais doivent d'abord être validées (voir [AGENTS.md](AGENTS.md)).
+Génération **audio** par IA (instrumentales), séparation de voix, clonage vocal et correction de hauteur **en direct** pendant la prise. La collaboration temps réel est envisagée mais doit d'abord être validée (voir [AGENTS.md](AGENTS.md)) ; la publication du mix final est disponible depuis #80.
 
 ---
 
@@ -81,7 +81,8 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Accueil | Visite 3D d'un studio au défilement : la caméra avance jusqu'au bureau (synthé, enceintes, écran) | ✅ Fonctionnel |
 | Projets | Mes projets (créer « Créer / Importer une prod », ouvrir, renommer, supprimer, pagination), sauvegarde du studio avec état visible et conflits détectés | ✅ Fonctionnel (M1) |
 | Bibliothèque | Les 24 sons réels du studio (12 frappes des kits boom bap et trap, 12 instruments) : filtre par catégorie, recherche, préécoute ; catégorie Samples vide pour l'instant | ✅ Fonctionnel (#72) |
-| Interface | Pages Collaborations, Publications | 🎨 Maquette |
+| Publications | Bouton « Publier le son » dans le studio (mix rendu comme à l'export), page Publications lue depuis la base avec lecteur, « Mes publications » avec retrait | ✅ Fonctionnel (#80) |
+| Interface | Page Collaborations | 🎨 Maquette |
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Timeline | Se placer (clic, clavier), boucle, clips de batterie (déplacer, dupliquer, raccourcir, supprimer), instrumentale et prises déplaçables, Annuler / Rétablir, positions sauvegardées | ✅ Fonctionnel (M5) |
@@ -359,6 +360,25 @@ Erreurs possibles : `400` JSON, thème ou réglage invalide (le champ `field` id
 
 **Sauvegarde côté studio.** Bouton 💾 ou Ctrl + S, et sauvegarde automatique (case à cocher, active par défaut) 2 s après la dernière modification : une série de réglages part en une seule requête `PUT`. Jamais pendant l'envoi d'un fichier ni après un `409` ; après un échec, pas de nouvel essai automatique avant une nouvelle modification.
 
+### Publications (#80)
+
+Schéma : `backend/src/models/Publication.js` ; routes : `backend/src/routes/publications.js`. Une publication est le **mix final** d'un projet, séparé du projet éditable : le projet, ses prises et ses fichiers `Track` restent privés. Les lectures sont publiques (sans JWT) ; publier et retirer exigent le JWT.
+
+| Méthode | Route | Requête | Réponse principale |
+|---|---|---|---|
+| GET | `/publications?page=1&limit=12` | aucune authentification (`limit` 1 à 50, défaut 12) | `200 Page<Publication>`, de la plus récente à la plus ancienne, tous auteurs |
+| GET | `/publications/mine?page=1&limit=12` | JWT | `200 Page<Publication>` de l'utilisateur connecté |
+| GET | `/publications/:id` | aucune authentification | `200 Publication` |
+| GET | `/publications/:id/audio` | aucune authentification ; en-tête `Range` accepté | flux `audio/wav` (`200`, ou `206` pour une plage) |
+| POST | `/publications` | multipart : `projectId`, `title`, `description?` puis `audio` (WAV) + JWT | `201 Publication` |
+| DELETE | `/publications/:id` | JWT (auteur) | `204`, fichier audio supprimé |
+
+`Publication` : `id`, `title` (1 à 80 caractères), `description` (0 à 500), `author` {`id`, `name`} (seul le nom de l'auteur est exposé), `bpm` et `key` {`root` 0 à 11, `scale`} copiés du projet **enregistré** au moment de la publication, `durationSeconds` (lue dans l'en-tête du WAV par le serveur, 600 s maximum), `mimeType` (`audio/wav`), `size` (octets), `createdAt`. Ni le nom de stockage du fichier ni l'identifiant du projet source ne sont exposés.
+
+Règles : l'auteur vient du JWT, jamais du corps ; seuls `projectId`, `title` et `description` sont lus (liste blanche) ; le projet doit appartenir à l'utilisateur. Le fichier est écrit sous un nom généré dans `backend/data/publications/` (hors de Git) ; le type annoncé **et** la signature RIFF/WAVE sont vérifiés ; tout envoi refusé supprime le fichier reçu. Erreurs : `400` champ invalide, projet absent du formulaire, fichier absent, type autre que WAV ou WAV illisible, morceau de plus de 10 minutes ; `401` sans JWT ; `404` projet d'un autre utilisateur ou inexistant (publication), publication inexistante, identifiant mal formé ou publication d'un autre auteur (retrait) ; `413` fichier au-delà de 60 Mo (environ 5 min 56 s de WAV stéréo 16 bits à 44,1 kHz).
+
+**Côté studio.** Bouton « ↗ Publier le son » dans l'en-tête d'un projet : titre (prérempli), description, puis rendu du mix avec le même moteur que l'export WAV et envoi avec progression. Publication possible dès que le projet est sauvegardé (tempo et tonalité publiés = ceux du projet enregistré) et qu'**au moins une piste a du son**, quelle qu'elle soit : batterie avec au moins une frappe, Mélodie ou Basse avec au moins une note, instrumentale ou prise de voix. Aucune instrumentale n'est exigée ; un clip vide ne compte pas. Le panneau indique les pistes publiées. La page `/publications` liste les morceaux de tous les utilisateurs avec un lecteur, et « Mes publications » permet de retirer un morceau après confirmation.
+
 ---
 
 ## 📋 Organisation du travail
@@ -387,6 +407,14 @@ Erreurs possibles : `400` JSON, thème ou réglage invalide (le champ `field` id
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 28 novembre 2026 — Publier le son et page Publications réelle (#80)
+
+- **Studio** : bouton « ↗ Publier le son » dans l'en-tête d'un projet. Le panneau préremplit le titre, accepte une description (500 caractères), rend le mix avec **le même moteur que l'export WAV** (`renderWav()` est désormais partagé : le fichier publié est celui qu'on téléchargerait), puis l'envoie avec la progression du rendu et de l'envoi. Publication refusée tant que le projet n'est pas sauvegardé (bouton « Sauvegarder maintenant ») ou si aucune piste n'a de son ; **une seule piste suffit** (batterie, mélodie, basse, instrumentale ou voix : l'instrumentale n'est pas obligatoire) et le panneau liste les pistes publiées ; double envoi bloqué ; erreurs serveur affichées avec « Réessayer ».
+- **Page Publications** : les faux projets de démonstration sont remplacés par les morceaux de **tous les utilisateurs**, lus depuis MongoDB (titre, auteur, date, BPM, tonalité, durée, description, lecteur audio). États chargement, vide et erreur ; bouton « Voir plus de morceaux » (12 par page). Connecté : « Mes publications » avec retrait après confirmation, qui explique que les liens ne fonctionneront plus.
+- **API** : modèle `Publication` et routes `/api/publications` (liste et écoute publiques, publier et retirer authentifiés), documentées dans le « Contrat d'API ». Le serveur vérifie la propriété du projet, la signature WAV et lit lui-même la durée ; tempo et tonalité viennent du projet enregistré, pas du client. Fichiers dans `backend/data/publications/` (ignoré par Git), supprimés en cas de refus ou de retrait. L'écoute accepte les requêtes `Range` (avance rapide).
+- **Vérifications** : backend `npm test` 83/83 (9 nouveaux tests : 401, auteur tiré du JWT, projet d'un autre compte, validations et suppression du fichier refusé, pagination, mes publications, écoute avec `Range`, retrait par l'auteur seul, lecture de la durée WAV). Frontend `npm test` 360/360 (20 nouveaux : contrat HTTP, panneau de publication, page Publications, règle « au moins une piste avec du son ») ; `npm run build` réussi. Navigateur avec une API locale sur la base Atlas de développement : publication d'un morceau de 21 s depuis un nouveau projet, apparition sur /publications avec l'auteur, écoute et avance à 15 s (réponse 206), retrait (204, fichier supprimé), page et panneau sans débordement à 360 px ; projet avec une seule note de piano sur la piste Mélodie, sans batterie ni instrumentale : publication autorisée, « Pistes publiées : Mélodie » ; projet et publication de test supprimés ensuite.
+- **Limites** : pas de pochette personnalisée (couleur choisie d'après l'identifiant) ; le WAV non compressé limite un morceau publié à environ 5 min 56 s (60 Mo) car les navigateurs n'encodent pas le MP3 ; pas de page de détail ni de lien de partage dédié ; les fichiers publiés restent sur le disque du serveur, comme les autres fichiers audio du TP.
 
 ### 28 novembre 2026 — Piano Roll : sélection multiple, copier, coller (#77)
 

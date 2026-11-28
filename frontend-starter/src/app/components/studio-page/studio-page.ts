@@ -4,6 +4,7 @@ import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { DrumRackPanelComponent } from '../drum-rack-panel/drum-rack-panel';
 import { ExportPanelComponent } from '../export-panel/export-panel';
+import { PublishPanelComponent } from '../publish-panel/publish-panel';
 import { LyricsPanelComponent } from '../lyrics-panel/lyrics-panel';
 import { MixerPanelComponent } from '../mixer-panel/mixer-panel';
 import { PianoRollPanelComponent } from '../piano-roll-panel/piano-roll-panel';
@@ -85,6 +86,7 @@ const DRAG_THRESHOLD_PX = 4;
     MixerPanelComponent,
     PianoRollPanelComponent,
     PitchCorrectionPanelComponent,
+    PublishPanelComponent,
     TakesPanelComponent,
     WaveformComponent,
   ],
@@ -104,6 +106,8 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   readonly editorTabs: readonly EditorTab[] = ['Batterie', 'Piano Roll', 'Correction vocale', 'Paroles', 'Mixeur', 'Export'];
   readonly activeTab = signal<EditorTab>('Batterie');
+  /** Panneau « Publier le son » (#80), ouvert depuis l'en-tête d'un projet sauvegardé. */
+  readonly publishOpen = signal(false);
 
   /** Depuis une piste Mélodie ou Basse vide : ouvre le Piano Roll avec le choix d'instrument. */
   openInstrumentPicker(event: Event): void {

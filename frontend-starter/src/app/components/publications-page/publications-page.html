@@ -1,3 +1,94 @@
-<section class="page-heading"><div><p class="eyebrow">FAITES ENTENDRE VOTRE UNIVERS</p><h1>Publications<span>.</span></h1><p>La dernière étape du morceau. Le début de son histoire.</p></div><button disabled>↗ Publier un morceau</button></section>
-<div class="publication-hero"><div class="record small-record" aria-hidden="true"><div class="record-label">RAP<br><b>STUDIO</b></div></div><div><span class="tag">VOTRE VITRINE MUSICALE</span><h2>Votre son mérite<br>d’être entendu.</h2><p>Retrouvez ici les versions finales de vos créations.<br>Vous gardez le contrôle sur ce que vous partagez.</p></div></div>
-<div class="section-heading"><h2>Aperçu des morceaux</h2><span class="muted">Contenus de démonstration</span></div><div class="two-columns">@for (project of projects.slice(0, 2); track project.title) {<article class="panel release-card"><div [class]="'release-art ' + project.color"><span>{{ project.number }}</span></div><div><span class="tag subtle">APERÇU</span><h2>{{ project.title }}</h2><p>Par Studio Crew · {{ project.genre }}</p><p>{{ project.bpm }} BPM · {{ project.key }}</p><button class="secondary" disabled>▷ Écouter</button></div></article>}</div>
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">FAITES ENTENDRE VOTRE UNIVERS</p>
+    <h1>Publications<span>.</span></h1>
+    <p>Les morceaux finis de la communauté. Écoutez, puis publiez le vôtre.</p>
+  </div>
+  <a class="button" [routerLink]="auth.isAuthenticated() ? '/projects' : '/login'">↗ Publier un morceau</a>
+</section>
+
+<div class="publication-hero">
+  <div class="record small-record" aria-hidden="true"><div class="record-label">RAP<br><b>STUDIO</b></div></div>
+  <div>
+    <span class="tag">COMMENT PUBLIER</span>
+    <h2>Votre son mérite<br>d’être entendu.</h2>
+    <p>Ouvrez un de vos projets dans le studio, sauvegardez-le, puis cliquez sur <b>« Publier le son »</b>. Seul le mix final est mis en ligne : vos prises et votre projet restent privés, et vous pouvez retirer un morceau à tout moment.</p>
+  </div>
+</div>
+
+@if (notice(); as message) {
+  <p class="notice" role="status">{{ message }} <button type="button" class="link-button" (click)="notice.set(null)">Masquer</button></p>
+}
+
+@if (auth.isAuthenticated()) {
+  <section aria-labelledby="mine-heading">
+    <div class="section-heading"><h2 id="mine-heading">Mes publications</h2></div>
+    @switch (mineState()) {
+      @case ('loading') { <p class="muted" role="status">Chargement de vos publications…</p> }
+      @case ('error') { <p class="error" role="alert">Impossible de charger vos publications.</p> }
+      @default {
+        @if (mine().length === 0) {
+          <p class="muted">Vous n’avez encore rien publié. <a class="inline-link" routerLink="/projects">Ouvrir un projet</a> pour publier votre premier son.</p>
+        } @else {
+          <ul class="mine">
+            @for (publication of mine(); track publication.id) {
+              <li>
+                <span><b>{{ publication.title }}</b> <small class="muted">{{ formatDate(publication.createdAt) }} · {{ formatDuration(publication.durationSeconds) }}</small></span>
+                @if (confirmingId() === publication.id) {
+                  <span class="confirm" role="group" [attr.aria-label]="'Retirer ' + publication.title">
+                    <small>Retirer ce morceau ? Il disparaîtra de la page et ses liens ne fonctionneront plus.</small>
+                    <button type="button" class="danger" (click)="remove(publication)" [disabled]="removingId() === publication.id">
+                      {{ removingId() === publication.id ? 'Retrait…' : 'Confirmer le retrait' }}
+                    </button>
+                    <button type="button" (click)="cancelRemove()" [disabled]="removingId() === publication.id">Annuler</button>
+                  </span>
+                } @else {
+                  <button type="button" (click)="askRemove(publication)" [attr.aria-label]="'Retirer ' + publication.title">Retirer</button>
+                }
+              </li>
+            }
+          </ul>
+          @if (removeError(); as message) { <p class="error" role="alert">{{ message }}</p> }
+        }
+      }
+    }
+  </section>
+}
+
+<section aria-labelledby="all-heading">
+  <div class="section-heading">
+    <h2 id="all-heading">Derniers morceaux</h2>
+    @if (state() === 'loaded') { <span class="muted">{{ total() }} morceau{{ total() > 1 ? 'x' : '' }} publié{{ total() > 1 ? 's' : '' }}</span> }
+  </div>
+
+  @switch (state()) {
+    @case ('loading') { <p class="muted" role="status">Chargement des publications…</p> }
+    @case ('error') {
+      <div class="panel" role="alert"><p class="error">{{ error() }}</p><button type="button" (click)="reload()">Réessayer</button></div>
+    }
+    @default {
+      @if (items().length === 0) {
+        <div class="panel empty"><p>Aucun morceau publié pour l’instant. Soyez le premier à publier le vôtre depuis le studio.</p></div>
+      } @else {
+        <ul class="releases">
+          @for (publication of items(); track publication.id) {
+            <li class="panel release-card">
+              <div [class]="'release-art ' + coverColor(publication.id)" aria-hidden="true"><span>{{ publication.title.slice(0, 2).toUpperCase() }}</span></div>
+              <div class="release-body">
+                <h3>{{ publication.title }}</h3>
+                <p class="by">Par <b>{{ publication.author.name }}</b> · {{ formatDate(publication.createdAt) }}</p>
+                <p class="facts">{{ publication.bpm }} BPM · {{ keyLabel(publication.key) }} · {{ formatDuration(publication.durationSeconds) }}</p>
+                @if (publication.description) { <p class="description">{{ publication.description }}</p> }
+                <audio controls preload="none" [src]="audioUrl(publication)" [attr.aria-label]="'Écouter ' + publication.title"></audio>
+              </div>
+            </li>
+          }
+        </ul>
+        @if (error(); as message) { <p class="error" role="alert">{{ message }}</p> }
+        @if (hasMore()) {
+          <div class="more"><button type="button" (click)="loadMore()" [disabled]="loadingMore()">{{ loadingMore() ? 'Chargement…' : 'Voir plus de morceaux' }}</button></div>
+        }
+      }
+    }
+  }
+</section>

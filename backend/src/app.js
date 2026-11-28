@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { User } from "./models/User.js";
 import { Track } from "./models/Track.js";
 import { createProjectRouter } from "./routes/projects.js";
+import { createPublicationRouter } from "./routes/publications.js";
 
 // Les fichiers audio restent sur le disque du serveur dans ce TP.
 // MongoDB ne conserve que leurs métadonnées : titre, nom, taille, etc.
@@ -605,6 +606,7 @@ export function createApp() {
   });
 
   app.use("/api/projects", createProjectRouter(auth));
+  app.use("/api/publications", createPublicationRouter(auth));
 
   /** Gestionnaire central des erreurs connues de l'application. */
   app.use((error, _req, res, next) => {

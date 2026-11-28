@@ -9,17 +9,17 @@ import { STEPS_PER_BAR, STEPS_PER_BEAT } from './music-time';
 export const MAX_SONG_BARS = 128;
 export const MAX_SONG_STEPS = MAX_SONG_BARS * STEPS_PER_BAR;
 
-export function clampSongStep(step: number): number {
-  return Number.isFinite(step) ? Math.min(MAX_SONG_STEPS, Math.max(0, Math.round(step))) : 0;
+export function clampSongStep(step: number, limit = MAX_SONG_STEPS): number {
+  return Number.isFinite(step) ? Math.min(limit, Math.max(0, Math.round(step))) : 0;
 }
 
 /**
  * Pas correspondant à un clic à la fraction `fraction` (0 à 1) de la fenêtre visible,
  * calé sur le temps le plus proche pour tomber juste en musique.
  */
-export function stepFromFraction(fraction: number, visibleBars: number): number {
-  const raw = Math.min(1, Math.max(0, fraction)) * visibleBars * STEPS_PER_BAR;
-  return clampSongStep(Math.round(raw / STEPS_PER_BEAT) * STEPS_PER_BEAT);
+export function stepFromFraction(fraction: number, visibleBars: number, firstBar = 0, limit = MAX_SONG_STEPS): number {
+  const raw = (firstBar + Math.min(1, Math.max(0, fraction)) * visibleBars) * STEPS_PER_BAR;
+  return clampSongStep(Math.round(raw / STEPS_PER_BEAT) * STEPS_PER_BEAT, limit);
 }
 
 export type PositionKey = 'ArrowLeft' | 'ArrowRight' | 'PageUp' | 'PageDown' | 'Home' | 'End';
@@ -28,20 +28,20 @@ export type PositionKey = 'ArrowLeft' | 'ArrowRight' | 'PageUp' | 'PageDown' | '
  * Nouvelle position après une touche : flèches = un temps, Page = une mesure,
  * Début = début du morceau, Fin = `endStep`. `null` pour une autre touche.
  */
-export function stepAfterKey(step: number, key: string, endStep: number): number | null {
+export function stepAfterKey(step: number, key: string, endStep: number, limit = MAX_SONG_STEPS): number | null {
   switch (key) {
     case 'ArrowLeft':
-      return clampSongStep(step - STEPS_PER_BEAT);
+      return clampSongStep(step - STEPS_PER_BEAT, limit);
     case 'ArrowRight':
-      return clampSongStep(step + STEPS_PER_BEAT);
+      return clampSongStep(step + STEPS_PER_BEAT, limit);
     case 'PageDown':
-      return clampSongStep(step - STEPS_PER_BAR);
+      return clampSongStep(step - STEPS_PER_BAR, limit);
     case 'PageUp':
-      return clampSongStep(step + STEPS_PER_BAR);
+      return clampSongStep(step + STEPS_PER_BAR, limit);
     case 'Home':
       return 0;
     case 'End':
-      return clampSongStep(endStep);
+      return clampSongStep(endStep, limit);
     default:
       return null;
   }

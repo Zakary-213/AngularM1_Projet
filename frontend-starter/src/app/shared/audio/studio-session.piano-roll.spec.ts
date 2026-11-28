@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { AudioEngineService } from './audio-engine.service';
 import { MAX_PATTERNS } from './drum-pattern';
 import { DEFAULT_BASS_PATTERN_ID, DEFAULT_MELODY_PATTERN_ID } from './melodic-pattern';
+import { notesAtSongStep } from './note-scheduling';
 import { StudioSessionService } from './studio-session.service';
 
 describe('StudioSessionService — Piano Roll et pistes d’instruments (M4)', () => {
@@ -115,6 +116,35 @@ describe('StudioSessionService — Piano Roll et pistes d’instruments (M4)', (
       // remplit jusqu'à la limite partagée
     }
     expect(session.addInstrument('flute')).toBeNull();
+  });
+
+  it('joue deux pistes d’instruments sur les mêmes mesures et garde le piano après suppression de la guitare', () => {
+    const piano = session.addInstrument('piano', 'new')!;
+    session.addNote(60, 0, 4);
+    const guitar = session.addInstrument('acousticGuitar', 'new')!;
+    session.addNote(55, 0, 4);
+    expect(guitar.track).not.toBe(piano.track);
+    expect(session.selectedInstrumentTrack()?.id).toBe(guitar.track);
+    expect(session.renameInstrumentTrack(guitar.track, '  Guitare refrain  ')).toBe(true);
+    expect(session.selectedInstrumentTrack()?.name).toBe('Guitare refrain');
+    const notes = () => notesAtSongStep(session.instrumentClips(), session.melodicPatterns(), 0);
+    expect(notes().map(note => [note.track, note.pitch])).toEqual([[piano.track, 60], [guitar.track, 55]]);
+    expect(session.tracksWithContent()).toContain(guitar.track);
+
+    expect(session.removeInstrumentTrack(guitar.track)).toBe(true);
+    expect(notes().map(note => note.track)).toEqual([piano.track]);
+    expect(session.melodicPatterns().some(pattern => pattern.id === guitar.patternId)).toBe(true);
+    session.undo();
+    session.redo();
+    expect(notes().map(note => note.track)).toEqual([piano.track]);
+  });
+
+  it('applique la limite totale avant d’ajouter une nouvelle piste ou partie', () => {
+    while (session.canAddTrack()) expect(session.addInstrument('piano', 'new')).not.toBeNull();
+    const count = session.melodicPatterns().length;
+    expect(session.addInstrument('flute', 'new')).toBeNull();
+    expect(session.addVocalTrack()).toBeNull();
+    expect(session.melodicPatterns()).toHaveLength(count);
   });
 
   it('copie une phrase d’une partie et la colle dans une autre (presse-papiers partagé)', () => {

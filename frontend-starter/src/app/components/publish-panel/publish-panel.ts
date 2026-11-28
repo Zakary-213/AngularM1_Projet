@@ -5,6 +5,7 @@ import { RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
 import { CONTENT_TRACK_LABELS } from '../../shared/audio/track-content';
+import { isInstrumentTrackId } from '../../shared/audio/melodic-pattern';
 import { PUBLICATION_LIMITS, Publication } from '../../shared/models/publication.model';
 import { PublicationService } from '../../shared/services/publication.service';
 import { StudioProjectService } from '../../shared/services/studio-project.service';
@@ -67,7 +68,10 @@ export class PublishPanelComponent {
   });
 
   /** Pistes qui seront entendues dans le morceau publié, en clair. */
-  readonly publishedTracks = computed(() => this.session.tracksWithContent().map(track => CONTENT_TRACK_LABELS[track]).join(', '));
+  readonly publishedTracks = computed(() => this.session.tracksWithContent().map(track => {
+    if (!isInstrumentTrackId(track)) return CONTENT_TRACK_LABELS[track];
+    return this.session.instrumentTracks().find(lane => lane.id === track)?.name ?? 'Instrument';
+  }).join(', '));
 
   readonly form = new FormGroup({
     title: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(PUBLICATION_LIMITS.titleMaxLength), Validators.pattern(/\S/)] }),

@@ -15,7 +15,6 @@ import {
   MidiNote,
   NOTE_LENGTH_CHOICES,
   cellAtPoint,
-  defaultTrackFor,
   describeNote,
   instrumentsOfFamily,
   isBlackKey,
@@ -102,8 +101,14 @@ export class PianoRollPanelComponent {
   readonly rows = computed(() => pitchRows(this.range()));
   readonly steps = computed(() => patternSteps(this.pattern()));
   readonly stepIndexes = computed(() => Array.from({ length: this.steps() }, (_, step) => step));
-  readonly track = computed(() => defaultTrackFor(this.pattern().instrument));
-  readonly trackLabel = computed(() => (this.track() === 'bass' ? 'Basse' : 'Mélodie'));
+  readonly track = computed(() => this.session.instrumentTarget(this.pattern().instrument));
+  readonly trackLabel = computed(() => this.session.instrumentTracks().find(track => track.id === this.track())?.name ?? 'Instrument');
+  readonly pickerDestination = computed(() => {
+    const target = this.session.instrumentPickerTarget();
+    if (target === 'new') return 'à créer';
+    if (target === 'default') return this.session.selectedInstrumentTrack()?.name ?? null;
+    return this.session.instrumentTracks().find(track => track.id === target)?.name ?? null;
+  });
   readonly usage = computed(() => instrumentClipsUsing(this.session.instrumentClips(), this.pattern().id));
   readonly patternCount = computed(() => this.session.patterns().length + this.session.melodicPatterns().length);
   readonly auditioning = computed(() => this.session.auditionPatternId() === this.pattern().id && this.session.playing());
@@ -218,13 +223,22 @@ export class PianoRollPanelComponent {
   /** Ajoute l'instrument choisi : nouvelle partie ouverte ici et placée sur sa piste. */
   addInstrument(instrument: InstrumentId): void {
     this.resetPanels();
-    const result = this.session.addInstrument(instrument);
+    const target = this.session.instrumentPickerTarget() ?? 'default';
+    if (target === 'new' && !this.session.canAddTrack()) {
+      this.message.set('Le projet a atteint la limite de pistes. Supprimez une piste pour en ajouter une.');
+      return;
+    }
+    if (target === 'new' && this.session.micState() !== 'idle') {
+      this.message.set('Terminez la prise vocale avant d’ajouter une piste.');
+      return;
+    }
+    const result = this.session.addInstrument(instrument, target);
     if (!result) {
       this.message.set(`${MAX_PATTERNS} patterns maximum (batterie et instruments) : supprimez-en un pour ajouter un instrument.`);
       return;
     }
-    this.session.instrumentPickerOpen.set(false);
-    const trackName = result.track === 'bass' ? 'Basse' : 'Mélodie';
+    this.session.instrumentPickerTarget.set(null);
+    const trackName = this.trackLabel();
     const bar = result.startBar + 1;
     this.notice.set(
       result.clipId
@@ -235,7 +249,7 @@ export class PianoRollPanelComponent {
 
   togglePicker(): void {
     this.resetPanels();
-    this.session.instrumentPickerOpen.update(open => !open);
+    this.session.instrumentPickerTarget.update(target => target === null ? 'default' : null);
   }
 
   /** Place le pattern sur sa piste, à la mesure de la tête de lecture. */

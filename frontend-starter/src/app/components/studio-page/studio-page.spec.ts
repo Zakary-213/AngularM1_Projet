@@ -45,3 +45,50 @@ describe('Raccourci Exporter du studio', () => {
     expect(scrollIntoView).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('Défilement de la timeline', () => {
+  it('garde le zoom, affiche les mesures suivantes et déplace la tête vers une mesure au-delà de 32', async () => {
+    TestBed.configureTestingModule({
+      imports: [StudioPageComponent],
+      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+    });
+    const fixture = TestBed.createComponent(StudioPageComponent);
+    const root = fixture.nativeElement as HTMLElement;
+    await fixture.whenStable();
+    root.querySelector<HTMLButtonElement>('[aria-label="Dézoomer la timeline"]')!.click();
+    await fixture.whenStable();
+    root.querySelector<HTMLButtonElement>('[aria-label="Mesures suivantes"]')!.click();
+    await fixture.whenStable();
+
+    expect(root.querySelector('label[for="timeline-start"]')?.textContent).toBe('Mesures 33 à 64');
+    expect(root.querySelector('.timeline-ruler > span:nth-child(2)')?.textContent).toBe('33');
+    const lane = root.querySelector<HTMLElement>('.track-lane')!;
+    vi.spyOn(lane, 'getBoundingClientRect').mockReturnValue(new DOMRect(150, 0, 640, 80));
+    root.querySelector('.timeline-ruler')!.dispatchEvent(new MouseEvent('click', { clientX: 290, bubbles: true }));
+    await fixture.whenStable();
+    expect(fixture.componentInstance.session.position()).toEqual({ bar: 40, beat: 1, sixteenth: 1 });
+    root.querySelector<HTMLElement>('[data-measure="41"]')!.click();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.session.position()).toEqual({ bar: 41, beat: 1, sixteenth: 1 });
+  });
+
+  it('renomme la piste depuis le formulaire sans soumettre la page', async () => {
+    TestBed.configureTestingModule({
+      imports: [StudioPageComponent],
+      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+    });
+    const fixture = TestBed.createComponent(StudioPageComponent);
+    const root = fixture.nativeElement as HTMLElement;
+    fixture.componentInstance.session.addInstrument('piano', 'new');
+    fixture.componentInstance.beginTrackRename();
+    await fixture.whenStable();
+    const input = root.querySelector<HTMLInputElement>('#instrument-track-name')!;
+    input.value = 'Piano couplet';
+    input.dispatchEvent(new Event('input'));
+    const submit = new Event('submit', { cancelable: true });
+    input.form!.dispatchEvent(submit);
+    await fixture.whenStable();
+    expect(submit.defaultPrevented).toBe(true);
+    expect(root.querySelector('[aria-label="Sélectionner la piste Piano couplet"]')).not.toBeNull();
+  });
+});

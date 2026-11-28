@@ -84,7 +84,7 @@ import {
 } from './arrangement';
 import { LoopRange } from './step-scheduler';
 import { DEFAULT_MASTER_VOLUME, MixerState, TrackId, TrackMix, VocalTrackId, clampMasterVolume, createDefaultMixer, updateTrack } from './track-mix';
-import { DEFAULT_VOCAL_TRACK, MAX_VOCAL_TRACKS, VOCAL_TRACK_NAME_MAX_LENGTH, VocalTrack, studioTracks } from './studio-tracks';
+import { DEFAULT_INSTRUMENT_TRACKS, DEFAULT_VOCAL_TRACK, INSTRUMENT_TRACK_NAME_MAX_LENGTH, InstrumentTrack, MAX_STUDIO_TRACKS, MAX_VOCAL_TRACKS, VOCAL_TRACK_NAME_MAX_LENGTH, VocalTrack, studioTracks } from './studio-tracks';
 import { encodeWav, peakLevel, rmsLevel } from './wav-encoder';
 
 /** Gains appliqués aux fichiers audio du studio (linéaires). */
@@ -225,7 +225,10 @@ export class StudioSessionService implements OnDestroy {
   readonly editedMelodicPattern = computed(
     () => this.melodicPatterns().find(entry => entry.id === this.editedMelodicPatternId()) ?? this.melodicPatterns()[0],
   );
-  /** Clips des pistes Mélodie et Basse : chacun joue un pattern mélodique en boucle. */
+  readonly instrumentTracks = signal<readonly InstrumentTrack[]>(DEFAULT_INSTRUMENT_TRACKS);
+  readonly selectedInstrumentTrackId = signal<InstrumentTrackId | null>(null);
+  readonly selectedInstrumentTrack = computed(() => this.instrumentTracks().find(track => track.id === this.selectedInstrumentTrackId()) ?? null);
+  /** Chaque clip joue un pattern mélodique en boucle sur sa piste. */
   readonly instrumentClips = signal<InstrumentClips>(EMPTY_INSTRUMENT_CLIPS);
   /** Pattern écouté seul en boucle depuis le Piano Roll, ou `null` : lecture normale du morceau. */
   readonly auditionPatternId = signal<string | null>(null);
@@ -256,8 +259,9 @@ export class StudioSessionService implements OnDestroy {
     const lastSecond = Math.max(instrumental, ...takes, 0);
     const drumsEnd = drumClipsEndBar(this.drumClips()) * STEPS_PER_BAR;
     const instrumentsEnd = instrumentClipsEndBar(this.instrumentClips()) * STEPS_PER_BAR;
-    return clampSongStep(Math.max(4 * STEPS_PER_BAR, drumsEnd, instrumentsEnd, Math.ceil(lastSecond / stepSeconds)));
+    return Math.max(4 * STEPS_PER_BAR, drumsEnd, instrumentsEnd, Math.ceil(lastSecond / stepSeconds));
   });
+  readonly navigationEndStep = computed(() => Math.max(MAX_SONG_BARS * STEPS_PER_BAR, this.songEndStep()));
   /** Tonalité du projet (la mineur par défaut) : reprise par la correction vocale. */
   readonly projectKey = signal<ProjectKey>({ root: 9, scale: 'minor' });
   readonly projectKeyLabel = computed(() => `${NOTE_NAMES[this.projectKey().root]} ${SCALE_LABELS[this.projectKey().scale]}`);
@@ -275,7 +279,8 @@ export class StudioSessionService implements OnDestroy {
   readonly micError = signal<string | null>(null);
   readonly vocalTracks = signal<readonly VocalTrack[]>([DEFAULT_VOCAL_TRACK]);
   readonly armedVocalTrackId = signal<VocalTrackId>('voice');
-  readonly studioTracks = computed(() => studioTracks(this.vocalTracks()));
+  readonly studioTracks = computed(() => studioTracks(this.vocalTracks(), this.instrumentTracks()));
+  readonly canAddTrack = computed(() => this.studioTracks().length < MAX_STUDIO_TRACKS);
   readonly armedVocalTrack = computed(() => this.vocalTracks().find(track => track.id === this.armedVocalTrackId()) ?? this.vocalTracks()[0]);
   /** Prises dans l'ordre d'enregistrement, une prise active par piste. */
   readonly takes = signal<VocalTake[]>([]);
@@ -481,24 +486,62 @@ export class StudioSessionService implements OnDestroy {
   }
 
   /** Sélecteur d'instruments ouvert dans le Piano Roll (aussi ouvert depuis une piste vide de la timeline). */
-  readonly instrumentPickerOpen = signal(false);
+  readonly instrumentPickerTarget = signal<InstrumentTrackId | 'new' | 'default' | null>(null);
+  readonly instrumentPickerOpen = computed(() => this.instrumentPickerTarget() !== null);
+
+  instrumentTarget(instrument: InstrumentId): InstrumentTrackId {
+    const tracks = this.instrumentTracks();
+    return this.selectedInstrumentTrack()?.id ?? tracks.find(track => track.id === defaultTrackFor(instrument))?.id ?? tracks[0].id;
+  }
+
+  selectInstrumentTrack(id: InstrumentTrackId): void {
+    if (this.instrumentTracks().some(track => track.id === id)) this.selectedInstrumentTrackId.set(id);
+  }
+
+  renameInstrumentTrack(id: InstrumentTrackId, name: string): boolean {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > INSTRUMENT_TRACK_NAME_MAX_LENGTH || !this.instrumentTracks().some(track => track.id === id)) return false;
+    this.instrumentTracks.update(tracks => tracks.map(track => track.id === id ? { ...track, name: trimmed } : track));
+    return true;
+  }
+
+  removeInstrumentTrack(id: InstrumentTrackId): boolean {
+    const tracks = this.instrumentTracks();
+    if (this.micState() !== 'idle' || tracks.length <= 1 || !tracks.some(track => track.id === id)) return false;
+    if (this.playing()) this.pausePlayback();
+    this.instrumentTracks.set(tracks.filter(track => track.id !== id));
+    this.instrumentClips.update(({ [id]: _removed, ...remaining }) => ({ ...EMPTY_INSTRUMENT_CLIPS, ...remaining }));
+    this.mixer.update(({ [id]: _removed, ...remaining }) => remaining as MixerState);
+    if (this.selectedInstrumentTrackId() === id) this.selectedInstrumentTrackId.set(null);
+    if (this.instrumentPickerTarget() === id) this.instrumentPickerTarget.set(null);
+    return true;
+  }
 
   /**
    * Ajout en un geste : crée une partie vide nommée d'après l'instrument, l'ouvre dans
    * le Piano Roll et la place sur sa piste (Mélodie ou Basse) à la mesure de la tête de lecture.
    */
-  addInstrument(instrument: InstrumentId): { patternId: string; track: InstrumentTrackId; clipId: string | null; startBar: number } | null {
+  addInstrument(instrument: InstrumentId, target: InstrumentTrackId | 'new' | 'default' = 'default'): { patternId: string; track: InstrumentTrackId; clipId: string | null; startBar: number } | null {
+    if (target === 'new' && (!this.canAddTrack() || this.micState() !== 'idle')) return null;
+    if (target !== 'new' && target !== 'default' && !this.instrumentTracks().some(track => track.id === target)) return null;
     const sameInstrument = this.melodicPatterns().filter(entry => entry.instrument === instrument).length;
     const name = `${INSTRUMENT_LABELS[instrument]} ${String(sameInstrument + 1).padStart(2, '0')}`.slice(0, PATTERN_NAME_MAX_LENGTH);
     const patternId = this.insertMelodicPattern(createMelodicPattern(createMelodicPatternId(), name, instrument));
     if (!patternId) {
       return null;
     }
-    const track = defaultTrackFor(instrument);
+    const track = target === 'new' ? `inst-${crypto.randomUUID()}` as const : target === 'default' ? this.instrumentTarget(instrument) : target;
+    if (target === 'new') {
+      if (this.playing()) this.pausePlayback();
+      this.setTrack(track, {});
+      this.instrumentTracks.update(tracks => [...tracks, { id: track, name: INSTRUMENT_LABELS[instrument], color: DEFAULT_INSTRUMENT_TRACKS[0].color }]);
+    }
+    if (target !== 'default') this.selectInstrumentTrack(track);
     // Un seul clip joue à la fois sur une piste : on ne recouvre pas une partie existante.
-    const startBar = freeStartBar(this.instrumentClips()[track], Math.floor(this.songStep() / STEPS_PER_BAR));
-    const clipId = `${track}-${crypto.randomUUID()}`;
-    const next = addDrumClip(this.instrumentClips()[track], startBar, clipId, patternId);
+    const clips = this.instrumentClips()[track] ?? [];
+    const startBar = freeStartBar(clips, Math.floor(this.songStep() / STEPS_PER_BAR));
+    const clipId = `clip-${crypto.randomUUID()}`;
+    const next = addDrumClip(clips, startBar, clipId, patternId);
     if (!next) {
       return { patternId, track, clipId: null, startBar };
     }
@@ -698,7 +741,7 @@ export class StudioSessionService implements OnDestroy {
     const auditionId = this.auditionPatternId();
     const audition = auditionId ? this.melodicPatterns().find(entry => entry.id === auditionId) : undefined;
     if (audition) {
-      return auditionNotesAt(audition, defaultTrackFor(audition.instrument), songStep);
+      return auditionNotesAt(audition, this.instrumentTarget(audition.instrument), songStep);
     }
     return notesAtSongStep(this.instrumentClips(), this.melodicPatterns(), songStep);
   }
@@ -728,7 +771,7 @@ export class StudioSessionService implements OnDestroy {
     if (this.micState() !== 'idle') {
       return;
     }
-    const step = clampSongStep(songStep);
+    const step = clampSongStep(songStep, this.navigationEndStep());
     const wasPlaying = this.playing();
     this.haltTransport();
     this.songStep.set(step);
@@ -796,11 +839,11 @@ export class StudioSessionService implements OnDestroy {
 
   /** Ajoute un clip sur la piste `track` à la mesure de la tête de lecture, jouant `patternId`. */
   addInstrumentClipAtPlayhead(track: InstrumentTrackId, patternId: string): string | null {
-    if (!this.melodicPatterns().some(entry => entry.id === patternId)) {
+    if (!this.instrumentTracks().some(entry => entry.id === track) || !this.melodicPatterns().some(entry => entry.id === patternId)) {
       return null;
     }
-    const newId = `${track}-${crypto.randomUUID()}`;
-    const next = addDrumClip(this.instrumentClips()[track], Math.floor(this.songStep() / STEPS_PER_BAR), newId, patternId);
+    const newId = `clip-${crypto.randomUUID()}`;
+    const next = addDrumClip(this.instrumentClips()[track] ?? [], Math.floor(this.songStep() / STEPS_PER_BAR), newId, patternId);
     if (!next) {
       return null;
     }
@@ -809,16 +852,16 @@ export class StudioSessionService implements OnDestroy {
   }
 
   moveInstrumentClip(track: InstrumentTrackId, id: string, deltaBars: number): void {
-    this.changeArrangement(() => this.setInstrumentClips(track, moveDrumClip(this.instrumentClips()[track], id, deltaBars)));
+    this.changeArrangement(() => this.setInstrumentClips(track, moveDrumClip(this.instrumentClips()[track] ?? [], id, deltaBars)));
   }
 
   resizeInstrumentClip(track: InstrumentTrackId, id: string, deltaBars: number): void {
-    this.changeArrangement(() => this.setInstrumentClips(track, resizeDrumClip(this.instrumentClips()[track], id, deltaBars)));
+    this.changeArrangement(() => this.setInstrumentClips(track, resizeDrumClip(this.instrumentClips()[track] ?? [], id, deltaBars)));
   }
 
   duplicateInstrumentClip(track: InstrumentTrackId, id: string): string | null {
-    const newId = `${track}-${crypto.randomUUID()}`;
-    const next = duplicateDrumClip(this.instrumentClips()[track], id, newId);
+    const newId = `clip-${crypto.randomUUID()}`;
+    const next = duplicateDrumClip(this.instrumentClips()[track] ?? [], id, newId);
     if (!next) {
       return null;
     }
@@ -828,16 +871,16 @@ export class StudioSessionService implements OnDestroy {
 
   setInstrumentClipPattern(track: InstrumentTrackId, id: string, patternId: string): void {
     if (this.melodicPatterns().some(entry => entry.id === patternId)) {
-      this.changeArrangement(() => this.setInstrumentClips(track, setDrumClipPattern(this.instrumentClips()[track], id, patternId)));
+      this.changeArrangement(() => this.setInstrumentClips(track, setDrumClipPattern(this.instrumentClips()[track] ?? [], id, patternId)));
     }
   }
 
   removeInstrumentClip(track: InstrumentTrackId, id: string): void {
-    this.changeArrangement(() => this.setInstrumentClips(track, removeDrumClip(this.instrumentClips()[track], id)));
+    this.changeArrangement(() => this.setInstrumentClips(track, removeDrumClip(this.instrumentClips()[track] ?? [], id)));
   }
 
   private setInstrumentClips(track: InstrumentTrackId, clips: readonly DrumClip[]): void {
-    this.instrumentClips.update(current => ({ ...current, [track]: clips }));
+    if (this.instrumentTracks().some(entry => entry.id === track)) this.instrumentClips.update(current => ({ ...current, [track]: clips }));
   }
 
   /** Déplace l'instrumentale par pas d'un temps ; elle ne commence jamais avant le morceau. */
@@ -900,7 +943,8 @@ export class StudioSessionService implements OnDestroy {
 
   private restoreArrangement(snapshot: ArrangementSnapshot): void {
     this.drumClips.set(snapshot.drumClips);
-    this.instrumentClips.set(snapshot.instrumentClips);
+    // Une piste supprimée depuis n'est pas recréée par l'historique des clips.
+    this.instrumentClips.set({ ...EMPTY_INSTRUMENT_CLIPS, ...Object.fromEntries(this.instrumentTracks().map(track => [track.id, snapshot.instrumentClips[track.id] ?? []])) });
     this.instrumentalStartBeat.set(snapshot.instrumentalStartBeat);
     // Une prise supprimée depuis n'est pas recréée : seules les positions sont restaurées.
     this.takes.update(takes =>
@@ -930,7 +974,7 @@ export class StudioSessionService implements OnDestroy {
   }
 
   addVocalTrack(): VocalTrackId | null {
-    if (this.micState() !== 'idle' || this.vocalTracks().length >= MAX_VOCAL_TRACKS) return null;
+    if (this.micState() !== 'idle' || !this.canAddTrack() || this.vocalTracks().length >= MAX_VOCAL_TRACKS) return null;
     if (this.playing()) this.pausePlayback();
     const id: VocalTrackId = `voice-${crypto.randomUUID()}`;
     const names = new Set(this.vocalTracks().map(track => track.name));

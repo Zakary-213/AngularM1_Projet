@@ -86,8 +86,11 @@ export function isInstrumentId(value: unknown): value is InstrumentId {
 }
 
 /** Pistes de la timeline qui jouent des patterns mélodiques. */
-export type InstrumentTrackId = 'melody' | 'bass';
-export const INSTRUMENT_TRACK_IDS: readonly InstrumentTrackId[] = ['melody', 'bass'];
+export type InstrumentTrackId = 'melody' | 'bass' | `inst-${string}`;
+
+export function isInstrumentTrackId(id: string): id is InstrumentTrackId {
+  return id === 'melody' || id === 'bass' || /^inst-[A-Za-z0-9_-]{1,59}$/.test(id);
+}
 
 /** Réglages de son d'un pattern, partagés par l'écoute et l'export. */
 export interface InstrumentParams {

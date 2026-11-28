@@ -1,5 +1,6 @@
 import { TrackId, VocalTrackId } from './track-mix';
 import { DEFAULT_VOICE_CORRECTION, VoiceCorrectionState } from './pitch/voice-correction-state';
+import type { InstrumentTrackId } from './melodic-pattern';
 
 /** Présentation fixe des pistes du studio (nom, type, couleur), partagée par la timeline et le mixeur. */
 export interface StudioTrackInfo {
@@ -10,14 +11,19 @@ export interface StudioTrackInfo {
   readonly className: string;
 }
 
-export const STUDIO_TRACKS: readonly StudioTrackInfo[] = [
-  { id: 'drums', name: 'Batterie', type: 'Drum Rack', color: '#c1ed75', className: 'clip-lime' },
-  { id: 'melody', name: 'Mélodie', type: 'Piano Roll', color: '#f0a07a', className: 'clip-peach' },
-  { id: 'bass', name: 'Basse', type: 'Piano Roll · 808', color: '#e58fb0', className: 'clip-rose' },
-  { id: 'instrumental', name: 'Instrumentale', type: 'Audio importé', color: '#bda4fa', className: 'clip-purple' },
-  { id: 'voice', name: 'Voix principale', type: 'Prise micro', color: '#8bc8dd', className: 'clip-blue' },
+export interface InstrumentTrack {
+  readonly id: InstrumentTrackId;
+  readonly name: string;
+  readonly color: string;
+}
+
+export const DEFAULT_INSTRUMENT_TRACKS: readonly InstrumentTrack[] = [
+  { id: 'melody', name: 'Mélodie', color: '#f0a07a' },
+  { id: 'bass', name: 'Basse', color: '#e58fb0' },
 ];
 
+export const MAX_STUDIO_TRACKS = 16;
+export const INSTRUMENT_TRACK_NAME_MAX_LENGTH = 40;
 export const MAX_VOCAL_TRACKS = 8;
 export const VOCAL_TRACK_NAME_MAX_LENGTH = 40;
 
@@ -37,9 +43,11 @@ export const DEFAULT_VOCAL_TRACK: VocalTrack = {
   settings: DEFAULT_VOICE_CORRECTION,
 };
 
-export function studioTracks(vocalTracks: readonly VocalTrack[]): StudioTrackInfo[] {
+export function studioTracks(vocalTracks: readonly VocalTrack[], instrumentTracks = DEFAULT_INSTRUMENT_TRACKS): StudioTrackInfo[] {
   return [
-    ...STUDIO_TRACKS.filter(track => track.id !== 'voice'),
+    { id: 'drums', name: 'Batterie', type: 'Drum Rack', color: '#c1ed75', className: 'clip-lime' },
+    ...instrumentTracks.map(({ id, name, color }) => ({ id, name, color, type: id === 'bass' ? 'Piano Roll · 808' : 'Piano Roll', className: id === 'bass' ? 'clip-rose' : 'clip-peach' })),
+    { id: 'instrumental', name: 'Instrumentale', type: 'Audio importé', color: '#bda4fa', className: 'clip-purple' },
     ...vocalTracks.map(({ id, name, color }) => ({ id, name, color, type: 'Prise micro', className: 'clip-blue' })),
   ];
 }

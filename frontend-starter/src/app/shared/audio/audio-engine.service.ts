@@ -24,7 +24,8 @@ export class AudioEngineService {
   }
 
   async decode(data: ArrayBuffer): Promise<AudioBuffer> {
-    const { context } = await this.start();
+    // Le chargement d'un projet doit décoder ses fichiers même avant le premier clic.
+    const context = this.context ?? new OfflineAudioContext(1, 1, 44_100);
     return context.decodeAudioData(data);
   }
 

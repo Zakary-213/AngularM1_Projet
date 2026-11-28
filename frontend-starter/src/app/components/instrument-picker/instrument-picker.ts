@@ -1,4 +1,4 @@
-import { Component, ElementRef, OnDestroy, afterNextRender, inject, output } from '@angular/core';
+import { Component, ElementRef, OnDestroy, afterNextRender, inject, input, output } from '@angular/core';
 import {
   INSTRUMENT_FAMILIES,
   INSTRUMENT_FAMILY_LABELS,
@@ -41,6 +41,7 @@ export class InstrumentPickerComponent implements OnDestroy {
 
   readonly picked = output<InstrumentId>();
   readonly closed = output<void>();
+  readonly destination = input<string | null>(null);
 
   readonly families = INSTRUMENT_FAMILIES;
   readonly familyLabels = INSTRUMENT_FAMILY_LABELS;
@@ -65,7 +66,7 @@ export class InstrumentPickerComponent implements OnDestroy {
   }
 
   trackName(instrument: InstrumentId): string {
-    return defaultTrackFor(instrument) === 'bass' ? 'Basse' : 'Mélodie';
+    return this.destination() ?? (defaultTrackFor(instrument) === 'bass' ? 'Basse' : 'Mélodie');
   }
 
   isPlaying(instrument: InstrumentId): boolean {

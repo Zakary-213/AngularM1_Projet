@@ -2,9 +2,11 @@ import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import {
   DEFAULT_NOTE_LENGTH,
-  INSTRUMENTS,
+  INSTRUMENT_FAMILIES,
+  INSTRUMENT_FAMILY_LABELS,
   INSTRUMENT_LABELS,
   INSTRUMENT_RANGES,
+  InstrumentFamily,
   InstrumentId,
   MAX_RELEASE_SECONDS,
   MELODIC_BAR_CHOICES,
@@ -15,6 +17,7 @@ import {
   cellAtPoint,
   defaultTrackFor,
   describeNote,
+  instrumentsOfFamily,
   isBlackKey,
   noteAt,
   noteName,
@@ -63,8 +66,10 @@ interface NoteDrag {
 export class PianoRollPanelComponent {
   readonly session = inject(StudioSessionService);
 
-  readonly instruments = INSTRUMENTS;
+  readonly families = INSTRUMENT_FAMILIES;
+  readonly familyLabels = INSTRUMENT_FAMILY_LABELS;
   readonly instrumentLabels = INSTRUMENT_LABELS;
+  readonly instrumentsOf = (family: InstrumentFamily): InstrumentId[] => instrumentsOfFamily(family);
   readonly barChoices = MELODIC_BAR_CHOICES;
   readonly lengthChoices = NOTE_LENGTH_CHOICES;
   readonly lengthLabels = NOTE_LENGTH_LABELS;

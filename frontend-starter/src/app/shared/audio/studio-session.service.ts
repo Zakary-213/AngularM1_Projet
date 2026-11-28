@@ -464,7 +464,7 @@ export class StudioSessionService implements OnDestroy {
   /** Crée un pattern mélodique vide pour `instrument` et l'ouvre ; `null` si la limite est atteinte. */
   createMelodicPattern(instrument: InstrumentId = this.editedMelodicPattern().instrument): string | null {
     const count = this.melodicPatterns().length + 1;
-    const prefix = instrument === 'bass808' ? 'Basse' : 'Mélodie';
+    const prefix = defaultTrackFor(instrument) === 'bass' ? 'Basse' : 'Mélodie';
     return this.insertMelodicPattern(createMelodicPattern(createMelodicPatternId(), `${prefix} ${String(count).padStart(2, '0')}`, instrument));
   }
 

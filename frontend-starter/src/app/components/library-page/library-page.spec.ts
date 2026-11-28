@@ -33,7 +33,7 @@ describe('LibraryPageComponent', () => {
 
   it('affiche les vrais sons du studio', () => {
     const { names } = render();
-    expect(names()).toHaveLength(15);
+    expect(names()).toHaveLength(24);
     expect(names()).toContain('Kick Boom bap');
     expect(names()).toContain('Basse 808');
   });
@@ -42,11 +42,12 @@ describe('LibraryPageComponent', () => {
     const { fixture, names, card } = render();
     card('Instruments').click();
     fixture.detectChanges();
-    expect(names()).toEqual(['Piano', 'Synthé', 'Basse 808']);
+    expect(names()).toHaveLength(12);
+    expect(names()).toContain('Cloches');
     expect(card('Instruments').getAttribute('aria-pressed')).toBe('true');
     card('Instruments').click();
     fixture.detectChanges();
-    expect(names()).toHaveLength(15);
+    expect(names()).toHaveLength(24);
   });
 
   it('filtre avec la recherche', () => {
@@ -65,7 +66,7 @@ describe('LibraryPageComponent', () => {
     expect(root.querySelector('.library-empty')?.textContent).toContain('Importez votre propre instrumentale');
     root.querySelector<HTMLButtonElement>('.library-empty button')!.click();
     fixture.detectChanges();
-    expect(names()).toHaveLength(15);
+    expect(names()).toHaveLength(24);
   });
 
   it('lance la préécoute du son cliqué et la coupe en quittant la page', () => {

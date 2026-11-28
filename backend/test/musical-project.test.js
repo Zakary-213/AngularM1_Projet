@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
-import { MusicalProject, PROJECT_FORMAT_VERSION, PROJECT_LIMITS } from "../src/models/MusicalProject.js";
+import { INSTRUMENTS, MusicalProject, PROJECT_FORMAT_VERSION, PROJECT_LIMITS } from "../src/models/MusicalProject.js";
 
 // Validation du format de sauvegarde v1, sans connexion MongoDB.
 
@@ -127,6 +127,14 @@ test("M4 : pattern mélodique avec instrument, réglages, longueur et notes MIDI
   assert.ok((await errorsOf(validProject({ patterns: melodic({ bars: 3 }) }))).some((path) => path.endsWith("bars")));
   assert.ok((await errorsOf(validProject({ patterns: melodic({ params: { tone: 2, releaseSeconds: 0.3 } }) }))).some((path) => path.endsWith("tone")));
   assert.ok((await errorsOf(validProject({ patterns: melodic({ params: { tone: 0.5, releaseSeconds: 5 } }) }))).some((path) => path.endsWith("releaseSeconds")));
+});
+
+test("#65 : chaque instrument de la bibliothèque est accepté", async () => {
+  assert.equal(INSTRUMENTS.length, 12);
+  for (const instrument of INSTRUMENTS) {
+    const patterns = [{ id: "mel-1", name: "M", instrument, bars: 1, drumRows: [], notes: [] }];
+    assert.deepEqual(await errorsOf(validProject({ patterns })), [], instrument);
+  }
 });
 
 test("M4 : refuse les notes invalides, hors du pattern ou sans instrument", async () => {

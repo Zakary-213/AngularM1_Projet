@@ -8,9 +8,82 @@ import { STEPS_PER_BAR } from './music-time';
  * Données sérialisables : les fonctions renvoient un nouveau pattern.
  */
 
-export type InstrumentId = 'piano' | 'synth' | 'bass808';
-export const INSTRUMENTS: readonly InstrumentId[] = ['piano', 'synth', 'bass808'];
-export const INSTRUMENT_LABELS: Readonly<Record<InstrumentId, string>> = { piano: 'Piano', synth: 'Synthé', bass808: 'Basse 808' };
+export type InstrumentId =
+  | 'piano'
+  | 'organ'
+  | 'acousticGuitar'
+  | 'electricGuitar'
+  | 'bass808'
+  | 'electricBass'
+  | 'strings'
+  | 'brass'
+  | 'flute'
+  | 'synth'
+  | 'pad'
+  | 'bells';
+export const INSTRUMENTS: readonly InstrumentId[] = [
+  'piano',
+  'organ',
+  'acousticGuitar',
+  'electricGuitar',
+  'bass808',
+  'electricBass',
+  'strings',
+  'brass',
+  'flute',
+  'synth',
+  'pad',
+  'bells',
+];
+export const INSTRUMENT_LABELS: Readonly<Record<InstrumentId, string>> = {
+  piano: 'Piano',
+  organ: 'Orgue',
+  acousticGuitar: 'Guitare acoustique',
+  electricGuitar: 'Guitare électrique',
+  bass808: 'Basse 808',
+  electricBass: 'Basse électrique',
+  strings: 'Cordes',
+  brass: 'Cuivres',
+  flute: 'Flûte',
+  synth: 'Synthé',
+  pad: 'Nappe (pad)',
+  bells: 'Cloches',
+};
+
+/** Familles d'instruments : regroupement dans le Piano Roll et la Bibliothèque. */
+export type InstrumentFamily = 'keys' | 'guitars' | 'basses' | 'orchestral' | 'synths' | 'mallets';
+export const INSTRUMENT_FAMILIES: readonly InstrumentFamily[] = ['keys', 'guitars', 'basses', 'orchestral', 'synths', 'mallets'];
+export const INSTRUMENT_FAMILY_LABELS: Readonly<Record<InstrumentFamily, string>> = {
+  keys: 'Claviers',
+  guitars: 'Guitares',
+  basses: 'Basses',
+  orchestral: 'Cordes et vents',
+  synths: 'Synthés',
+  mallets: 'Cloches',
+};
+export const INSTRUMENT_FAMILY: Readonly<Record<InstrumentId, InstrumentFamily>> = {
+  piano: 'keys',
+  organ: 'keys',
+  acousticGuitar: 'guitars',
+  electricGuitar: 'guitars',
+  bass808: 'basses',
+  electricBass: 'basses',
+  strings: 'orchestral',
+  brass: 'orchestral',
+  flute: 'orchestral',
+  synth: 'synths',
+  pad: 'synths',
+  bells: 'mallets',
+};
+
+/** Instruments d'une famille, dans l'ordre de `INSTRUMENTS`. */
+export function instrumentsOfFamily(family: InstrumentFamily): InstrumentId[] {
+  return INSTRUMENTS.filter(instrument => INSTRUMENT_FAMILY[instrument] === family);
+}
+
+export function isInstrumentId(value: unknown): value is InstrumentId {
+  return typeof value === 'string' && (INSTRUMENTS as readonly string[]).includes(value);
+}
 
 /** Pistes de la timeline qui jouent des patterns mélodiques. */
 export type InstrumentTrackId = 'melody' | 'bass';
@@ -29,8 +102,17 @@ export const MAX_RELEASE_SECONDS = 2;
 
 export const DEFAULT_INSTRUMENT_PARAMS: Readonly<Record<InstrumentId, InstrumentParams>> = {
   piano: { tone: 0.6, releaseSeconds: 0.3 },
-  synth: { tone: 0.5, releaseSeconds: 0.25 },
+  organ: { tone: 0.5, releaseSeconds: 0.08 },
+  acousticGuitar: { tone: 0.6, releaseSeconds: 0.2 },
+  electricGuitar: { tone: 0.5, releaseSeconds: 0.15 },
   bass808: { tone: 0.4, releaseSeconds: 0.15 },
+  electricBass: { tone: 0.4, releaseSeconds: 0.1 },
+  strings: { tone: 0.5, releaseSeconds: 0.5 },
+  brass: { tone: 0.6, releaseSeconds: 0.15 },
+  flute: { tone: 0.5, releaseSeconds: 0.15 },
+  synth: { tone: 0.5, releaseSeconds: 0.25 },
+  pad: { tone: 0.4, releaseSeconds: 1.2 },
+  bells: { tone: 0.5, releaseSeconds: 1.5 },
 };
 
 /** Tessiture affichée dans le Piano Roll (MIDI, bornes incluses). */
@@ -42,9 +124,21 @@ export interface PitchRange {
 export const INSTRUMENT_RANGES: Readonly<Record<InstrumentId, PitchRange>> = {
   // Do3 à si5 : accords et mélodies.
   piano: { low: 48, high: 83 },
+  organ: { low: 48, high: 83 },
+  strings: { low: 48, high: 83 },
+  brass: { low: 48, high: 83 },
   synth: { low: 48, high: 83 },
+  pad: { low: 48, high: 83 },
+  // Mi2 à ré#5 : tessiture courante d'une guitare (36 notes).
+  acousticGuitar: { low: 40, high: 75 },
+  electricGuitar: { low: 40, high: 75 },
   // Do1 à si2 : registre des basses de rap.
   bass808: { low: 24, high: 47 },
+  // Mi1 à ré#3 : basse à 4 cordes.
+  electricBass: { low: 28, high: 51 },
+  // Do4 à si6 : instruments aigus.
+  flute: { low: 60, high: 95 },
+  bells: { low: 60, high: 95 },
 };
 
 export interface MidiNote {
@@ -93,9 +187,9 @@ export function patternSteps(pattern: Pick<MelodicPattern, 'bars'>): number {
   return pattern.bars * STEPS_PER_BAR;
 }
 
-/** Piste où se place un pattern par défaut : la 808 sur la piste Basse, le reste sur Mélodie. */
+/** Piste où se place un pattern par défaut : les basses sur la piste Basse, le reste sur Mélodie. */
 export function defaultTrackFor(instrument: InstrumentId): InstrumentTrackId {
-  return instrument === 'bass808' ? 'bass' : 'melody';
+  return INSTRUMENT_FAMILY[instrument] === 'basses' ? 'bass' : 'melody';
 }
 
 export function createMelodicPattern(id: string, name: string, instrument: InstrumentId, bars: MelodicBars = 2): MelodicPattern {

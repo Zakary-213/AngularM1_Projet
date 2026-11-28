@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterCutoffHz, noteEnvelope, noteStopTime, playInstrumentNote, pluckedString, stringPeriod } from './instrument-synth';
+import { filterCutoffHz, noteEnvelope, noteStopTime, playInstrumentNote, pluckedString, startHeldInstrumentNote, stringPeriod } from './instrument-synth';
 import {
   DEFAULT_INSTRUMENT_PARAMS,
   INSTRUMENTS,
@@ -17,9 +17,10 @@ class FakeParam {
   linearRampToValueAtTime(): void {}
   exponentialRampToValueAtTime(): void {}
   setTargetAtTime(): void {}
+  cancelScheduledValues(): void {}
 }
 
-class FakeNode {
+class FakeNode extends EventTarget {
   gain = new FakeParam();
   frequency = new FakeParam();
   detune = new FakeParam();
@@ -31,14 +32,16 @@ class FakeNode {
   loop = false;
   startedAt: number | null = null;
   stoppedAt: number | null = null;
-  constructor(private readonly sources?: FakeNode[]) {}
+  constructor(private readonly sources?: FakeNode[]) { super(); }
   connect<T>(target: T): T { return target; }
+  disconnect(): void {}
   start(time: number): void { this.startedAt = time; this.sources?.push(this); }
   stop(time: number): void { this.stoppedAt = time; }
 }
 
 class FakeContext {
   sampleRate = 44100;
+  currentTime = 0;
   started: FakeNode[] = [];
   buffers = 0;
   createGain(): FakeNode { return new FakeNode(); }
@@ -92,6 +95,29 @@ describe('Synthèse des instruments', () => {
       expect(context.started.length, instrument).toBeGreaterThan(0);
       expect(context.started.every(source => source.startedAt === 1 && source.stoppedAt === stopAt), instrument).toBe(true);
     }
+  });
+
+  it('tient deux notes et ne programme la fin de chaque voix qu’au relâchement', () => {
+    const fakeContext = new FakeContext();
+    const context = fakeContext as unknown as BaseAudioContext;
+    const output = new FakeNode() as unknown as AudioNode;
+    const params = DEFAULT_INSTRUMENT_PARAMS.organ;
+    fakeContext.currentTime = 2;
+    const first = startHeldInstrumentNote(context, output, 'organ', 60, 0.8, params);
+    const firstVoice = [...fakeContext.started];
+    const second = startHeldInstrumentNote(context, output, 'organ', 64, 0.8, params);
+    const secondVoice = fakeContext.started.slice(firstVoice.length);
+
+    expect(firstVoice.length).toBeGreaterThan(0);
+    expect(secondVoice.length).toBeGreaterThan(0);
+    expect(fakeContext.started.every(source => source.startedAt === 2 && source.stoppedAt === null)).toBe(true);
+    fakeContext.currentTime = 2.005;
+    first.release();
+    expect(firstVoice.every(source => source.stoppedAt === 2.005 + params.releaseSeconds)).toBe(true);
+    expect(secondVoice.every(source => source.stoppedAt === null)).toBe(true);
+    fakeContext.currentTime = 4;
+    second.release(true);
+    expect(secondVoice.every(source => source.stoppedAt === 4.02)).toBe(true);
   });
 
   it('ouvre le filtre avec la brillance pour chaque instrument, sans dépasser 16 kHz', () => {

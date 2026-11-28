@@ -6,6 +6,7 @@ import { DrumRackPanelComponent } from '../drum-rack-panel/drum-rack-panel';
 import { ExportPanelComponent } from '../export-panel/export-panel';
 import { PublishPanelComponent } from '../publish-panel/publish-panel';
 import { LyricsPanelComponent } from '../lyrics-panel/lyrics-panel';
+import { LiveInstrumentPanelComponent } from '../live-instrument-panel/live-instrument-panel';
 import { MixerPanelComponent } from '../mixer-panel/mixer-panel';
 import { PianoRollPanelComponent } from '../piano-roll-panel/piano-roll-panel';
 import { PitchCorrectionPanelComponent } from '../pitch-correction-panel/pitch-correction-panel';
@@ -31,7 +32,7 @@ const RULER_MARKS = 8;
 /** Largeur de la colonne des noms de pistes (styles.css : .track-label, .timeline-ruler). */
 const TRACK_LABEL_WIDTH_PX = 150;
 
-type EditorTab = 'Batterie' | 'Piano Roll' | 'Correction vocale' | 'Paroles' | 'Mixeur' | 'Export';
+type EditorTab = 'Batterie' | 'Piano Roll' | 'Jouer en direct' | 'Correction vocale' | 'Paroles' | 'Mixeur' | 'Export';
 
 type ClipKind = 'drum' | InstrumentTrackId | 'instrumental' | 'take';
 
@@ -84,6 +85,7 @@ const DRAG_THRESHOLD_PX = 4;
     DrumRackPanelComponent,
     ExportPanelComponent,
     LyricsPanelComponent,
+    LiveInstrumentPanelComponent,
     MixerPanelComponent,
     PianoRollPanelComponent,
     PitchCorrectionPanelComponent,
@@ -105,7 +107,7 @@ export class StudioPageComponent implements LeaveConfirmation {
   /** Identifiant du projet ouvert, ou `null` pour la session libre de `/studio`. */
   readonly projectId = inject(ActivatedRoute).snapshot.paramMap.get('id');
 
-  readonly editorTabs: readonly EditorTab[] = ['Batterie', 'Piano Roll', 'Correction vocale', 'Paroles', 'Mixeur', 'Export'];
+  readonly editorTabs: readonly EditorTab[] = ['Batterie', 'Piano Roll', 'Jouer en direct', 'Correction vocale', 'Paroles', 'Mixeur', 'Export'];
   readonly activeTab = signal<EditorTab>('Batterie');
   private readonly injector = inject(Injector);
   private readonly editorPanel = viewChild<ElementRef<HTMLElement>>('editorPanel');

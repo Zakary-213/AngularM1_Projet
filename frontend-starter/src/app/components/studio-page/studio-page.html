@@ -325,6 +325,10 @@
       }
     }
     @case ('Mixeur') { <app-mixer-panel /> }
+    @case ('Jouer en direct') {
+      @defer (on immediate) { <app-live-instrument-panel /> }
+      @loading { <p class="editor-body muted">Chargement du clavier…</p> }
+    }
     @case ('Export') { <app-export-panel #exportPanel tabindex="-1" role="region" aria-label="Export WAV" /> }
     @case ('Batterie') { <app-drum-rack-panel /> }
   }

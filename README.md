@@ -80,13 +80,13 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Visite 3D d'un studio au défilement : la caméra avance jusqu'au bureau (synthé, enceintes, écran) | ✅ Fonctionnel |
 | Projets | Mes projets (créer « Créer / Importer une prod », ouvrir, renommer, supprimer, pagination), sauvegarde du studio avec état visible et conflits détectés | ✅ Fonctionnel (M1) |
-| Bibliothèque | Les 15 sons réels du studio (12 frappes des kits boom bap et trap, piano, synthé, basse 808) : filtre par catégorie, recherche, préécoute ; catégorie Samples vide pour l'instant | ✅ Fonctionnel (#72) |
+| Bibliothèque | Les 24 sons réels du studio (12 frappes des kits boom bap et trap, 12 instruments) : filtre par catégorie, recherche, préécoute ; catégorie Samples vide pour l'instant | ✅ Fonctionnel (#72) |
 | Interface | Pages Collaborations, Publications | 🎨 Maquette |
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Timeline | Se placer (clic, clavier), boucle, clips de batterie (déplacer, dupliquer, raccourcir, supprimer), instrumentale et prises déplaçables, Annuler / Rétablir, positions sauvegardées | ✅ Fonctionnel (M5) |
 | Batterie | Drum Rack 16 pas, 6 instruments synthétisés (kick, snare, clap, hi-hat, percussion, 808 accordée sur la tonalité), 2 kits (boom bap, trap), préécoute, vélocité, bibliothèque de patterns, un pattern par clip de batterie | ✅ Fonctionnel (M3) |
-| Composition | Piano Roll (ajouter, déplacer, redimensionner, supprimer des notes à la souris ou au clavier, accords), 3 instruments synthétisés (piano, synthé, basse 808 jouée par notes) avec brillance et relâchement, écoute en boucle d'un pattern, pistes Mélodie et Basse dans la timeline, le mixeur et l'export, notes MIDI sauvegardées | ✅ Fonctionnel (M4) |
+| Composition | Piano Roll (ajouter, déplacer, redimensionner, supprimer des notes à la souris ou au clavier, accords), 12 instruments synthétisés rangés en 6 familles (claviers, guitares, basses, cordes et vents, synthés, cloches) avec brillance et relâchement (#65), écoute en boucle d'un pattern, pistes Mélodie et Basse dans la timeline, le mixeur et l'export, notes MIDI sauvegardées | ✅ Fonctionnel (M4) |
 | Import | Instrumentale MP3 / WAV envoyée dans vos fichiers audio, forme d'onde, égaliseur 3 bandes, retrouvée à la réouverture du projet | ✅ Fonctionnel (M6) |
 | Mix | Mixeur : volume, mute, solo, panoramique, égaliseur 3 bandes, réverbération et delay par piste, volume Master, vumètres avec alerte « Saturation » ; appliqués à l'écoute et à l'export WAV, conservés à la sauvegarde | ✅ Fonctionnel (M7) |
 | Voix | Prise micro (bouton ●) et onglet « Correction vocale » : 6 styles (Naturel, Rap, Trap, Drill, Raï, Robot) + dose d'effet, mode personnalisé (gamme, notes, humanisation, transposition, égaliseur), courbe de hauteur, calcul dans un Web Worker, version corrigée utilisable sur la piste Voix | 🚧 Partiel (M9) |
@@ -387,6 +387,15 @@ Erreurs possibles : `400` JSON, thème ou réglage invalide (le champ `field` id
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 28 novembre 2026 — Bibliothèque d'instruments : 12 instruments (#65)
+
+- **Instruments** (`shared/audio/instrument-synth.ts`) : 9 nouveaux instruments s'ajoutent au piano, au synthé et à la basse 808. Orgue (5 tirettes additives), guitare acoustique, guitare électrique (saturation dosée par la brillance) et basse électrique (corde pincée **Karplus-Strong** calculée en JavaScript, mise en cache par note, accord exact grâce à `playbackRate`), cordes (3 dents de scie désaccordées, attaque d'archet, vibrato), cuivres (filtre qui s'ouvre pendant l'attaque), flûte (sinus, souffle filtré, vibrato), nappe (attaque lente) et cloches (modulation de fréquence inharmonique).
+- **Familles** (`melodic-pattern.ts`) : claviers, guitares, basses, cordes et vents, synthés, cloches. Le choix d'instrument du Piano Roll est groupé par famille ; la Bibliothèque (`/library`) affiche la famille de chaque instrument et la recherche la prend en compte. Les basses vont sur la piste Basse.
+- **Licences** : tout est synthétisé en code, aucun sample n'est téléchargé ni distribué. Il n'y a donc **aucune licence** de son à documenter, ni de chargement à la demande à prévoir. Le même code sert à l'écoute et à l'export (`BaseAudioContext`).
+- **Sauvegarde** : l'instrument reste enregistré par pattern ; le serveur accepte les 12 identifiants (`INSTRUMENTS` de `MusicalProject.js`, même liste que le frontend). Format inchangé : les anciens projets s'ouvrent tels quels.
+- **Vérifications** : frontend `npm test` 317/317 (familles, tessitures, synthèse de chaque instrument avec démarrage et arrêt des sources, filtres, cache des cordes, justesse de la corde, décroissance) ; backend `npm test` 74/74 (chaque instrument accepté) ; `npm run build` réussi. Navigateur : préécoute des 12 instruments mesurée à la sortie (aucune valeur invalide, niveaux efficaces de 0,05 à 0,10 hors 808 ; basse électrique remontée après mesure), choix groupé par famille dans le Piano Roll, tessiture de la guitare (mi2 à ré#5), export WAV d'un pattern de guitare sans erreur, console sans erreur.
+- **Limites** : timbres synthétiques, moins réalistes que des samples ; qualité des sons non vérifiée au casque ; 24 notes de tessiture pour les basses.
 
 ### 28 novembre 2026 — Page Bibliothèque branchée sur les sons du studio (#72)
 

@@ -1,5 +1,5 @@
 import { DRUM_KITS, DRUM_KIT_LABELS, DRUM_VOICES, DRUM_VOICE_LABELS, DrumKit, DrumVoice } from './drum-pattern';
-import { INSTRUMENTS, INSTRUMENT_LABELS, INSTRUMENT_RANGES, InstrumentId } from './melodic-pattern';
+import { INSTRUMENTS, INSTRUMENT_FAMILY, INSTRUMENT_FAMILY_LABELS, INSTRUMENT_LABELS, INSTRUMENT_RANGES, InstrumentId } from './melodic-pattern';
 
 /**
  * Catalogue de la page Bibliothèque, construit à partir des sons réellement
@@ -39,12 +39,6 @@ export interface SoundEntry {
   readonly source: SoundSource;
 }
 
-const INSTRUMENT_DESCRIPTIONS: Readonly<Record<InstrumentId, string>> = {
-  piano: 'Instrument · Accords et mélodies',
-  synth: 'Instrument · Nappes et leads',
-  bass808: 'Instrument · Basse jouable par notes',
-};
-
 /** Note de préécoute d'un instrument : un do au milieu de sa tessiture du Piano Roll. */
 export function previewPitch(instrument: InstrumentId): number {
   const range = INSTRUMENT_RANGES[instrument];
@@ -66,7 +60,7 @@ export const SOUND_LIBRARY: readonly SoundEntry[] = [
     id: `instrument-${instrument}`,
     name: INSTRUMENT_LABELS[instrument],
     category: 'instruments' as const,
-    description: INSTRUMENT_DESCRIPTIONS[instrument],
+    description: `Instrument · ${INSTRUMENT_FAMILY_LABELS[INSTRUMENT_FAMILY[instrument]]}`,
     source: { kind: 'instrument' as const, instrument, pitch: previewPitch(instrument) },
   })),
 ];

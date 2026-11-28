@@ -11,8 +11,12 @@
   <div class="field">
     <label for="melodic-instrument">Instrument</label>
     <select id="melodic-instrument" (change)="onInstrumentChange($event)">
-      @for (instrument of instruments; track instrument) {
-        <option [value]="instrument" [selected]="instrument === current.instrument">{{ instrumentLabels[instrument] }}</option>
+      @for (family of families; track family) {
+        <optgroup [label]="familyLabels[family]">
+          @for (instrument of instrumentsOf(family); track instrument) {
+            <option [value]="instrument" [selected]="instrument === current.instrument">{{ instrumentLabels[instrument] }}</option>
+          }
+        </optgroup>
       }
     </select>
   </div>

@@ -57,8 +57,22 @@ export const TRACK_TYPES = ["drum", "instrument", "audio", "vocal"];
 // Instruments du Drum Rack (sons synthétisés) ; clap, percussion et 808 depuis la M3.
 export const DRUM_VOICES = ["kick", "snare", "clap", "hihat", "perc", "bass808"];
 export const DRUM_KITS = ["boomBap", "trap"];
-// Instruments du Piano Roll (synthétisés en Web Audio, M4).
-export const INSTRUMENTS = ["piano", "synth", "bass808"];
+// Instruments du Piano Roll (synthétisés en Web Audio, M4 ; bibliothèque élargie en #65).
+// Liste identique à INSTRUMENTS de frontend-starter/src/app/shared/audio/melodic-pattern.ts.
+export const INSTRUMENTS = [
+  "piano",
+  "organ",
+  "acousticGuitar",
+  "electricGuitar",
+  "bass808",
+  "electricBass",
+  "strings",
+  "brass",
+  "flute",
+  "synth",
+  "pad",
+  "bells",
+];
 // Mêmes gammes que la correction vocale du studio (musical-scale.ts).
 export const SCALES = ["major", "minor", "harmonicMinor", "phrygianDominant"];
 // Styles de correction vocale du studio (vocal-styles.ts).

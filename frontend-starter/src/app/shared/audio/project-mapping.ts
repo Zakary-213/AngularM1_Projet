@@ -10,7 +10,7 @@ import { STUDIO_TRACKS } from './studio-tracks';
 import { DEFAULT_DRUM_CLIPS, DrumClip } from './arrangement';
 import {
   DEFAULT_INSTRUMENT_PARAMS,
-  INSTRUMENTS,
+  isInstrumentId,
   InstrumentId,
   InstrumentTrackId,
   MELODIC_BAR_CHOICES,
@@ -257,7 +257,7 @@ function readMelodicPatterns(project: MusicalProject): MelodicPattern[] {
     return createDefaultMelodicPatterns();
   }
   return stored.map(entry => {
-    const instrument: InstrumentId = INSTRUMENTS.includes(entry.instrument as InstrumentId) ? (entry.instrument as InstrumentId) : 'piano';
+    const instrument: InstrumentId = isInstrumentId(entry.instrument) ? entry.instrument : 'piano';
     const bars: MelodicBars = MELODIC_BAR_CHOICES.includes(entry.bars as MelodicBars) ? (entry.bars as MelodicBars) : 1;
     let pattern: MelodicPattern = {
       id: entry.id,

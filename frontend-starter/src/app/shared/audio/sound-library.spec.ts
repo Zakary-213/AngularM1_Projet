@@ -6,7 +6,7 @@ import { SOUND_LIBRARY, countByCategory, filterSounds, previewPitch } from './so
 describe('Catalogue de la bibliothèque de sons', () => {
   it('liste exactement les sons du studio : chaque frappe de chaque kit et chaque instrument', () => {
     expect(SOUND_LIBRARY).toHaveLength(DRUM_KITS.length * DRUM_VOICES.length + INSTRUMENTS.length);
-    expect(countByCategory(SOUND_LIBRARY)).toEqual({ drums: 12, instruments: 3, samples: 0 });
+    expect(countByCategory(SOUND_LIBRARY)).toEqual({ drums: 12, instruments: 12, samples: 0 });
   });
 
   it('donne un identifiant unique à chaque son', () => {
@@ -31,18 +31,20 @@ describe('filterSounds', () => {
 
   it('filtre par catégorie', () => {
     const instruments = filterSounds(SOUND_LIBRARY, 'instruments', '');
-    expect(instruments.map(sound => sound.name)).toEqual(['Piano', 'Synthé', 'Basse 808']);
+    expect(instruments).toHaveLength(12);
+    expect(instruments.map(sound => sound.name)).toContain('Guitare acoustique');
     expect(filterSounds(SOUND_LIBRARY, 'samples', '')).toEqual([]);
   });
 
   it('cherche dans le nom et la description, sans tenir compte de la casse ni des accents', () => {
     expect(filterSounds(SOUND_LIBRARY, null, 'KICK').map(sound => sound.id)).toEqual(['drum-boomBap-kick', 'drum-trap-kick']);
-    expect(filterSounds(SOUND_LIBRARY, null, 'synthe').map(sound => sound.id)).toEqual(['instrument-synth']);
+    expect(filterSounds(SOUND_LIBRARY, null, 'synthe').map(sound => sound.id)).toEqual(['instrument-synth', 'instrument-pad']);
     expect(filterSounds(SOUND_LIBRARY, null, '  trap ').every(sound => sound.id.startsWith('drum-trap-'))).toBe(true);
   });
 
   it('combine catégorie et recherche', () => {
     expect(filterSounds(SOUND_LIBRARY, 'instruments', '808').map(sound => sound.id)).toEqual(['instrument-bass808']);
+    expect(filterSounds(SOUND_LIBRARY, 'instruments', 'guitares').map(sound => sound.id)).toEqual(['instrument-acousticGuitar', 'instrument-electricGuitar']);
     expect(filterSounds(SOUND_LIBRARY, 'drums', 'piano')).toEqual([]);
   });
 });

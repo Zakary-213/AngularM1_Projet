@@ -49,7 +49,7 @@
     } @else {
       <a class="button secondary" routerLink="/collaborations">♧ Collaborer</a>
     }
-    <button type="button" (click)="activeTab.set('Export')">↗ Exporter</button>
+    <button type="button" (click)="openExportPanel()">↗ Exporter</button>
   </div>
 </section>
 @if (publishOpen() && studioProject.project()) {
@@ -258,7 +258,7 @@
   </section>
 </div>
 
-<section class="panel editor-panel">
+<section #editorPanel class="panel editor-panel">
   <div class="tabs" aria-label="Panneaux du studio">
     @for (tab of editorTabs; track tab) {
       <button type="button" [class.selected]="activeTab() === tab" [attr.aria-pressed]="activeTab() === tab" (click)="activeTab.set(tab)">{{ tab }}</button>
@@ -282,7 +282,7 @@
       }
     }
     @case ('Mixeur') { <app-mixer-panel /> }
-    @case ('Export') { <app-export-panel /> }
+    @case ('Export') { <app-export-panel #exportPanel tabindex="-1" role="region" aria-label="Export WAV" /> }
     @case ('Batterie') { <app-drum-rack-panel /> }
   }
   @defer (when activeTab() === 'Paroles') {

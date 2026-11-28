@@ -13,8 +13,7 @@ import {
   patternIdAtBar,
   removeDrumClip,
   resizeDrumClip,
-  setDrumClipPattern,
-} from './arrangement';
+  setDrumClipPattern, freeStartBar } from './arrangement';
 import { MAX_SONG_BARS } from './timeline-position';
 
 const intro: DrumClip = { id: 'a', startBar: 0, lengthBars: 4, patternId: 'p1' };
@@ -115,5 +114,17 @@ describe('placement des clips sur la timeline', () => {
     expect(dragUnits(-30, 800, 16)).toBe(-1);
     expect(dragUnits(10, 800, 16)).toBe(0);
     expect(dragUnits(10, 0, 16)).toBe(0);
+  });
+});
+
+describe('freeStartBar', () => {
+  const clip = (startBar: number, lengthBars = 4) => ({ id: `c${startBar}`, startBar, lengthBars, patternId: 'p' });
+  it('garde la mesure voulue si elle est libre', () => {
+    expect(freeStartBar([], 3)).toBe(3);
+    expect(freeStartBar([clip(0)], 4)).toBe(4);
+  });
+  it('place après le dernier clip si la mesure voulue est occupée', () => {
+    expect(freeStartBar([clip(0), clip(8)], 2)).toBe(12);
+    expect(freeStartBar([clip(4)], 2)).toBe(8);
   });
 });

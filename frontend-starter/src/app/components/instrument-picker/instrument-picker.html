@@ -1,0 +1,31 @@
+<section class="picker" aria-labelledby="picker-title">
+  <header class="picker-head">
+    <div>
+      <h3 id="picker-title" tabindex="-1">Ajouter un instrument</h3>
+      <p class="muted">Écoutez avec ▷, puis « Ajouter » : l’instrument est placé sur la timeline, à la tête de lecture, et s’ouvre ici pour poser vos notes.</p>
+    </div>
+    <button type="button" class="close" (click)="closed.emit()" aria-label="Fermer le choix d’instrument">✕</button>
+  </header>
+
+  @if (previewError(); as error) {
+    <p class="error" role="alert">{{ error }}</p>
+  }
+
+  @for (family of families; track family) {
+    <h4>{{ familyLabels[family] }}</h4>
+    <ul class="cards">
+      @for (instrument of instrumentsOf(family); track instrument) {
+        <li class="card" [class.playing]="isPlaying(instrument)">
+          <div class="card-text">
+            <b>{{ labels[instrument] }}</b>
+            <small>{{ hints[instrument] }} · piste {{ trackName(instrument) }}</small>
+          </div>
+          <div class="card-actions">
+            <button type="button" class="listen" (click)="preview(instrument)" [attr.aria-label]="'Écouter ' + labels[instrument]">{{ isPlaying(instrument) ? '♪' : '▷' }}</button>
+            <button type="button" class="add" (click)="picked.emit(instrument)" [attr.aria-label]="'Ajouter ' + labels[instrument]">Ajouter</button>
+          </div>
+        </li>
+      }
+    </ul>
+  }
+</section>

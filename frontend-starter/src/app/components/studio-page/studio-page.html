@@ -184,7 +184,10 @@
                 </button>
               }
               @if ((track.id === 'melody' || track.id === 'bass') && session.instrumentClips()[track.id].length === 0) {
-                <p class="lane-hint">Aucun clip : composez dans l’onglet Piano Roll puis « Placer sur la piste ».</p>
+                <div class="lane-action">
+                  <button type="button" (click)="openInstrumentPicker($event)">＋ Ajouter un instrument</button>
+                  <small>{{ track.id === 'bass' ? 'Basse 808, basse électrique' : 'Piano, guitare, cordes, orgue…' }}</small>
+                </div>
               } @else if (track.id === 'drums' && session.drumClips().length === 0) {
                 <p class="lane-hint">Aucun clip de batterie : placez la tête de lecture puis « ＋ Clip de batterie ».</p>
               } @else if (track.id === 'instrumental' && !session.instrumental()) {

@@ -388,6 +388,15 @@ Erreurs possibles : `400` JSON, thème ou réglage invalide (le champ `field` id
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
 
+### 28 novembre 2026 — Ajouter un instrument en un clic (#75)
+
+- **Problème** : après #65, ajouter une guitare demandait trois étapes peu claires (créer un pattern, changer son instrument dans une liste, « Placer sur la piste »).
+- **Bouton « ＋ Ajouter un instrument »** en haut du Piano Roll, et sur les pistes Mélodie et Basse vides de la timeline (il ouvre l'onglet Piano Roll). Le sélecteur (`instrument-picker`) affiche les 12 instruments en cartes groupées par famille, avec une phrase d'usage, la piste visée, une préécoute ▷ et un bouton « Ajouter ». Il défile jusqu'à l'écran et reçoit le focus quand on l'ouvre depuis la timeline.
+- **« Ajouter »** (`StudioSessionService.addInstrument`) crée une partie vide nommée d'après l'instrument (« Guitare acoustique 01 »), l'ouvre dans le Piano Roll et la place sur la bonne piste à la tête de lecture, ou juste après le dernier clip de la piste si cette mesure est déjà occupée (un seul clip joue à la fois sur une piste : on ne masque pas une partie existante) ; un message dit à quelle mesure elle est et quoi faire ensuite. Annuler (Ctrl + Z) retire le clip.
+- **Libellés** : « Partie affichée », « Changer l'instrument », « ＋ Partie vide ».
+- **Vérifications** : `npm test` 325/325 (ajout d'instrument, piste choisie, noms, limite, place libre sans recouvrement ; sélecteur : familles, émission, préécoute) ; `npm run build` réussi. Navigateur : depuis la piste Mélodie vide, sélecteur ouvert avec le focus, guitare ajoutée en deux clics (clip « Guitare acoustique 01, mesures 1 à 4 »), pas de débordement à 360 px et 1280 px.
+- **Limite** : toujours deux pistes d'instruments (Mélodie et Basse) : deux instruments de la même piste jouent l'un après l'autre, pas en même temps (par exemple piano et cordes ensemble). Des pistes par instrument relèvent de #68.
+
 ### 28 novembre 2026 — Bibliothèque d'instruments : 12 instruments (#65)
 
 - **Instruments** (`shared/audio/instrument-synth.ts`) : 9 nouveaux instruments s'ajoutent au piano, au synthé et à la basse 808. Orgue (5 tirettes additives), guitare acoustique, guitare électrique (saturation dosée par la brillance) et basse électrique (corde pincée **Karplus-Strong** calculée en JavaScript, mise en cache par note, accord exact grâce à `playbackRate`), cordes (3 dents de scie désaccordées, attaque d'archet, vibrato), cuivres (filtre qui s'ouvre pendant l'attaque), flûte (sinus, souffle filtré, vibrato), nappe (attaque lente) et cloches (modulation de fréquence inharmonique).

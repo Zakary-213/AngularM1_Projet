@@ -80,7 +80,8 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Fichiers audio | Upload multipart avec progression, liste paginée, lecture, suppression | ✅ Fonctionnel |
 | Accueil | Visite 3D d'un studio au défilement : la caméra avance jusqu'au bureau (synthé, enceintes, écran) | ✅ Fonctionnel |
 | Projets | Mes projets (créer « Créer / Importer une prod », ouvrir, renommer, supprimer, pagination), sauvegarde du studio avec état visible et conflits détectés | ✅ Fonctionnel (M1) |
-| Interface | Pages Bibliothèque, Collaborations, Publications | 🎨 Maquette |
+| Bibliothèque | Les 15 sons réels du studio (12 frappes des kits boom bap et trap, piano, synthé, basse 808) : filtre par catégorie, recherche, préécoute ; catégorie Samples vide pour l'instant | ✅ Fonctionnel (#72) |
+| Interface | Pages Collaborations, Publications | 🎨 Maquette |
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Timeline | Se placer (clic, clavier), boucle, clips de batterie (déplacer, dupliquer, raccourcir, supprimer), instrumentale et prises déplaçables, Annuler / Rétablir, positions sauvegardées | ✅ Fonctionnel (M5) |
@@ -386,6 +387,14 @@ Erreurs possibles : `400` JSON, thème ou réglage invalide (le champ `field` id
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 28 novembre 2026 — Page Bibliothèque branchée sur les sons du studio (#72)
+
+- **Catalogue** (`shared/audio/sound-library.ts`) : construit à partir des listes du studio (`DRUM_KITS`, `DRUM_VOICES`, `INSTRUMENTS`). La page ne peut donc pas annoncer un son absent du Drum Rack ou du Piano Roll. Chaque son indique où le retrouver dans le studio.
+- **Page `/library`** : les cartes Drums / Instruments / Samples filtrent la liste (`aria-pressed`, un second clic retire le filtre) ; recherche insensible à la casse et aux accents ; nombre de sons annoncé aux lecteurs d'écran. Le bouton désactivé « Importer un fichier » est remplacé par « Utiliser dans un projet » (vers `/projects`).
+- **Préécoute** (`SoundPreviewService`) : même code de synthèse que le studio ; un seul son à la fois (fondu de 30 ms sur le précédent) ; état « Lecture en cours » ; message si le moteur audio ne démarre pas ; arrêt en quittant la page.
+- **Vérifications** : `npm test` 308/308 (12 nouveaux tests : catalogue, filtres, recherche, préécoute) ; `npm run build` réussi. Navigateur : filtres, recherche, état vide, préécoute, aucune erreur console, pas de débordement horizontal à 400 px et 1280 px.
+- **Limites** : pas encore de samples (catégorie vide, expliquée) ; « Utiliser dans un projet » ouvre la liste des projets, sans présélectionner l'instrument ; la bibliothèque s'agrandira avec #65 ; préécoute non vérifiée au casque.
 
 ### M12 (#31) · Première étape de génération côté serveur
 

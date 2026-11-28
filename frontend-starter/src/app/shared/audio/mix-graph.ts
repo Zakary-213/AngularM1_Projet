@@ -1,3 +1,5 @@
+import type { VocalTrackId } from './track-mix';
+
 /**
  * Éléments du graphe de mixage partagés par l'écoute et l'export.
  * Gains linéaires (0 à 1) sauf mention contraire ; niveaux affichés en dBFS.
@@ -43,7 +45,7 @@ export interface AudioClip {
 
 /** Fichier audio rattaché à une piste du studio (sa piste porte volume, égaliseur, pan et effets). */
 export interface TrackClip {
-  readonly track: 'instrumental' | 'voice';
+  readonly track: 'instrumental' | VocalTrackId;
   readonly clip: AudioClip;
 }
 

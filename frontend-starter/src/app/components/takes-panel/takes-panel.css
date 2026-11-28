@@ -1,6 +1,10 @@
 :host { display: block; border-top: 1px solid var(--line); }
 .takes { padding: 12px; font-size: 12px; }
 .takes-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 10px; }
+.track-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 10px 14px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; }
+.track-controls select { min-width: min(100%, 12rem); }
+.track-controls button { min-height: 44px; text-align: left; }
+.track-takes-title { margin: 14px 0 8px; overflow-wrap: anywhere; font-size: 13px; }
 h3 { margin: 0; font-size: 14px; }
 h3 small { color: var(--muted); font-weight: 400; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 100%; }

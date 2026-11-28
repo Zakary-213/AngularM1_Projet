@@ -36,6 +36,7 @@ interface VocalSource {
   readonly sampleRate: number;
   /** La source est la prise du studio : la version corrigée peut remplacer la piste Voix. */
   readonly fromStudioTake: boolean;
+  readonly takeId?: string;
 }
 
 interface CorrectionResult {
@@ -201,7 +202,7 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   useStudioTake(): void {
     const take = this.session.take();
     if (take) {
-      this.setSource({ label: 'Prise active du studio', samples: toMono(take.buffer), sampleRate: take.buffer.sampleRate, fromStudioTake: true });
+      this.setSource({ label: take.name + ' · ' + this.session.armedVocalTrack().name, samples: toMono(take.buffer), sampleRate: take.buffer.sampleRate, fromStudioTake: true, takeId: take.id });
     }
   }
 
@@ -283,14 +284,14 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   applyToVoiceTrack(): void {
     const result = this.result();
     const takeId = this.session.activeTakeId();
-    if (!result || !this.source()?.fromStudioTake || !takeId) {
+    if (!result || !takeId || this.source()?.takeId !== takeId) {
       return;
     }
     if (this.studioProject) {
       this.studioProject.useCorrectedVersion(result.buffer, result.styleLabel);
     } else {
-      this.session.correctedTake.set({ takeId, buffer: result.buffer, styleLabel: result.styleLabel });
-      this.session.useCorrectedTake.set(true);
+      this.session.setCorrectedTake({ takeId, buffer: result.buffer, styleLabel: result.styleLabel });
+      this.session.setUseCorrectedTake(true);
     }
   }
 
@@ -299,7 +300,7 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   }
 
   useOriginalOnTrack(): void {
-    this.session.useCorrectedTake.set(false);
+    this.session.setUseCorrectedTake(false);
   }
 
   download(): void {
@@ -455,7 +456,7 @@ export class PitchCorrectionPanelComponent implements OnDestroy {
   }
 
   private updateCorrection(change: Partial<VoiceCorrectionState>): void {
-    this.session.voiceCorrection.update(state => ({ ...state, ...change }));
+    this.session.setVoiceCorrection({ ...this.session.voiceCorrection(), ...change });
   }
 
   /** Dans un projet, les styles partent avec la sauvegarde ; sinon ils restent dans ce navigateur. */

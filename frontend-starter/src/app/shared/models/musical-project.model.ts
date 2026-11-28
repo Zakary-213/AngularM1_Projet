@@ -3,10 +3,10 @@ import type { LyricsLine, ProjectLyrics } from './lyrics.model';
 
 /**
  * Version du format de sauvegarde comprise par ce studio (voir « Contrat d'API »).
- * v2 (M10) : section `vocal` et version corrigée d'une prise ; un projet v1 se lit
- * avec les réglages de correction par défaut et passe en v2 à sa prochaine sauvegarde.
+ * v3 (#64) : prises et réglages vocaux par piste, piste armée. Les projets v1/v2
+ * restent lisibles et passent en v3 à leur prochaine sauvegarde.
  */
-export const PROJECT_FORMAT_VERSION = 2;
+export const PROJECT_FORMAT_VERSION = 3;
 export const PROJECT_TITLE_MAX_LENGTH = 80;
 
 export type ProjectOrigin = 'create' | 'import';
@@ -91,6 +91,7 @@ export interface ProjectTrack {
   readonly fx?: { readonly reverb?: ProjectFxSend; readonly delay?: ProjectFxSend };
   /** Prise jouée parmi les clips de la piste (piste Voix). */
   readonly activeClipId?: string;
+  readonly vocal?: ProjectVocal;
   readonly clips: readonly ProjectClip[];
 }
 
@@ -129,6 +130,7 @@ export interface ProjectPattern {
 
 /** Champs qu'une sauvegarde peut modifier (le serveur ignore tous les autres). */
 export interface ProjectContent {
+  readonly armedVocalTrackId?: string;
   readonly bpm: number;
   readonly key: ProjectKeySignature;
   readonly tracks: readonly ProjectTrack[];

@@ -11,6 +11,7 @@ import { MusicalProject, PROJECT_FORMAT_VERSION } from '../models/musical-projec
 import type { ProjectLyrics } from '../models/lyrics.model';
 import { ProjectService } from './project.service';
 import { TrackService } from './track.service';
+import type { VocalTrackId } from '../audio/track-mix';
 
 export type ProjectLoadState = 'loading' | 'loaded' | 'error';
 /** `dirty` : modifié localement ; `saved` : confirmé par le serveur ; `conflict` : modifié ailleurs. */
@@ -74,7 +75,8 @@ export class StudioProjectService {
   readonly takesLoading = signal(0);
 
   /** Version corrigée de la prise active telle qu'elle sera sauvegardée (fichier déjà envoyé). */
-  readonly correctionRef = signal<Omit<TakeCorrectionRef, 'enabled'> | null>(null);
+  private readonly correctionRefs = signal<Readonly<Record<string, Omit<TakeCorrectionRef, 'enabled'>>>>({});
+  readonly correctionRef = computed(() => this.correctionRefs()[this.session.activeTakeId() ?? ''] ?? null);
   readonly correctionUpload = signal<TakeUpload | null>(null);
   /** Version corrigée du projet impossible à récupérer à l'ouverture. */
   readonly correctionError = signal<string | null>(null);
@@ -98,6 +100,9 @@ export class StudioProjectService {
     const loaded = this.session.instrumental();
     const bpm = this.session.bpm();
     return {
+      vocalTracks: this.session.vocalTracks(),
+      armedVocalTrackId: this.session.armedVocalTrackId(),
+      corrections: Object.values(this.correctionRefs()).map(ref => ({ ...ref, enabled: this.session.enabledCorrections()[ref.takeId] === true })),
       lyrics: this.lyrics(),
       bpm,
       key: this.session.projectKey(),
@@ -116,7 +121,7 @@ export class StudioProjectService {
       instrumentalStartBeat: this.session.instrumentalStartBeat(),
       melodicPatterns: this.session.melodicPatterns(),
       instrumentClips: this.session.instrumentClips(),
-      vocal: this.session.voiceCorrection(),
+      vocal: this.session.vocalTracks()[0].settings,
       userStyles: this.session.userVocalStyles(),
       correction: this.currentCorrection(),
     };
@@ -215,7 +220,7 @@ export class StudioProjectService {
   /** Abandonne les modifications locales et recharge la version du serveur (après un conflit). */
   reload(): void {
     const project = this.project();
-    if (project) {
+    if (project && this.session.micState() === 'idle') {
       this.load(project.id);
     }
   }
@@ -285,6 +290,24 @@ export class StudioProjectService {
     this.session.selectTake(id);
   }
 
+  removeVocalTrack(trackId: VocalTrackId): boolean {
+    if (this.uploading()) return false;
+    const takeIds = new Set([
+      ...this.takeRefs().filter(ref => (ref.trackId ?? 'voice') === trackId).map(ref => ref.id),
+      ...this.session.takes().filter(take => (take.trackId ?? 'voice') === trackId).map(take => take.id),
+    ]);
+    if (!this.session.removeVocalTrack(trackId)) return false;
+    this.takeRefs.update(refs => refs.filter(ref => !takeIds.has(ref.id)));
+    this.takeUploads.update(values => Object.fromEntries(Object.entries(values).filter(([id]) => !takeIds.has(id))));
+    this.takeErrors.update(values => Object.fromEntries(Object.entries(values).filter(([id]) => !takeIds.has(id))));
+    this.correctionRefs.update(values => Object.fromEntries(Object.entries(values).filter(([id]) => !takeIds.has(id))));
+    if (this.pendingCorrection && takeIds.has(this.pendingCorrection.takeId)) {
+      this.pendingCorrection = null;
+      this.correctionUpload.set(null);
+    }
+    return true;
+  }
+
   renameTake(id: string, name: string): boolean {
     if (!this.session.renameTake(id, name)) {
       return false;
@@ -304,13 +327,21 @@ export class StudioProjectService {
 
   /** Retire une prise du projet. Son fichier reste dans la bibliothèque (page Fichiers audio). */
   removeTake(id: string): void {
-    if (this.takeUploads()[id]?.state === 'uploading') {
+    if (this.takeUploads()[id]?.state === 'uploading' || this.session.micState() !== 'idle') {
       return;
     }
     this.session.removeTake(id);
     this.takeRefs.update(refs => refs.filter(ref => ref.id !== id));
     this.takeUploads.update(({ [id]: _removed, ...rest }) => rest);
     this.takeErrors.update(({ [id]: _removed, ...rest }) => rest);
+    this.correctionRefs.update(({ [id]: _removed, ...rest }) => rest);
+    this.session.vocalTracks.update(tracks => tracks.map(track => track.activeTakeId === id
+      ? { ...track, activeTakeId: this.takeRefs().filter(ref => (ref.trackId ?? 'voice') === track.id).at(-1)?.id ?? null }
+      : track));
+    if (this.pendingCorrection?.takeId === id) {
+      this.pendingCorrection = null;
+      this.correctionUpload.set(null);
+    }
   }
 
   /**
@@ -322,8 +353,8 @@ export class StudioProjectService {
     if (!takeId || this.correctionUpload()?.state === 'uploading') {
       return;
     }
-    this.session.correctedTake.set({ takeId, buffer, styleLabel });
-    this.session.useCorrectedTake.set(true);
+    this.session.setCorrectedTake({ takeId, buffer, styleLabel });
+    this.session.setUseCorrectedTake(true);
     this.correctionError.set(null);
     if (!this.project()) {
       return;
@@ -358,11 +389,12 @@ export class StudioProjectService {
         }
         this.correctionUpload.set(null);
         // Remplacée ou abandonnée (autre prise active) pendant l'envoi : le fichier reste dans la bibliothèque.
-        if (this.pendingCorrection !== pending || this.session.activeTakeId() !== pending.takeId) {
+        if (this.pendingCorrection !== pending || !this.session.takes().some(candidate => candidate.id === pending.takeId)) {
           return;
         }
         this.pendingCorrection = null;
-        this.correctionRef.set({ takeId: pending.takeId, fileId: event.body.id, styleLabel: pending.styleLabel });
+        const ref = { takeId: pending.takeId, fileId: event.body.id, styleLabel: pending.styleLabel };
+        this.correctionRefs.update(refs => ({ ...refs, [ref.takeId]: ref }));
         console.log('[studio-project] version corrigée envoyée', { takeId: pending.takeId, fileId: event.body.id });
       },
       error: (error: unknown) => {
@@ -373,11 +405,16 @@ export class StudioProjectService {
   }
 
   private fetchCorrection(ref: Omit<TakeCorrectionRef, 'enabled'>): void {
+    const loadVersion = this.projectLoadVersion();
+    this.takesLoading.update(count => count + 1);
     this.tracks.audio(ref.fileId).subscribe({
       next: blob => {
-        void this.decodeCorrection(ref, blob);
+        void this.decodeCorrection(ref, blob, loadVersion);
       },
       error: (error: unknown) => {
+        if (this.projectLoadVersion() !== loadVersion) return;
+        this.takesLoading.update(count => count - 1);
+        if (!this.correctionRefs()[ref.takeId]) return;
         console.error('[studio-project] version corrigée introuvable', error);
         this.correctionError.set(
           error instanceof HttpErrorResponse && error.status === 404
@@ -388,16 +425,19 @@ export class StudioProjectService {
     });
   }
 
-  private async decodeCorrection(ref: Omit<TakeCorrectionRef, 'enabled'>, blob: Blob): Promise<void> {
+  private async decodeCorrection(ref: Omit<TakeCorrectionRef, 'enabled'>, blob: Blob, loadVersion: number): Promise<void> {
     try {
       const buffer = await this.engine.decode(await blob.arrayBuffer());
       // Ignorée si la prise active ou la version corrigée ont changé entre-temps.
-      if (this.correctionRef()?.fileId === ref.fileId && this.session.activeTakeId() === ref.takeId) {
-        this.session.correctedTake.set({ takeId: ref.takeId, buffer, styleLabel: ref.styleLabel });
+      if (this.projectLoadVersion() === loadVersion && this.correctionRefs()[ref.takeId]?.fileId === ref.fileId) {
+        this.session.setCorrectedTake({ takeId: ref.takeId, buffer, styleLabel: ref.styleLabel });
       }
     } catch (error) {
+      if (this.projectLoadVersion() !== loadVersion || !this.correctionRefs()[ref.takeId]) return;
       console.error('[studio-project] décodage de la version corrigée impossible', error);
       this.correctionError.set('La version corrigée ne peut pas être décodée par ce navigateur : la prise originale est jouée.');
+    } finally {
+      if (loadVersion === this.projectLoadVersion()) this.takesLoading.update(count => count - 1);
     }
   }
 
@@ -426,7 +466,7 @@ export class StudioProjectService {
         this.session.markTakeUploaded(take.id, fileId);
         this.takeRefs.update(refs => [
           ...refs,
-          { id: take.id, fileId, label: current.name, startSeconds: current.startSeconds, durationSeconds: take.buffer.duration },
+          { id: take.id, trackId: take.trackId, fileId, label: current.name, startSeconds: current.startSeconds, durationSeconds: take.buffer.duration },
         ]);
         console.log('[studio-project] prise envoyée', { id: take.id, fileId });
       },
@@ -442,14 +482,17 @@ export class StudioProjectService {
   }
 
   private fetchTake(ref: TakeRef, order: readonly string[]): void {
+    const loadVersion = this.projectLoadVersion();
     this.takesLoading.update(count => count + 1);
     this.tracks.audio(ref.fileId).subscribe({
       next: blob => {
-        void this.decodeTake(ref, blob, order);
+        void this.decodeTake(ref, blob, order, loadVersion);
       },
       error: (error: unknown) => {
+        if (loadVersion !== this.projectLoadVersion()) return;
         console.error('[studio-project] prise introuvable', error);
         this.takesLoading.update(count => count - 1);
+        if (!this.takeRefs().some(candidate => candidate.id === ref.id)) return;
         this.takeErrors.update(errors => ({
           ...errors,
           [ref.id]:
@@ -461,20 +504,21 @@ export class StudioProjectService {
     });
   }
 
-  private async decodeTake(ref: TakeRef, blob: Blob, order: readonly string[]): Promise<void> {
+  private async decodeTake(ref: TakeRef, blob: Blob, order: readonly string[], loadVersion: number): Promise<void> {
     try {
       const buffer = await this.engine.decode(await blob.arrayBuffer());
-      if (this.takeRefs().some(candidate => candidate.id === ref.id)) {
+      if (loadVersion === this.projectLoadVersion() && this.takeRefs().some(candidate => candidate.id === ref.id)) {
         this.session.restoreTake(
-          { id: ref.id, name: ref.label, blob, fileId: ref.fileId, buffer, url: URL.createObjectURL(blob), mimeType: blob.type, startSeconds: ref.startSeconds, latencyMs: 0 },
+          { id: ref.id, trackId: ref.trackId, name: ref.label, blob, fileId: ref.fileId, buffer, url: URL.createObjectURL(blob), mimeType: blob.type, startSeconds: ref.startSeconds, latencyMs: 0 },
           order,
         );
       }
     } catch (error) {
+      if (loadVersion !== this.projectLoadVersion() || !this.takeRefs().some(candidate => candidate.id === ref.id)) return;
       console.error('[studio-project] décodage de la prise impossible', error);
       this.takeErrors.update(errors => ({ ...errors, [ref.id]: `« ${ref.label} » ne peut pas être décodée par ce navigateur.` }));
     } finally {
-      this.takesLoading.update(count => count - 1);
+      if (loadVersion === this.projectLoadVersion()) this.takesLoading.update(count => count - 1);
     }
   }
 
@@ -547,6 +591,7 @@ export class StudioProjectService {
   }
 
   private apply(project: MusicalProject): void {
+    this.session.stopPlayback();
     const state = fromProject(project);
     this.lyrics.set(state.lyrics);
     this.session.setBpm(state.bpm);
@@ -556,7 +601,6 @@ export class StudioProjectService {
     this.session.mixer.set(state.mixer);
     this.session.masterVolume.set(state.masterVolume);
     this.session.loadArrangement(state.drumClips, state.instrumentalStartBeat, state.instrumentClips);
-    this.session.voiceCorrection.set(state.vocal);
     // Projet antérieur à la M10 : il reprend les styles personnels gardés dans ce navigateur
     // (ils deviennent une modification à sauvegarder).
     this.session.userVocalStyles.set(migrateUserStyles(project.vocal, state.userStyles, readStoredUserStylesJson()));
@@ -566,15 +610,18 @@ export class StudioProjectService {
     this.download.set('idle');
     this.downloadError.set(null);
     this.instrumentalRef.set(state.instrumental);
-    this.session.clearTakes(state.activeTakeId);
-    this.correctionRef.set(state.correction ? { takeId: state.correction.takeId, fileId: state.correction.fileId, styleLabel: state.correction.styleLabel } : null);
-    this.session.correctedTake.set(null);
-    this.session.useCorrectedTake.set(state.correction?.enabled ?? false);
+    this.session.clearTakes();
+    this.session.vocalTracks.set(state.vocalTracks!);
+    this.session.armedVocalTrackId.set(state.armedVocalTrackId!);
+    const corrections = state.corrections ?? [];
+    this.correctionRefs.set(Object.fromEntries(corrections.map(({ enabled: _enabled, ...ref }) => [ref.takeId, ref])));
+    this.session.enabledCorrections.set(Object.fromEntries(corrections.map(ref => [ref.takeId, ref.enabled])));
     this.correctionUpload.set(null);
     this.correctionError.set(null);
     this.pendingCorrection = null;
     this.failedFingerprint = null;
     this.takeRefs.set([...state.takes]);
+    this.takesLoading.set(0);
     this.takeUploads.set({});
     this.takeErrors.set({});
     this.project.set(project);
@@ -584,9 +631,7 @@ export class StudioProjectService {
     }
     const order = state.takes.map(take => take.id);
     state.takes.forEach(take => this.fetchTake(take, order));
-    if (state.correction) {
-      this.fetchCorrection(state.correction);
-    }
+    corrections.forEach(ref => this.fetchCorrection(ref));
   }
 
   private fail(message: string): void {

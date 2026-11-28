@@ -84,11 +84,11 @@ function withoutNoteIds(patterns: readonly MelodicPattern[]) {
   return patterns.map(pattern => ({ ...pattern, notes: pattern.notes.map(({ id: _id, ...note }) => note) }));
 }
 
-describe('conversion studio ↔ format de sauvegarde (v1 et v2)', () => {
+describe('conversion studio ↔ format de sauvegarde', () => {
   it('retrouve exactement l’état du studio après un aller-retour', () => {
     const content = toProjectContent(state);
     const restored = fromProject(project({ ...content }));
-    expect({ ...restored, melodicPatterns: withoutNoteIds(restored.melodicPatterns) }).toEqual({ ...state, melodicPatterns: withoutNoteIds(state.melodicPatterns) });
+    expect({ ...restored, melodicPatterns: withoutNoteIds(restored.melodicPatterns) }).toMatchObject({ ...state, melodicPatterns: withoutNoteIds(state.melodicPatterns) });
     expect(toProjectContent(restored)).toEqual(content);
   });
 

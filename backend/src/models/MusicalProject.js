@@ -6,8 +6,9 @@ import { analyzeLyrics } from "../services/lyrics-analysis.js";
  * Format de sauvegarde d'un projet musical, défini en M0 et utilisé par les
  * routes /api/projects de M1. Version 2 (M10) : ajoute la section `vocal`
  * (réglages de correction vocale et styles personnels, M9) et la version
- * corrigée d'une prise (`clips[].correction`). Un projet v1 reste lisible tel
- * quel (ces champs y sont absents) et passe en v2 à sa prochaine sauvegarde.
+ * corrigée d'une prise (`clips[].correction`). La version 3 héberge la correction
+ * à l'échelle de chaque piste vocale et la piste armée. Les anciens projets
+ * restent lisibles et passent en v3 à leur prochaine sauvegarde.
  *
  * Unités : positions et durées des clips en temps (beats), pour qu'un
  * changement de BPM conserve l'arrangement ; décalage dans un fichier audio
@@ -18,14 +19,15 @@ import { analyzeLyrics } from "../services/lyrics-analysis.js";
  * document Track (audioFileId) dont le fichier reste sur le disque.
  */
 
-export const PROJECT_FORMAT_VERSION = 2;
+export const PROJECT_FORMAT_VERSION = 3;
 /** Versions que ce serveur sait relire (et réécrire dans la version courante). */
-export const SUPPORTED_FORMAT_VERSIONS = Object.freeze([1, 2]);
+export const SUPPORTED_FORMAT_VERSIONS = Object.freeze([1, 2, 3]);
 export const PROJECT_LIMITS = Object.freeze({
   titleMaxLength: 80,
   minBpm: 60,
   maxBpm: 200,
   maxTracks: 16,
+  maxVocalTracks: 8,
   maxClipsPerTrack: 256,
   maxPatterns: 64,
   stepsPerPattern: 16,
@@ -339,6 +341,8 @@ vocalSchema.pre("validate", function () {
   }
 });
 
+trackSchema.add({ vocal: { type: vocalSchema, default: undefined } });
+
 const schema = new mongoose.Schema(
   {
     formatVersion: { type: Number, required: true, default: PROJECT_FORMAT_VERSION, enum: SUPPORTED_FORMAT_VERSIONS },
@@ -354,6 +358,7 @@ const schema = new mongoose.Schema(
     },
     key: { type: keySchema, default: () => ({ root: 9, scale: "minor" }) },
     tracks: { type: [trackSchema], default: [], validate: maxItems(L.maxTracks) },
+    armedVocalTrackId: { type: String, match: stableId.match },
     patterns: { type: [patternSchema], default: [], validate: maxItems(L.maxPatterns) },
     master: {
       volume: { type: Number, default: 0.8, min: 0, max: 1 },
@@ -367,6 +372,29 @@ const schema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+schema.pre("validate", function () {
+  if (!Array.isArray(this.tracks) || this.tracks.some(track => !track || !Array.isArray(track.clips) || track.clips.some(clip => !clip))) {
+    this.invalidate("tracks", "Liste de pistes ou de clips invalide");
+    return;
+  }
+  const vocalTracks = this.tracks.filter(track => track.type === "vocal");
+  if (this.armedVocalTrackId && !vocalTracks.some(track => track.id === this.armedVocalTrackId)) {
+    this.invalidate("armedVocalTrackId", "La piste armée doit être une piste vocale du projet");
+  }
+  const trackIds = this.tracks.map(track => track.id);
+  const takeIds = vocalTracks.flatMap(track => track.clips.map(clip => clip.id));
+  if (new Set(trackIds).size !== trackIds.length || new Set(takeIds).size !== takeIds.length) {
+    this.invalidate("tracks", "Les identifiants de piste et de prise doivent être uniques");
+  }
+  if (vocalTracks.length > L.maxVocalTracks) {
+    this.invalidate("tracks", "Trop de pistes vocales");
+  }
+  if (this.tracks.some(track => track.vocal && track.type !== "vocal") ||
+      vocalTracks.some(track => track.clips.some(clip => !clip.audioFileId))) {
+    this.invalidate("tracks", "Une piste vocale contient des prises audio et ses propres réglages vocaux");
+  }
+});
 
 schema.index({ ownerId: 1, updatedAt: -1 });
 

@@ -7,9 +7,18 @@ import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
  * correspondants sont construits par `mixer-graph.ts`, à l'écoute comme à l'export.
  */
 
-export type TrackId = 'drums' | 'melody' | 'bass' | 'instrumental' | 'voice';
+export type VocalTrackId = 'voice' | `voice-${string}`;
+export type TrackId = 'drums' | 'melody' | 'bass' | 'instrumental' | VocalTrackId;
 
 export const TRACK_IDS: readonly TrackId[] = ['drums', 'melody', 'bass', 'instrumental', 'voice'];
+
+export function mixerTrackIds(mixer: MixerState): TrackId[] {
+  return Object.keys(mixer) as TrackId[];
+}
+
+export function isVocalTrackId(id: string): id is VocalTrackId {
+  return id === 'voice' || id.startsWith('voice-');
+}
 
 /** Bornes du fader de piste, en dB relatifs au niveau d'origine de la piste. */
 export const MIN_TRACK_DB = -36;
@@ -126,7 +135,7 @@ export function sanitizeTrackMix(mix: Partial<TrackMix>): TrackMix {
  * seulement si elle est elle-même en solo (le mute l'emporte sur le solo).
  */
 export function isTrackAudible(mixer: MixerState, track: TrackId): boolean {
-  const anySolo = TRACK_IDS.some(id => mixer[id].solo);
+  const anySolo = Object.values(mixer).some(mix => mix.solo);
   const { muted, solo } = mixer[track];
   return !muted && (!anySolo || solo);
 }
@@ -134,7 +143,7 @@ export function isTrackAudible(mixer: MixerState, track: TrackId): boolean {
 /** Gains linéaires effectifs de chaque piste, partagés par l'écoute et l'export. */
 export function effectiveTrackGains(mixer: MixerState): Record<TrackId, number> {
   const gains = {} as Record<TrackId, number>;
-  for (const id of TRACK_IDS) {
+  for (const id of mixerTrackIds(mixer)) {
     gains[id] = isTrackAudible(mixer, id) ? decibelsToGain(clampTrackDb(mixer[id].volumeDb)) : 0;
   }
   return gains;

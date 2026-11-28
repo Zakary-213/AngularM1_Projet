@@ -62,7 +62,7 @@ import { PatternTransport, TrackClip } from './pattern-transport';
 import { NOTE_NAMES, SCALE_LABELS, midiToFrequency } from './pitch/musical-scale';
 import { DrumSound, playDrumHit } from './drum-synth';
 import { ProjectKey, UserVocalStyle } from './pitch/vocal-styles';
-import { DEFAULT_VOICE_CORRECTION, VoiceCorrectionState } from './pitch/voice-correction-state';
+import { VoiceCorrectionState } from './pitch/voice-correction-state';
 import { readStoredUserStyles } from './pitch/user-styles-storage';
 import { exportLength } from './song-length';
 import { DEFAULT_LOOP_BARS, LoopBars, MAX_SONG_BARS, clampSongStep, loopStepRange, validateLoopBars } from './timeline-position';
@@ -83,7 +83,8 @@ import {
   resizeDrumClip,
 } from './arrangement';
 import { LoopRange } from './step-scheduler';
-import { DEFAULT_MASTER_VOLUME, MixerState, TrackId, TrackMix, clampMasterVolume, createDefaultMixer, updateTrack } from './track-mix';
+import { DEFAULT_MASTER_VOLUME, MixerState, TrackId, TrackMix, VocalTrackId, clampMasterVolume, createDefaultMixer, updateTrack } from './track-mix';
+import { DEFAULT_VOCAL_TRACK, MAX_VOCAL_TRACKS, VOCAL_TRACK_NAME_MAX_LENGTH, VocalTrack, studioTracks } from './studio-tracks';
 import { encodeWav, peakLevel, rmsLevel } from './wav-encoder';
 
 /** Gains appliqués aux fichiers audio du studio (linéaires). */
@@ -120,6 +121,8 @@ export interface LoadedAudio {
 export interface VocalTake {
   /** Identifiant stable (clip du projet). */
   readonly id: string;
+  /** Absente sur les prises héritées de la première piste. */
+  readonly trackId?: VocalTrackId;
   /** Nom affiché, modifiable (« Prise 1 »…). */
   readonly name: string;
   /** Enregistrement original tel que capté, pour l'envoi au serveur et l'écoute seule. */
@@ -270,22 +273,27 @@ export class StudioSessionService implements OnDestroy {
 
   readonly micState = signal<MicState>('idle');
   readonly micError = signal<string | null>(null);
-  /** Prises de la piste Voix, dans l'ordre d'enregistrement. Une seule est jouée : la prise active. */
+  readonly vocalTracks = signal<readonly VocalTrack[]>([DEFAULT_VOCAL_TRACK]);
+  readonly armedVocalTrackId = signal<VocalTrackId>('voice');
+  readonly studioTracks = computed(() => studioTracks(this.vocalTracks()));
+  readonly armedVocalTrack = computed(() => this.vocalTracks().find(track => track.id === this.armedVocalTrackId()) ?? this.vocalTracks()[0]);
+  /** Prises dans l'ordre d'enregistrement, une prise active par piste. */
   readonly takes = signal<VocalTake[]>([]);
-  readonly activeTakeId = signal<string | null>(null);
-  readonly take = computed(() => this.takes().find(take => take.id === this.activeTakeId()) ?? null);
-  readonly canRecordTake = computed(() => this.takes().length < MAX_TAKES);
+  readonly armedTakes = computed(() => this.takes().filter(take => (take.trackId ?? 'voice') === this.armedVocalTrack().id));
+  readonly activeTakeId = computed(() => this.armedVocalTrack().activeTakeId);
+  readonly take = computed(() => this.activeTakeFor(this.armedVocalTrack().id));
+  readonly canRecordTake = computed(() => this.armedTakes().length < MAX_TAKES);
   readonly inputDevices = signal<InputDevice[]>([]);
   /** Entrée choisie, ou `null` pour l'entrée par défaut du système. */
   readonly selectedInputId = signal<string | null>(null);
   readonly inputLevel = signal<InputLevel>(SILENT_LEVEL);
-  readonly correctedTake = signal<CorrectedTake | null>(null);
-  /** Lire la version corrigée sur la piste Voix (écoute et export) au lieu de l'originale. */
-  readonly useCorrectedTake = signal(false);
-  /** Version corrigée effectivement jouée sur la piste Voix (« correction de hauteur activée »). */
-  readonly correctionActive = computed(() => this.useCorrectedTake() && this.correctedTake()?.takeId === this.activeTakeId());
+  private readonly correctedTakes = signal<Readonly<Record<string, CorrectedTake>>>({});
+  readonly enabledCorrections = signal<Readonly<Record<string, boolean>>>({});
+  readonly correctedTake = computed(() => this.correctedTakes()[this.activeTakeId() ?? ''] ?? null);
+  readonly useCorrectedTake = computed(() => this.enabledCorrections()[this.activeTakeId() ?? ''] === true);
+  readonly correctionActive = computed(() => this.useCorrectedTake() && this.correctedTake() !== null);
   /** Réglages de l'onglet Correction vocale (style, dose, personnalisé), gardés d'un onglet à l'autre. */
-  readonly voiceCorrection = signal<VoiceCorrectionState>(DEFAULT_VOICE_CORRECTION);
+  readonly voiceCorrection = computed(() => this.armedVocalTrack().settings);
   /** Styles personnels : ceux du projet, ou ceux du navigateur dans la session libre. */
   readonly userVocalStyles = signal<readonly UserVocalStyle[]>(readStoredUserStyles());
 
@@ -311,7 +319,7 @@ export class StudioSessionService implements OnDestroy {
     effect(() => {
       const mixer = this.mixer();
       const masterVolume = this.masterVolume();
-      this.transport?.applyMix(mixer, masterVolume);
+      this.transport?.applyMix(this.playbackMixer(mixer, this.micState() === 'recording' ? this.armedVocalTrack().id : undefined), masterVolume);
     });
     // Le delay du mixeur reste calé sur le tempo.
     effect(() => {
@@ -921,6 +929,78 @@ export class StudioSessionService implements OnDestroy {
     this.mixer.update(mixer => updateTrack(mixer, track, change));
   }
 
+  addVocalTrack(): VocalTrackId | null {
+    if (this.micState() !== 'idle' || this.vocalTracks().length >= MAX_VOCAL_TRACKS) return null;
+    if (this.playing()) this.pausePlayback();
+    const id: VocalTrackId = `voice-${crypto.randomUUID()}`;
+    const names = new Set(this.vocalTracks().map(track => track.name));
+    let number = this.vocalTracks().length + 1;
+    while (names.has(`Voix ${number}`)) number++;
+    this.setTrack(id, {});
+    this.vocalTracks.update(tracks => [...tracks, { ...DEFAULT_VOCAL_TRACK, id, name: `Voix ${number}` }]);
+    this.armVocalTrack(id);
+    return id;
+  }
+
+  armVocalTrack(id: VocalTrackId): void {
+    if (this.micState() === 'idle' && this.vocalTracks().some(track => track.id === id)) {
+      this.armedVocalTrackId.set(id);
+    }
+  }
+
+  renameVocalTrack(id: VocalTrackId, name: string): boolean {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > VOCAL_TRACK_NAME_MAX_LENGTH || !this.vocalTracks().some(track => track.id === id)) return false;
+    this.vocalTracks.update(tracks => tracks.map(track => track.id === id ? { ...track, name: trimmed } : track));
+    return true;
+  }
+
+  removeVocalTrack(id: VocalTrackId): boolean {
+    const tracks = this.vocalTracks();
+    if (this.micState() !== 'idle' || tracks.length <= 1 || !tracks.some(track => track.id === id)) return false;
+    if (this.playing()) this.pausePlayback();
+    for (const take of this.takes().filter(take => (take.trackId ?? 'voice') === id)) {
+      URL.revokeObjectURL(take.url);
+      this.forgetCorrection(take.id);
+    }
+    this.takes.update(takes => takes.filter(take => (take.trackId ?? 'voice') !== id));
+    const remaining = tracks.filter(track => track.id !== id);
+    this.vocalTracks.set(remaining);
+    this.mixer.update(({ [id]: _removed, ...next }) => next as MixerState);
+    if (this.armedVocalTrackId() === id) this.armedVocalTrackId.set(remaining[0].id);
+    return true;
+  }
+
+  activeTakeFor(id: VocalTrackId): VocalTake | null {
+    const takeId = this.vocalTracks().find(track => track.id === id)?.activeTakeId;
+    return this.takes().find(take => take.id === takeId && (take.trackId ?? 'voice') === id) ?? null;
+  }
+
+  setVoiceCorrection(settings: VoiceCorrectionState, id = this.armedVocalTrack().id): void {
+    this.vocalTracks.update(tracks => tracks.map(track => track.id === id ? { ...track, settings } : track));
+  }
+
+  correctionFor(id: VocalTrackId): CorrectedTake | null {
+    const take = this.activeTakeFor(id);
+    return take ? this.correctedTakes()[take.id] ?? null : null;
+  }
+
+  setCorrectedTake(take: CorrectedTake): void {
+    this.correctedTakes.update(takes => ({ ...takes, [take.takeId]: take }));
+  }
+
+  setUseCorrectedTake(enabled: boolean, id = this.armedVocalTrack().id): void {
+    const take = this.activeTakeFor(id);
+    if (!take) return;
+    if (this.playing() && this.micState() === 'idle') this.pausePlayback();
+    this.enabledCorrections.update(values => ({ ...values, [take.id]: enabled }));
+  }
+
+  private forgetCorrection(id: string): void {
+    this.correctedTakes.update(({ [id]: _removed, ...remaining }) => remaining);
+    this.enabledCorrections.update(({ [id]: _removed, ...remaining }) => remaining);
+  }
+
   setMasterVolume(volume: number): void {
     this.masterVolume.set(clampMasterVolume(volume));
   }
@@ -981,6 +1061,7 @@ export class StudioSessionService implements OnDestroy {
       return;
     }
     this.pausePlayback();
+    this.auditionPatternId.set(null);
     this.micError.set(null);
     this.micState.set('opening');
     try {
@@ -994,7 +1075,7 @@ export class StudioSessionService implements OnDestroy {
       return;
     }
     // La prise en cours d'enregistrement ne doit pas être rejouée sous elle-même.
-    const started = await this.startPlayback(false);
+    const started = await this.startPlayback(this.armedVocalTrack().id);
     if (!started) {
       this.recorder.release();
       this.micState.set('idle');
@@ -1026,6 +1107,7 @@ export class StudioSessionService implements OnDestroy {
           : 0;
       const take: VocalTake = {
         id: `take-${crypto.randomUUID()}`,
+        trackId: this.armedVocalTrack().id,
         name: `Prise ${++this.takeCounter}`,
         blob: recorded.blob,
         fileId: null,
@@ -1037,7 +1119,7 @@ export class StudioSessionService implements OnDestroy {
       };
       this.takes.update(takes => [...takes, take]);
       // La nouvelle prise devient active ; l'ancienne correction ne la concerne pas.
-      this.setActiveTake(take.id);
+      this.setActiveTake(take.id, take.trackId!);
       this.lastRecordedTake.set(take);
       console.log('[studio] prise enregistrée', { durationSeconds: buffer.duration, startSeconds });
     } catch (error) {
@@ -1054,11 +1136,13 @@ export class StudioSessionService implements OnDestroy {
 
   /** Choisit la prise jouée sur la piste Voix. */
   selectTake(id: string): void {
-    if (this.takes().some(take => take.id === id) && id !== this.activeTakeId()) {
+    const take = this.takes().find(candidate => candidate.id === id);
+    const trackId = take?.trackId ?? 'voice';
+    if (take && this.micState() === 'idle' && this.activeTakeFor(trackId)?.id !== id) {
       if (this.transportState() !== 'stopped') {
         this.stopPlayback();
       }
-      this.setActiveTake(id);
+      this.setActiveTake(id, trackId);
     }
   }
 
@@ -1076,17 +1160,21 @@ export class StudioSessionService implements OnDestroy {
   removeTake(id: string): void {
     const takes = this.takes();
     const index = takes.findIndex(take => take.id === id);
-    if (index < 0) {
+    if (index < 0 || this.micState() !== 'idle') {
       return;
     }
     if (this.transportState() !== 'stopped') {
       this.stopPlayback();
     }
     URL.revokeObjectURL(takes[index].url);
+    const trackId = takes[index].trackId ?? 'voice';
+    const wasActive = this.activeTakeFor(trackId)?.id === id;
+    const previous = takes.slice(0, index).reverse().find(take => (take.trackId ?? 'voice') === trackId);
     const remaining = takes.filter(take => take.id !== id);
     this.takes.set(remaining);
-    if (this.activeTakeId() === id) {
-      this.setActiveTake(remaining[Math.min(index, remaining.length) - 1]?.id ?? remaining[0]?.id ?? null);
+    this.forgetCorrection(id);
+    if (wasActive) {
+      this.setActiveTake(previous?.id ?? remaining.find(take => (take.trackId ?? 'voice') === trackId)?.id ?? null, trackId);
     }
   }
 
@@ -1148,7 +1236,9 @@ export class StudioSessionService implements OnDestroy {
     this.takes().forEach(take => URL.revokeObjectURL(take.url));
     this.takes.set([]);
     this.takeCounter = 0;
-    this.setActiveTake(activeTakeId);
+    this.correctedTakes.set({});
+    this.enabledCorrections.set({});
+    this.setActiveTake(activeTakeId, this.armedVocalTrack().id);
   }
 
   /** Liste les entrées audio ; les noms n'apparaissent qu'après l'autorisation du micro. */
@@ -1170,13 +1260,8 @@ export class StudioSessionService implements OnDestroy {
     }
   }
 
-  private setActiveTake(id: string | null): void {
-    if (id !== this.activeTakeId()) {
-      // Une correction vocale appartient à une prise : elle ne suit pas le changement.
-      this.correctedTake.set(null);
-      this.useCorrectedTake.set(false);
-    }
-    this.activeTakeId.set(id);
+  private setActiveTake(id: string | null, trackId: VocalTrackId): void {
+    this.vocalTracks.update(tracks => tracks.map(track => track.id === trackId ? { ...track, activeTakeId: id } : track));
   }
 
   /** Indicateur de niveau : analyse du flux micro, jamais reliée aux haut-parleurs (pas de larsen). */
@@ -1226,7 +1311,7 @@ export class StudioSessionService implements OnDestroy {
       instrumentClips: this.instrumentClips(),
       melodicPatterns: this.melodicPatterns(),
       hasInstrumental: this.instrumental() !== null,
-      hasTake: this.take() !== null,
+      hasTake: this.vocalTracks().some(track => this.activeTakeFor(track.id) !== null),
     }),
   );
 
@@ -1236,7 +1321,7 @@ export class StudioSessionService implements OnDestroy {
     return exportLength({
       bpm: this.bpm(),
       patternEndBar: Math.max(drumClipsEndBar(this.drumClips()), instrumentClipsEndBar(this.instrumentClips())),
-      audio: this.trackClips(true).map(({ clip }) => ({ startSeconds: clip.startSeconds, durationSeconds: clip.buffer.duration })),
+      audio: this.trackClips().map(({ clip }) => ({ startSeconds: clip.startSeconds, durationSeconds: clip.buffer.duration })),
       effectsActive: Object.values(mixer).some(track => !track.muted && (track.reverb.enabled || track.delay.enabled)),
     });
   });
@@ -1271,7 +1356,10 @@ export class StudioSessionService implements OnDestroy {
     this.exporting.set(true);
     // Sans suspension du rendu hors temps réel (Firefox), l'avancement reste inconnu (null).
     this.exportProgress.set(typeof OfflineAudioContext.prototype.suspend === 'function' ? 0 : null);
-    const correctedVoice = this.correctionActive();
+    const correctedVoice = this.vocalTracks().some(track => {
+      const corrected = this.correctionFor(track.id);
+      return corrected && this.enabledCorrections()[corrected.takeId];
+    });
     const started = performance.now();
     try {
       const rendered = await renderMix(
@@ -1281,7 +1369,7 @@ export class StudioSessionService implements OnDestroy {
           durationSeconds: plan.seconds,
           // L'export suit l'arrangement : l'écoute seule d'un pattern n'y figure pas.
           notesAt: step => notesAtSongStep(this.instrumentClips(), this.melodicPatterns(), step),
-          clips: this.trackClips(true),
+          clips: this.trackClips(),
           mixer: this.mixer(),
           masterVolume: this.masterVolume(),
         },
@@ -1306,7 +1394,7 @@ export class StudioSessionService implements OnDestroy {
   }
 
   /** Démarre la lecture à la position courante (début du morceau, ou reprise après une pause). */
-  private async startPlayback(includeTake = true): Promise<boolean> {
+  private async startPlayback(excludedVoice?: VocalTrackId): Promise<boolean> {
     try {
       const { context, master } = await this.engine.start();
       this.transport ??= new PatternTransport(
@@ -1320,13 +1408,13 @@ export class StudioSessionService implements OnDestroy {
       // Pas de boucle pendant une prise : la voix doit suivre le morceau de façon linéaire.
       // Écoute d'un pattern du Piano Roll : boucle sur sa longueur, depuis le début.
       const audition = this.melodicPatterns().find(entry => entry.id === this.auditionPatternId());
-      const loop = audition ? { startStep: 0, endStep: audition.bars * STEPS_PER_BAR } : includeTake ? this.loopRange() : null;
+      const loop = audition ? { startStep: 0, endStep: audition.bars * STEPS_PER_BAR } : excludedVoice ? null : this.loopRange();
       let fromSongStep = this.transportState() === 'paused' ? this.songStep() : 0;
       if (loop && (fromSongStep < loop.startStep || fromSongStep >= loop.endStep)) {
         fromSongStep = loop.startStep;
       }
       this.transport.play(
-        { clips: this.trackClips(includeTake), mixer: this.mixer(), masterVolume: this.masterVolume(), fromSongStep, loop },
+        { clips: this.trackClips(excludedVoice), mixer: this.playbackMixer(this.mixer(), excludedVoice), masterVolume: this.masterVolume(), fromSongStep, loop },
         this.bpm(),
       );
       this.engineError.set(null);
@@ -1342,19 +1430,26 @@ export class StudioSessionService implements OnDestroy {
   }
 
   /** Clips à programmer ; le mute et le solo sont appliqués par les gains de piste. */
-  private trackClips(includeTake: boolean): TrackClip[] {
+  private trackClips(excludedVoice?: VocalTrackId): TrackClip[] {
     const clips: TrackClip[] = [];
     const instrumental = this.instrumental();
     if (instrumental) {
       clips.push({ track: 'instrumental', clip: { buffer: instrumental.buffer, startSeconds: this.instrumentalStartSeconds(), gain: INSTRUMENTAL_GAIN } });
     }
-    const take = this.take();
-    if (includeTake && take) {
-      const corrected = this.correctionActive() ? this.correctedTake() : null;
+    for (const track of this.vocalTracks()) {
+      if (track.id === excludedVoice) continue;
+      const take = this.activeTakeFor(track.id);
+      if (!take) continue;
+      const corrected = this.enabledCorrections()[take.id] ? this.correctedTakes()[take.id] : null;
       // Même position que l'original : la correction conserve la durée de la prise.
-      clips.push({ track: 'voice', clip: { buffer: corrected?.buffer ?? take.buffer, startSeconds: take.startSeconds, gain: TAKE_GAIN } });
+      clips.push({ track: track.id, clip: { buffer: corrected?.buffer ?? take.buffer, startSeconds: take.startSeconds, gain: TAKE_GAIN } });
     }
     return clips;
+  }
+
+  /** Un solo sur la piste armée ne doit pas masquer l’accompagnement de la prise. */
+  private playbackMixer(mixer: MixerState, excludedVoice?: VocalTrackId): MixerState {
+    return excludedVoice && mixer[excludedVoice].solo ? updateTrack(mixer, excludedVoice, { solo: false }) : mixer;
   }
 
   private haltTransport(): void {

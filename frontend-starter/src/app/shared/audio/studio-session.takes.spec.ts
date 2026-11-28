@@ -36,17 +36,20 @@ describe('StudioSessionService — prises', () => {
     expect(session.takes().map(t => t.id)).toEqual(['a', 'b', 'c']);
   });
 
-  it('la prise active est celle jouée ; en changer efface la correction de l’ancienne', () => {
+  it('la correction reste attachée à sa prise quand on change la prise jouée', () => {
     session.clearTakes('a');
     session.restoreTake(take('a'), ['a', 'b']);
     session.restoreTake(take('b'), ['a', 'b']);
     expect(session.take()?.id).toBe('a');
-    session.correctedTake.set({ takeId: 'a', buffer: {} as AudioBuffer, styleLabel: 'Trap' });
-    session.useCorrectedTake.set(true);
+    session.setCorrectedTake({ takeId: 'a', buffer: {} as AudioBuffer, styleLabel: 'Trap' });
+    session.setUseCorrectedTake(true);
     session.selectTake('b');
     expect(session.take()?.id).toBe('b');
     expect(session.correctedTake()).toBeNull();
     expect(session.useCorrectedTake()).toBe(false);
+    session.selectTake('a');
+    expect(session.correctedTake()?.takeId).toBe('a');
+    expect(session.useCorrectedTake()).toBe(true);
   });
 
   it('renomme une prise avec un nom valide seulement', () => {

@@ -61,7 +61,7 @@
 @if (studioProject.conflict()) {
   <div class="panel save-alert" role="alert">
     <p>Ce projet a été modifié ailleurs (autre onglet ou appareil) depuis son ouverture. Votre version n'a pas été envoyée, rien n'a été écrasé.</p>
-    <button type="button" (click)="studioProject.reload()">Recharger la version du serveur</button>
+    <button type="button" (click)="studioProject.reload()" [disabled]="session.micState() !== 'idle'">Recharger la version du serveur</button>
   </div>
 }
 
@@ -69,7 +69,7 @@
   <div class="transport-buttons">
     <button type="button" class="icon-button" (click)="session.stopPlayback()" [disabled]="session.transportState() === 'stopped' || session.micState() !== 'idle'" aria-label="Stop : arrêter et revenir au début">■</button>
     <button type="button" class="play-button" (click)="session.togglePlayback()" [disabled]="session.micState() !== 'idle'" [attr.aria-pressed]="session.playing()" [attr.aria-label]="session.playing() ? 'Pause' : (session.transportState() === 'paused' ? 'Reprendre la lecture' : 'Lire')">{{ session.playing() ? '❚❚' : '▶' }}</button>
-    <button type="button" class="record-button" [class.recording]="session.micState() === 'recording'" (click)="toggleRecording()" [disabled]="session.micState() === 'opening' || session.micState() === 'saving' || (session.micState() === 'idle' && !session.canRecordTake())" [attr.aria-pressed]="session.micState() === 'recording'" [attr.aria-label]="session.micState() === 'recording' ? 'Arrêter la prise' : 'Enregistrer une prise'">●</button>
+    <button type="button" class="record-button" [class.recording]="session.micState() === 'recording'" (click)="toggleRecording()" [disabled]="session.micState() === 'opening' || session.micState() === 'saving' || (session.micState() === 'idle' && (!session.canRecordTake() || studioProject.takesLoading() > 0))" [attr.aria-pressed]="session.micState() === 'recording'" [attr.aria-label]="session.micState() === 'recording' ? 'Arrêter la prise' : 'Enregistrer une prise sur ' + session.armedVocalTrack().name">●</button>
     <button type="button" class="icon-button metronome-button" [class.on]="session.metronome()" (click)="session.metronome.set(!session.metronome())" [attr.aria-pressed]="session.metronome()" aria-label="Métronome">♩</button>
   </div>
   <span class="timecode" role="timer" [attr.aria-label]="'Mesure ' + session.position().bar + ', temps ' + session.position().beat">{{ pad(session.position().bar) }} <small>:</small> {{ pad(session.position().beat) }} <small>:</small> {{ pad(session.position().sixteenth) }}</span>
@@ -94,6 +94,7 @@
       }
     }
   </p>
+  <p class="transport-help">Piste armée · <b>{{ session.armedVocalTrack().name }}</b></p>
   <small id="studio-bpm-help" class="transport-help" [class.error]="bpmControl.invalid">
     @if (bpmControl.invalid) { Tempo entre {{ minBpm }} et {{ maxBpm }} : il reste à {{ session.bpm() }}. } @else { ▶ / ❚❚ lecture et pause, ■ retour au début. Utilisez un casque pour enregistrer : la prod n'est pas captée dans la prise. }
   </small>
@@ -164,7 +165,7 @@
         @for (track of tracks(); track track.id) {
           <div class="timeline-row">
             <div class="track-label">
-              <span [style.color]="track.color">●</span><b>{{ track.name }}</b><small>{{ track.type }}</small>
+              <span [style.color]="track.color">●</span><b>{{ track.name }}</b><small>{{ track.id === session.armedVocalTrackId() ? 'Armée · ' : '' }}{{ track.type }}</small>
               <div>
                 <button type="button" (click)="session.setTrack(track.id, { muted: !track.mix.muted })" [attr.aria-pressed]="track.mix.muted" [attr.aria-label]="'Muet : ' + track.name" [class.toggle-on]="track.mix.muted">M</button>
                 <button type="button" (click)="session.setTrack(track.id, { solo: !track.mix.solo })" [attr.aria-pressed]="track.mix.solo" [attr.aria-label]="'Solo : ' + track.name" [class.toggle-on]="track.mix.solo">S</button>
@@ -200,7 +201,7 @@
                   <input id="studio-instrumental" type="file" [accept]="audioAccept" (change)="onInstrumentalSelected($event)" [disabled]="session.importing()" />
                   @if (session.importing()) { <small role="status">Décodage en cours…</small> }
                 </div>
-              } @else if (track.id === 'voice' && !session.take()) {
+              } @else if (track.id === session.armedVocalTrackId() && !session.take()) {
                 <p class="lane-hint">Appuyez sur ● pour enregistrer une prise sur la prod.</p>
               }
               @if (playheadPercent(); as left) { <span class="playhead" [style.left.%]="left" aria-hidden="true"></span> }

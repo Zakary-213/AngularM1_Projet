@@ -123,6 +123,53 @@ describe('StudioProjectService', () => {
     expect(service.saveState()).toBe('saved');
   });
 
+  it('#64 : reprend la piste Voix v2 et retrouve les trois pistes, prises et réglages en v3', async () => {
+    const fileId = '64b0000000000000000000bb';
+    const legacy = {
+      ...stored,
+      formatVersion: 2,
+      vocal: { styleId: 'trap', dose: 0.6 },
+      tracks: [{ id: 'voice', name: 'Voix principale', type: 'vocal' as const, activeClipId: 'prise-lead',
+        clips: [{ id: 'prise-lead', label: 'Lead', startBeat: 0, durationBeats: 4, audioFileId: fileId }] }],
+    };
+    api.get.mockReturnValue(of(legacy));
+    service.load('p1');
+    await vi.waitFor(() => expect(session.take()?.id).toBe('prise-lead'));
+    expect(session.voiceCorrection()).toMatchObject({ styleId: 'trap', dose: 0.6 });
+
+    const backs = session.addVocalTrack()!;
+    const adlibs = session.addVocalTrack()!;
+    session.renameVocalTrack(backs, 'Backs');
+    session.renameVocalTrack(adlibs, 'Ad-libs');
+    session.setVoiceCorrection({ ...session.voiceCorrection(), styleId: 'drill', dose: 0.3 }, backs);
+    session.setTrack(backs, { volumeDb: -8, pan: 0.4, reverb: { enabled: true, amount: 0.2 } });
+    service.takeRefs.update(refs => [...refs,
+      { id: 'prise-backs', trackId: backs, fileId, label: 'Backs', startSeconds: 3, durationSeconds: 2 },
+      { id: 'prise-adlibs', trackId: adlibs, fileId, label: 'Ad-libs', startSeconds: 5, durationSeconds: 2 },
+    ]);
+    session.vocalTracks.update(tracks => tracks.map(track => track.id === backs
+      ? { ...track, activeTakeId: 'prise-backs' }
+      : track.id === adlibs ? { ...track, activeTakeId: 'prise-adlibs' } : track));
+    session.armVocalTrack(backs);
+    api.save.mockImplementation((id: string, revision: number, content: ProjectContent) =>
+      of({ ...stored, ...content, id, revision: revision + 1, formatVersion: 3 }));
+    service.save();
+    const saved = service.project()!;
+    expect(saved.armedVocalTrackId).toBe(backs);
+    expect(saved.tracks.filter(track => track.type === 'vocal').map(track => track.activeClipId)).toEqual(['prise-lead', 'prise-backs', 'prise-adlibs']);
+
+    api.get.mockReturnValue(of(saved));
+    service.reload();
+    await vi.waitFor(() => expect(session.takes().length).toBe(3));
+    expect(session.vocalTracks().map(track => [track.name, session.activeTakeFor(track.id)?.name])).toEqual([
+      ['Voix principale', 'Lead'], ['Backs', 'Backs'], ['Ad-libs', 'Ad-libs'],
+    ]);
+    expect(session.armedVocalTrackId()).toBe(backs);
+    expect(session.voiceCorrection()).toMatchObject({ styleId: 'drill', dose: 0.3 });
+    expect(session.mixer()[backs]).toMatchObject({ volumeDb: -8, pan: 0.4, reverb: { enabled: true, amount: 0.2 } });
+    expect(service.saveState()).toBe('saved');
+  });
+
   it('une modification faite pendant la sauvegarde reste non sauvegardée', () => {
     service.load('p1');
     session.toggleStep('kick', 1);
@@ -159,7 +206,7 @@ describe('StudioProjectService', () => {
   });
 
   it('refuse d’ouvrir un projet d’une version future du format', () => {
-    api.get.mockReturnValue(of({ ...stored, formatVersion: 3 }));
+    api.get.mockReturnValue(of({ ...stored, formatVersion: 4 }));
     service.load('p1');
     expect(service.loadState()).toBe('error');
     expect(service.loadError()).toContain('version plus récente');
@@ -270,7 +317,7 @@ describe('StudioProjectService', () => {
     function fakeRecording(take: VocalTake): void {
       vi.spyOn(session, 'stopRecording').mockImplementation(async () => {
         session.takes.update(takes => [...takes, take]);
-        session.activeTakeId.set(take.id);
+        session.selectTake(take.id);
         session.lastRecordedTake.set(take);
       });
     }
@@ -436,7 +483,7 @@ describe('StudioProjectService', () => {
 
     it('sauvegarde le style, la dose, les réglages personnalisés et les styles personnels', () => {
       service.load('p1');
-      session.voiceCorrection.set({ styleId: 'trap', dose: 0.5, userStyleName: 'Refrain', custom: trap });
+      session.setVoiceCorrection({ styleId: 'trap', dose: 0.5, userStyleName: 'Refrain', custom: trap });
       session.userVocalStyles.set([{ name: 'Refrain', basedOn: 'trap', settings: trap }]);
       expect(service.saveState()).toBe('dirty');
       api.save.mockReturnValue(of({ ...stored, revision: 5 }));
@@ -489,7 +536,7 @@ describe('StudioProjectService', () => {
       expect(service.saveState()).toBe('saved');
 
       // Désactiver la correction (mixeur) est une modification sauvegardée ; le fichier reste référencé.
-      session.useCorrectedTake.set(false);
+      session.setUseCorrectedTake(false);
       api.save.mockReturnValue(of({ ...stored, revision: 5 }));
       service.save();
       const clip = (api.save.mock.calls[0][2] as ProjectContent).tracks.find(track => track.id === 'voice')!.clips[0];

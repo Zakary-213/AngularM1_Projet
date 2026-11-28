@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -107,8 +107,28 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   readonly editorTabs: readonly EditorTab[] = ['Batterie', 'Piano Roll', 'Correction vocale', 'Paroles', 'Mixeur', 'Export'];
   readonly activeTab = signal<EditorTab>('Batterie');
+  private readonly injector = inject(Injector);
+  private readonly editorPanel = viewChild<ElementRef<HTMLElement>>('editorPanel');
+  private readonly exportPanel = viewChild('exportPanel', { read: ElementRef<HTMLElement> });
   /** Panneau « Publier le son » (#80), ouvert depuis l'en-tête d'un projet sauvegardé. */
   readonly publishOpen = signal(false);
+
+  openExportPanel(): void {
+    this.activeTab.set('Export');
+    // L'onglet peut être créé par Angular à la suite de ce clic.
+    afterNextRender({
+      write: () => {
+        const panel = this.exportPanel()?.nativeElement;
+        if (!panel) return;
+        const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+        panel.focus({ preventScroll: true });
+        this.editorPanel()?.nativeElement.scrollIntoView?.({
+          behavior: reduceMotion ? 'auto' : 'smooth',
+          block: 'start',
+        });
+      },
+    }, { injector: this.injector });
+  }
 
   /** Depuis une piste Mélodie ou Basse vide : ouvre le Piano Roll avec le choix d'instrument. */
   openInstrumentPicker(event: Event): void {

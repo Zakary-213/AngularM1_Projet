@@ -410,6 +410,12 @@ Règles : l'auteur vient du JWT, jamais du corps ; seuls `projectId`, `title` et
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
 
+### 28 novembre 2026 — Raccourci Exporter du studio (#71)
+
+- Le bouton Exporter de l’en-tête ouvre l’onglet Export, amène le panneau sous la navigation et lui donne le focus. Avec les animations réduites, le défilement est immédiat.
+- `npm test` frontend réussi (366 tests). Le test du raccourci couvre le focus, les deux modes de défilement et le clic quand l’onglet est déjà ouvert. Le build Angular de production a réussi avec une sortie dans un dossier temporaire.
+- En session libre, vérifié dans le navigateur sur ordinateur au clavier, puis à 768 et 360 px au clic. Le panneau et le bouton WAV sont visibles après le défilement, sans débordement horizontal ni erreur dans la console.
+
 ### 28 novembre 2026 — Pistes vocales multiples (#64)
 
 - **Studio** — Ajouter, renommer et retirer une piste depuis le panneau Pistes vocales. Le sélecteur « Piste armée pour le micro » choisit la destination de l'enregistrement et le groupe de prises affiché. Limite de huit pistes, huit prises enregistrées dans le studio par piste. Le studio garde au moins une piste vocale.

@@ -18,7 +18,7 @@ try {
   await mongoose.connect(uri).then(() => {
     console.log("[startup] Connecté à MongoDB Atlas");
     console.log(
-      "[startup] La base guitar-practice-cloud est prête à recevoir des données",
+      `[startup] La base ${mongoose.connection.name} est prête à recevoir des données`,
     );
     console.log(`[startup] Vérification : http://localhost:${port}/api/health`);
   });
@@ -49,7 +49,7 @@ try {
 }
 
 const server = createApp().listen(port, () => {
-  console.log(`Guitar Practice Cloud API: http://localhost:${port}/api/health`);
+  console.log(`Zakat Record API: http://localhost:${port}/api/health`);
 });
 
 // Le callback `error` couvre notamment un port déjà utilisé.

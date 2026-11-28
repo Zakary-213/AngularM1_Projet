@@ -42,7 +42,7 @@ export class HomePageComponent {
   readonly workflows = [
     { number: '01', title: 'COMPOSEZ.', description: 'Une ligne de basse, un beat, une mélodie. Donnez une forme à ce que vous avez en tête.', link: '/studio', action: 'Créer une production' },
     { number: '02', title: 'ENREGISTREZ.', description: 'Posez votre voix sur une instrumentale. Trouvez le bon équilibre, façonnez votre signature.', link: '/studio', action: 'Découvrir le studio' },
-    { number: '03', title: 'PARTAGEZ.', description: 'Construisez avec votre équipe. Et quand le morceau est prêt, faites-le entendre.', link: '/collaborations', action: 'Créer à plusieurs' },
+    { number: '03', title: 'PARTAGEZ.', description: 'Publiez votre mix final pour le faire écouter.', link: '/publications', action: 'Voir les publications' },
   ];
 
   private readonly stage = viewChild.required<ElementRef<HTMLElement>>('stage');

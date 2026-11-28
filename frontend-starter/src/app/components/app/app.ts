@@ -19,7 +19,6 @@ export class AppComponent {
     { path: '/home', label: 'Accueil' },
     { path: '/projects', label: 'Projets' },
     { path: '/library', label: 'Bibliothèque' },
-    { path: '/collaborations', label: 'Collaborations' },
     { path: '/publications', label: 'Publications' },
   ];
 

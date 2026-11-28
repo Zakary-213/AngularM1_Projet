@@ -14,7 +14,6 @@ export const routes: Routes = [
   { path: 'studio', title: 'Studio · Zakat Record', loadComponent: () => import('./components/studio-page/studio-page').then(m => m.StudioPageComponent), canDeactivate: [unsavedChangesGuard] },
   { path: 'studio/:id', title: 'Studio · Zakat Record', loadComponent: () => import('./components/studio-page/studio-page').then(m => m.StudioPageComponent), canActivate: [authGuard], canDeactivate: [unsavedChangesGuard] },
   { path: 'library', title: 'Bibliothèque · Zakat Record', loadComponent: () => import('./components/library-page/library-page').then(m => m.LibraryPageComponent) },
-  { path: 'collaborations', title: 'Collaborations · Zakat Record', loadComponent: () => import('./components/collaborations-page/collaborations-page').then(m => m.CollaborationsPageComponent) },
   { path: 'publications', title: 'Publications · Zakat Record', loadComponent: () => import('./components/publications-page/publications-page').then(m => m.PublicationsPageComponent) },
   { path: 'login', title: 'Connexion · Zakat Record', component: LoginPageComponent, canActivate: [guestGuard] },
   { path: 'register', title: 'Inscription · Zakat Record', component: RegisterPageComponent, canActivate: [guestGuard] },

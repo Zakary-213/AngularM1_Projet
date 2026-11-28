@@ -45,12 +45,14 @@ flowchart TD
 - **Enregistrement vocal**, plusieurs prises et synchronisation.
 - **Correction de hauteur de la voix après enregistrement**, réglable (*effet de type Auto-Tune*).
 - **Sauvegarde** des projets éditables et **export** du morceau final.
+- **Publication du mix final** (#20, #80). Le morceau publié est accessible à l'écoute. Le projet éditable, les pistes et les prises originales restent privés.
 
 ### ⛔ Hors périmètre pour cette version
 
 - Génération automatique d'instrumentales par IA (l'assistant d'écriture de paroles de **M12** ne génère que du texte).
 - Suppression/séparation de la voix d'un rappeur sur un morceau existant.
-- Clonage de voix, imitation d'artistes, plateforme sociale et collaboration en temps réel.
+- Clonage de voix et imitation d'artistes.
+- **Sessions partagées et édition à plusieurs en direct** (#20, #66). Les fonctions de réseau social sont également hors périmètre de la V1.
 - Reproduction complète d'un logiciel commercial comme FL Studio.
 - Auto-Tune **en direct pendant la prise** : la V1 applique la correction **après** l'enregistrement.
 
@@ -78,6 +80,7 @@ L'interface doit être **riche mais progressive** : les panneaux s'ouvrent selon
 | **▶ Écouter** | Rend audible le projet en cours **sans** l'exporter |
 | **💾 Sauvegarder** | Conserve les notes, clips, réglages, voix et références de fichiers pour les **rééditer plus tard** |
 | **⬇ Exporter** | Génère un **fichier audio final** (WAV d'abord ; MP3 si possible) |
+| **Publier le son** | Rend le **mix final** accessible à l'écoute dans Publications. L'auteur peut le retirer. |
 
 ---
 

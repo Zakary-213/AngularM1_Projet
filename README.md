@@ -66,9 +66,11 @@ flowchart LR
     C <--> H[(💾 Sauvegarde)]
 ```
 
+La V1 permet de publier le **mix final** (#80). Le projet éditable, ses pistes et ses prises restent privés.
+
 ### Hors périmètre (V1)
 
-Génération **audio** par IA (instrumentales), séparation de voix, clonage vocal et correction de hauteur **en direct** pendant la prise. La collaboration temps réel est envisagée mais doit d'abord être validée (voir [AGENTS.md](AGENTS.md)) ; la publication du mix final est disponible depuis #80.
+Génération **audio** par IA (instrumentales), séparation de voix, clonage vocal, correction de hauteur **en direct** pendant la prise, sessions partagées et édition à plusieurs en temps réel (#20, #66).
 
 ---
 
@@ -82,7 +84,6 @@ Génération **audio** par IA (instrumentales), séparation de voix, clonage voc
 | Projets | Mes projets (créer « Créer / Importer une prod », ouvrir, renommer, supprimer, pagination), sauvegarde du studio avec état visible et conflits détectés | ✅ Fonctionnel (M1) |
 | Bibliothèque | Les 24 sons réels du studio (12 frappes des kits boom bap et trap, 12 instruments) : filtre par catégorie, recherche, préécoute ; catégorie Samples vide pour l'instant | ✅ Fonctionnel (#72) |
 | Publications | Bouton « Publier le son » dans le studio (mix rendu comme à l'export), page Publications lue depuis la base avec lecteur, « Mes publications » avec retrait | ✅ Fonctionnel (#80) |
-| Interface | Page Collaborations | 🎨 Maquette |
 | Moteur audio | Branché dans `/studio` : séquenceur 16 pas au BPM choisi, 2e source synchronisée, prise micro, export WAV (Web Audio natif) | 🧪 Prototype M0 intégré |
 | Studio | Lecture, pause, stop, position (mesure:temps:double-croche), tempo, métronome, enregistrement, pistes avec mute / solo / volume, zoom de la timeline ; ajout / renommage de pistes, sélection de position et sauvegarde restent à faire | 🚧 Partiel (M2) |
 | Timeline | Se placer (clic, clavier), boucle, clips de batterie (déplacer, dupliquer, raccourcir, supprimer), instrumentale et prises déplaçables, Annuler / Rétablir, positions sauvegardées | ✅ Fonctionnel (M5) |
@@ -409,6 +410,12 @@ Règles : l'auteur vient du JWT, jamais du corps ; seuls `projectId`, `title` et
 ## Journal
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
+
+### 28 novembre 2026 — Périmètre de la V1 et retrait des sessions partagées (#20, #66)
+
+- La V1 inclut la publication du mix final et place les sessions partagées en direct hors périmètre. Le guide de développement, le cahier des missions et le README décrivent cette décision. Les projets et les prises restent privés.
+- La maquette Angular des sessions partagées, sa route et ses liens ont été retirés. Sur l'accueil, « Partagez » mène aux publications. Les sessions partagées n'avaient pas de route backend.
+- `npm test` frontend 366/366, `npm test` backend 84/84 et build de production réussi dans un dossier temporaire. Navigateur vérifié sur ordinateur, à 768 px dans le studio et à 360 px dans le menu. L'ancienne adresse revient à l'accueil. Le lien « Voir les publications » ouvre la liste, qui affiche un lecteur et reçoit une réponse HTTP 200.
 
 ### 28 novembre 2026 — Raccourci Exporter du studio (#71)
 

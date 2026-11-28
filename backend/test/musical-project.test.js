@@ -70,7 +70,7 @@ test("toPublic expose id et ownerId en texte, sans _id ni __v", () => {
 test("refuse un BPM hors bornes et une version de format inconnue", async () => {
   assert.ok((await errorsOf(validProject({ bpm: 300 }))).includes("bpm"));
   assert.ok((await errorsOf(validProject({ bpm: 59 }))).includes("bpm"));
-  assert.ok((await errorsOf(validProject({ formatVersion: 4 }))).includes("formatVersion"));
+  assert.ok((await errorsOf(validProject({ formatVersion: PROJECT_FORMAT_VERSION + 1 }))).includes("formatVersion"));
   assert.deepEqual(await errorsOf(validProject({ formatVersion: 1 })), [], "un projet v1 reste valide");
 });
 

@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { format } from "node:util";
 import { createApp } from "../src/app.js";
-import { MusicalProject } from "../src/models/MusicalProject.js";
+import { MusicalProject, PROJECT_FORMAT_VERSION } from "../src/models/MusicalProject.js";
 import { Track } from "../src/models/Track.js";
 import { LyricsQuota } from "../src/models/LyricsQuota.js";
 import { estimateLyricSyllables } from "../src/services/lyrics-analysis.js";
@@ -149,7 +149,7 @@ test("création : propriétaire tiré du JWT, ownerId du corps ignoré", async (
   assert.equal(body.origin, "import");
   assert.equal(body.bpm, 140);
   assert.equal(body.revision, 0);
-  assert.equal(body.formatVersion, 3);
+  assert.equal(body.formatVersion, PROJECT_FORMAT_VERSION);
 });
 
 test("création : titre, parcours et BPM validés", async () => {
@@ -211,7 +211,7 @@ test("sauvegarde : liste blanche, révision incrémentée, validation du contenu
   assert.equal(saved.body.key.scale, "harmonicMinor");
   assert.equal(saved.body.tracks[0].volumeDb, -3);
   assert.equal(saved.body.ownerId, alice);
-  assert.equal(saved.body.formatVersion, 3);
+  assert.equal(saved.body.formatVersion, PROJECT_FORMAT_VERSION);
   assert.equal(saved.body.origin, "create");
 
   const invalid = await call(alice, "PUT", `/${project.id}`, { revision: 1, tracks: [{ ...drumsTrack, volumeDb: 40 }] });
@@ -231,7 +231,7 @@ test("sauvegarde concurrente : 409 avec la révision actuelle, rien n'est écras
 test("format inconnu : 422 et projet non réécrit", async () => {
   const { body: project } = await createProject(alice);
   // Simule un projet enregistré par une version future du studio.
-  store.get(project.id).set("formatVersion", 4, { strict: false });
+  store.get(project.id).set("formatVersion", PROJECT_FORMAT_VERSION + 1, { strict: false });
   const response = await call(alice, "PUT", `/${project.id}`, { revision: 0, bpm: 100 });
   assert.equal(response.status, 422);
   assert.equal(store.get(project.id).bpm, 90);
@@ -390,7 +390,7 @@ test("M10 : un projet au format v1 s'ouvre tel quel et passe en v3 à la sauvega
   assert.equal((await call(alice, "GET", `/${project.id}`)).body.formatVersion, 1);
   const saved = await call(alice, "PUT", `/${project.id}`, { revision: 0, bpm: 100 });
   assert.equal(saved.status, 200);
-  assert.equal(saved.body.formatVersion, 3);
+  assert.equal(saved.body.formatVersion, PROJECT_FORMAT_VERSION);
   assert.equal(saved.body.bpm, 100);
 });
 
@@ -412,7 +412,7 @@ test("#64 : trois pistes vocales gardent leurs prises, leur mix, leur correction
   });
   const saved = await call(alice, "PUT", route, { revision: 0, tracks, armedVocalTrackId: "voice-1" });
   assert.equal(saved.status, 200);
-  assert.equal(saved.body.formatVersion, 3);
+  assert.equal(saved.body.formatVersion, PROJECT_FORMAT_VERSION);
   const reopened = (await call(alice, "GET", route)).body;
   assert.deepEqual(reopened.tracks, saved.body.tracks);
   assert.equal(reopened.armedVocalTrackId, "voice-1");
@@ -429,6 +429,29 @@ test("#64 : trois pistes vocales gardent leurs prises, leur mix, leur correction
   const unsafe = { ...tracks[1], clips: [{ ...tracks[1].clips[0], audioFileId: foreign }] };
   assert.equal((await call(alice, "PUT", route, { revision: 1, tracks: [tracks[0], unsafe, tracks[2]] })).status, 400);
   assert.equal((await call(alice, "GET", route)).body.revision, 1);
+});
+
+test("M2 : deux pistes d'instruments sont sauvegardées séparément et leurs clips sont validés", async () => {
+  const { body: project } = await createProject(alice);
+  const route = `/${project.id}`;
+  const patterns = [{ id: "part-piano", name: "Piano", instrument: "piano" },
+    { id: "part-guitar", name: "Guitare", instrument: "acousticGuitar" }];
+  const tracks = patterns.map((part, index) => ({
+    id: `inst-${index}`, type: "instrument", name: part.name, pan: index / 2,
+    clips: [{ id: `clip-${index}`, startBeat: 0, durationBeats: 16, patternId: part.id }],
+  }));
+  const saved = await call(alice, "PUT", route, { revision: 0, patterns, tracks });
+  assert.equal(saved.status, 200);
+  const before = (await call(alice, "GET", route)).body;
+  assert.deepEqual(before.tracks.map(track => [track.name, track.pan, track.clips[0].patternId]), [
+    ["Piano", 0, "part-piano"], ["Guitare", 0.5, "part-guitar"],
+  ]);
+
+  const invalid = { ...tracks[1], clips: [{ ...tracks[1].clips[0], patternId: "part-absente" }] };
+  assert.equal((await call(alice, "PUT", route, { revision: 1, tracks: [tracks[0], invalid] })).status, 400);
+  const reduced = await call(alice, "PUT", route, { revision: 1, tracks: [tracks[0]] });
+  assert.equal(reduced.status, 200);
+  assert.deepEqual(reduced.body.tracks, [before.tracks[0]]);
 });
 
 const makeLyricLines = (count) => Array.from({ length: count }, (_, index) => ({

@@ -1,5 +1,5 @@
 import { DrumClip } from './arrangement';
-import { INSTRUMENT_TRACK_IDS, InstrumentId, InstrumentParams, InstrumentTrackId, MelodicPattern, notesStartingAt, patternSteps } from './melodic-pattern';
+import { InstrumentId, InstrumentParams, InstrumentTrackId, MelodicPattern, isInstrumentTrackId, notesStartingAt, patternSteps } from './melodic-pattern';
 import { STEPS_PER_BAR } from './music-time';
 
 /**
@@ -41,8 +41,9 @@ function clipAt(clips: readonly DrumClip[], songStep: number): DrumClip | null {
  */
 export function notesAtSongStep(clips: InstrumentClips, patterns: readonly MelodicPattern[], songStep: number): ScheduledNote[] {
   const notes: ScheduledNote[] = [];
-  for (const track of INSTRUMENT_TRACK_IDS) {
-    const clip = clipAt(clips[track], songStep);
+  for (const [track, trackClips] of Object.entries(clips)) {
+    if (!isInstrumentTrackId(track)) continue;
+    const clip = clipAt(trackClips, songStep);
     const pattern = clip ? patterns.find(candidate => candidate.id === clip.patternId) : undefined;
     if (!clip || !pattern) {
       continue;
@@ -81,8 +82,8 @@ export function auditionNotesAt(pattern: MelodicPattern, track: InstrumentTrackI
 
 /** Pas joué dans un pattern au pas absolu `songStep`, d'après les clips qui le jouent ; -1 s'il ne joue pas. */
 export function patternStepAt(clips: InstrumentClips, pattern: MelodicPattern, songStep: number): number {
-  for (const track of INSTRUMENT_TRACK_IDS) {
-    const clip = clipAt(clips[track], songStep);
+  for (const trackClips of Object.values(clips)) {
+    const clip = clipAt(trackClips, songStep);
     if (clip?.patternId === pattern.id) {
       return (songStep - clip.startBar * STEPS_PER_BAR) % patternSteps(pattern);
     }
@@ -92,9 +93,9 @@ export function patternStepAt(clips: InstrumentClips, pattern: MelodicPattern, s
 
 /** Nombre de clips (toutes pistes d'instruments) qui jouent un pattern. */
 export function instrumentClipsUsing(clips: InstrumentClips, patternId: string): number {
-  return INSTRUMENT_TRACK_IDS.reduce((count, track) => count + clips[track].filter(clip => clip.patternId === patternId).length, 0);
+  return Object.values(clips).reduce((count, trackClips) => count + trackClips.filter(clip => clip.patternId === patternId).length, 0);
 }
 
 export function instrumentClipsEndBar(clips: InstrumentClips): number {
-  return Math.max(0, ...INSTRUMENT_TRACK_IDS.flatMap(track => clips[track].map(clip => clip.startBar + clip.lengthBars)));
+  return Math.max(0, ...Object.values(clips).flatMap(trackClips => trackClips.map(clip => clip.startBar + clip.lengthBars)));
 }

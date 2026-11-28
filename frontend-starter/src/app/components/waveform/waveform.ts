@@ -13,7 +13,8 @@ import { computePeaks } from '../../shared/audio/waveform';
 })
 export class WaveformComponent implements OnDestroy {
   readonly buffer = input.required<AudioBuffer>();
-  /** Fin de la portion affichée, en secondes (le début du fichier est toujours affiché). */
+  /** Bornes de la portion affichée, en secondes depuis le début du fichier. */
+  readonly fromSeconds = input(0);
   readonly toSeconds = input<number | null>(null);
   readonly color = input('#bda4fa');
 
@@ -30,14 +31,14 @@ export class WaveformComponent implements OnDestroy {
       });
       this.observer.observe(element);
     });
-    effect(() => this.draw(this.buffer(), this.toSeconds(), this.color(), this.size()));
+    effect(() => this.draw(this.buffer(), this.fromSeconds(), this.toSeconds(), this.color(), this.size()));
   }
 
   ngOnDestroy(): void {
     this.observer?.disconnect();
   }
 
-  private draw(buffer: AudioBuffer, toSeconds: number | null, color: string, size: { width: number; height: number }): void {
+  private draw(buffer: AudioBuffer, fromSeconds: number, toSeconds: number | null, color: string, size: { width: number; height: number }): void {
     const canvas = this.canvas().nativeElement;
     const context = canvas.getContext('2d');
     if (!context || size.width === 0 || size.height === 0) {
@@ -50,8 +51,9 @@ export class WaveformComponent implements OnDestroy {
     context.clearRect(0, 0, size.width, size.height);
 
     const end = Math.min(buffer.length, Math.round((toSeconds ?? buffer.duration) * buffer.sampleRate));
+    const start = Math.max(0, Math.min(end, Math.round(fromSeconds * buffer.sampleRate)));
     // subarray : vue sur les échantillons existants, sans copie du buffer.
-    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index).subarray(0, end));
+    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index).subarray(start, end));
     const { min, max } = computePeaks(channels, size.width);
     const middle = size.height / 2;
     context.fillStyle = color;

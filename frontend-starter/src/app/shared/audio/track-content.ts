@@ -1,15 +1,13 @@
 import { DrumClip } from './arrangement';
 import { PatternEntry } from './drum-pattern';
-import { MelodicPattern } from './melodic-pattern';
+import { InstrumentTrackId, MelodicPattern, isInstrumentTrackId } from './melodic-pattern';
 import { InstrumentClips } from './note-scheduling';
 
 /** Pistes du studio qui peuvent porter du son dans le morceau rendu. */
-export type ContentTrack = 'drums' | 'melody' | 'bass' | 'instrumental' | 'voice';
+export type ContentTrack = 'drums' | InstrumentTrackId | 'instrumental' | 'voice';
 
-export const CONTENT_TRACK_LABELS: Readonly<Record<ContentTrack, string>> = {
+export const CONTENT_TRACK_LABELS: Readonly<Record<'drums' | 'instrumental' | 'voice', string>> = {
   drums: 'Batterie',
-  melody: 'Mélodie',
-  bass: 'Basse',
   instrumental: 'Instrumentale',
   voice: 'Voix',
 };
@@ -39,8 +37,8 @@ export function tracksWithContent(song: SongTracks): ContentTrack[] {
     tracks.push('drums');
   }
   const melodicHasNotes = (patternId: string) => (song.melodicPatterns.find(pattern => pattern.id === patternId)?.notes.length ?? 0) > 0;
-  for (const track of ['melody', 'bass'] as const) {
-    if (song.instrumentClips[track].some(clip => melodicHasNotes(clip.patternId))) {
+  for (const [track, clips] of Object.entries(song.instrumentClips)) {
+    if (isInstrumentTrackId(track) && clips.some(clip => melodicHasNotes(clip.patternId))) {
       tracks.push(track);
     }
   }

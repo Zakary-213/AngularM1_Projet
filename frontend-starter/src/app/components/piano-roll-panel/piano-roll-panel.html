@@ -6,7 +6,7 @@
   <span class="muted">Guitare, cordes, basse, orgue… 12 instruments, placés sur la timeline en un clic.</span>
 </div>
 @if (session.instrumentPickerOpen()) {
-  <app-instrument-picker (picked)="addInstrument($event)" (closed)="session.instrumentPickerOpen.set(false)" />
+  <app-instrument-picker [destination]="pickerDestination()" (picked)="addInstrument($event)" (closed)="session.instrumentPickerTarget.set(null)" />
 }
 @if (notice(); as text) { <p class="notice" role="status">{{ text }}</p> }
 

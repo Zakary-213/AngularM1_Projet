@@ -4,7 +4,7 @@ import { Observable, Subject, of, throwError } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioEngineService } from '../audio/audio-engine.service';
 import { StudioSessionService, VocalTake } from '../audio/studio-session.service';
-import { MusicalProject, ProjectContent } from '../models/musical-project.model';
+import { MusicalProject, PROJECT_FORMAT_VERSION, ProjectContent } from '../models/musical-project.model';
 import type { LyricsVersion } from '../models/lyrics.model';
 import { ProjectService } from './project.service';
 import { TrackService } from './track.service';
@@ -206,11 +206,38 @@ describe('StudioProjectService', () => {
   });
 
   it('refuse d’ouvrir un projet d’une version future du format', () => {
-    api.get.mockReturnValue(of({ ...stored, formatVersion: 4 }));
+    api.get.mockReturnValue(of({ ...stored, formatVersion: PROJECT_FORMAT_VERSION + 1 }));
     service.load('p1');
     expect(service.loadState()).toBe('error');
     expect(service.loadError()).toContain('version plus récente');
     expect(service.project()).toBeNull();
+  });
+
+  it('sauvegarde et rouvre deux pistes d’instruments avec leurs réglages et la suppression d’une piste par défaut', () => {
+    api.get.mockReturnValue(of(stored));
+    service.load('p1');
+    expect(session.instrumentTracks().map(track => track.id)).toEqual(['melody', 'bass']);
+    const piano = session.addInstrument('piano', 'new')!;
+    session.addNote(60, 0, 4);
+    const guitar = session.addInstrument('acousticGuitar', 'new')!;
+    session.addNote(55, 0, 4);
+    session.renameInstrumentTrack(guitar.track, 'Guitare refrain');
+    session.setTrack(guitar.track, { pan: -0.6 });
+    session.removeInstrumentTrack('melody');
+    api.save.mockImplementation((id: string, revision: number, content: ProjectContent) =>
+      of({ ...stored, ...content, id, revision: revision + 1, formatVersion: PROJECT_FORMAT_VERSION }));
+    expect(service.saveState()).toBe('dirty');
+    service.save();
+    const saved = service.project()!;
+    api.get.mockReturnValue(of(saved));
+    service.load('p1');
+
+    expect(session.instrumentTracks().map(track => track.id)).toEqual(['bass', piano.track, guitar.track]);
+    expect(session.instrumentTracks().find(track => track.id === guitar.track)?.name).toBe('Guitare refrain');
+    expect(session.instrumentClips()[piano.track][0]).toMatchObject({ patternId: piano.patternId, startBar: 0 });
+    expect(session.instrumentClips()[guitar.track][0]).toMatchObject({ patternId: guitar.patternId, startBar: 0 });
+    expect(session.mixer()[guitar.track].pan).toBe(-0.6);
+    expect(service.saveState()).toBe('saved');
   });
 
   it('projet introuvable ou d’un autre utilisateur : message explicite', () => {

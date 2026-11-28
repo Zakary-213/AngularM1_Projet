@@ -39,6 +39,13 @@
 
 .editor-body { padding: 18px 20px; }
 .editor-panel { scroll-margin-top: 96px; }
+.timeline-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; }
+.timeline-navigation label { font-size: 12px; }
+.timeline-navigation input { flex: 1 1 100px; min-width: 0; accent-color: var(--accent); }
+.timeline-ruler .ruler-mark { justify-self: start; padding-right: 4px; }
+.track-rename-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.track-rename-form input { min-width: 0; max-width: 100%; }
+.track-label .instrument-track-name { max-width: calc(100% - 14px); overflow-wrap: anywhere; padding: 4px 6px; text-align: left; }
 app-export-panel:focus-visible { outline: 3px solid #8bc8dd; outline-offset: -3px; }
 .muted { color: var(--muted); }
 

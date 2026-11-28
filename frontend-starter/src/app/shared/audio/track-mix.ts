@@ -1,4 +1,5 @@
 import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
+import type { InstrumentTrackId } from './melodic-pattern';
 
 /**
  * Réglages de mixage du studio (M7) : par piste, volume (dB), mute, solo,
@@ -8,7 +9,7 @@ import { FLAT_THREE_BAND_EQ, ThreeBandEq, clampEq } from './three-band-eq';
  */
 
 export type VocalTrackId = 'voice' | `voice-${string}`;
-export type TrackId = 'drums' | 'melody' | 'bass' | 'instrumental' | VocalTrackId;
+export type TrackId = 'drums' | 'instrumental' | InstrumentTrackId | VocalTrackId;
 
 export const TRACK_IDS: readonly TrackId[] = ['drums', 'melody', 'bass', 'instrumental', 'voice'];
 

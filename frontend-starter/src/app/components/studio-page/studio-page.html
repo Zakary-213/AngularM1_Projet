@@ -128,6 +128,8 @@
       <button type="button" (click)="session.undo()" [disabled]="!session.canUndo()" aria-keyshortcuts="Control+Z Meta+Z">↶ Annuler</button>
       <button type="button" (click)="session.redo()" [disabled]="!session.canRedo()" aria-keyshortcuts="Control+Shift+Z Control+Y Meta+Shift+Z">↷ Rétablir</button>
       <button type="button" (click)="addDrumClip()">＋ Clip de batterie</button>
+      <button type="button" (click)="openInstrumentPicker('new')" [disabled]="!session.canAddTrack() || session.micState() !== 'idle'">＋ Piste d’instrument</button>
+      @if (!session.canAddTrack()) { <span class="muted">{{ maxStudioTracks }} pistes maximum.</span> }
       @if (selection(); as clip) {
         <span class="clip-selection" role="status">Sélection : <b>{{ clip.ariaLabel }}</b></span>
         <button type="button" (click)="moveClip(clip, -1)" [attr.aria-label]="isPatternClip(clip) ? 'Plus tôt d’une mesure' : 'Plus tôt d’un temps'">◀</button>
@@ -150,20 +152,60 @@
         <span class="clip-selection muted">Cliquez sur un clip pour le modifier.</span>
       }
     </div>
-    <p id="clip-help" class="visually-hidden">Glissez le clip pour le déplacer. Au clavier : flèches pour déplacer (Maj : d’une mesure pour l’audio), Suppr pour supprimer un clip de batterie, de mélodie ou de basse, Ctrl + D pour le dupliquer, Échap pour désélectionner. Ctrl + Z annule, Ctrl + Maj + Z rétablit.</p>
+    @if (session.selectedInstrumentTrack(); as track) {
+      <div class="clip-toolbar" role="group" [attr.aria-label]="'Gestion de la piste ' + track.name">
+        <strong>{{ track.name }}</strong>
+        @switch (instrumentTrackAction()) {
+          @case ('rename') {
+            <form class="track-rename-form" (submit)="renameSelectedInstrumentTrack($event)">
+              <label for="instrument-track-name">Nom de la piste</label>
+              <input id="instrument-track-name" [maxlength]="instrumentNameLimit" [formControl]="instrumentTrackName" />
+              <button type="submit" [disabled]="instrumentTrackName.invalid || !instrumentTrackName.value.trim()">Enregistrer le nom</button>
+              <button type="button" (click)="instrumentTrackAction.set(null)">Annuler</button>
+            </form>
+          }
+          @case ('remove') {
+            <span role="status">Retirer cette piste et ses clips de la timeline ? Les parties restent disponibles dans le Piano Roll.</span>
+            <button type="button" class="danger" (click)="removeSelectedInstrumentTrack()" [disabled]="session.micState() !== 'idle'">Confirmer la suppression</button>
+            <button type="button" (click)="instrumentTrackAction.set(null)">Annuler</button>
+          }
+          @default {
+            <button type="button" (click)="beginTrackRename()">Renommer la piste</button>
+            <button type="button" class="danger" (click)="instrumentTrackAction.set('remove')" [disabled]="session.instrumentTracks().length <= 1 || session.micState() !== 'idle'">Supprimer la piste</button>
+            @if (session.instrumentTracks().length === 1) { <span class="muted">Le studio garde une piste d’instrument.</span> }
+          }
+        }
+      </div>
+    }
+    <p id="clip-help" class="visually-hidden">Glissez le clip pour le déplacer. Au clavier : flèches pour déplacer (Maj : d’une mesure pour l’audio), Suppr pour supprimer un clip de batterie ou d’instrument, Ctrl + D pour le dupliquer, Échap pour désélectionner. Ctrl + Z annule, Ctrl + Maj + Z rétablit.</p>
+    <div class="timeline-navigation">
+      <button type="button" (click)="setTimelineStart(firstVisibleBar() - visibleBars())" [disabled]="firstVisibleBar() === 0" aria-label="Mesures précédentes">←</button>
+      <label for="timeline-start">{{ timelineRange() }}</label>
+      <input id="timeline-start" type="range" min="0" [max]="lastFirstBar()" [value]="firstVisibleBar()" [attr.aria-valuetext]="timelineRange()" (input)="onTimelineScroll($event)" />
+      <button type="button" (click)="setTimelineStart(firstVisibleBar() + visibleBars())" [disabled]="firstVisibleBar() === lastFirstBar()" aria-label="Mesures suivantes">→</button>
+    </div>
     <div class="timeline-scroll">
       <div class="timeline-inner">
         <div class="timeline-ruler" role="slider" tabindex="0" aria-label="Position de lecture" aria-describedby="ruler-help"
-          aria-valuemin="0" [attr.aria-valuemax]="session.songEndStep()" [attr.aria-valuenow]="session.songStep()" [attr.aria-valuetext]="positionText()"
+          aria-valuemin="0" [attr.aria-valuemax]="session.navigationEndStep()" [attr.aria-valuenow]="session.songStep()" [attr.aria-valuetext]="positionText()"
           (click)="onTimelineClick($event)" (keydown)="onRulerKey($event)">
-          <span>PISTES · {{ tracks().length }}</span>@for (bar of rulerBars(); track $index) {<span>{{ bar }}</span>}
+          <span>PISTES · {{ tracks().length }}</span>
+          @for (bar of rulerBars(); track $index) {
+            <span class="ruler-mark" [attr.data-measure]="bar">{{ bar }}</span>
+          }
           @if (loopBand(); as band) { <span class="loop-band" [style.left]="rulerOffset(band.left)" [style.width]="rulerWidth(band.width)" aria-hidden="true"></span> }
         </div>
         <p id="ruler-help" class="visually-hidden">Cliquez sur la règle ou une piste pour vous placer. Au clavier : flèches pour un temps, Page précédente et suivante pour une mesure, Début et Fin.</p>
         @for (track of tracks(); track track.id) {
           <div class="timeline-row">
             <div class="track-label">
-              <span [style.color]="track.color">●</span><b>{{ track.name }}</b><small>{{ track.id === session.armedVocalTrackId() ? 'Armée · ' : '' }}{{ track.type }}</small>
+              <span [style.color]="track.color">●</span>
+              @if (isInstrumentTrackId(track.id)) {
+                <button class="instrument-track-name" [class.toggle-on]="session.selectedInstrumentTrackId() === track.id" type="button" [attr.aria-pressed]="session.selectedInstrumentTrackId() === track.id" [attr.aria-label]="'Sélectionner la piste ' + track.name" (click)="selectInstrumentTrack(track.id)">{{ track.name }}</button>
+              } @else {
+                <b>{{ track.name }}</b>
+              }
+              <small>{{ track.id === session.armedVocalTrackId() ? 'Armée · ' : '' }}{{ track.type }}</small>
               <div>
                 <button type="button" (click)="session.setTrack(track.id, { muted: !track.mix.muted })" [attr.aria-pressed]="track.mix.muted" [attr.aria-label]="'Muet : ' + track.name" [class.toggle-on]="track.mix.muted">M</button>
                 <button type="button" (click)="session.setTrack(track.id, { solo: !track.mix.solo })" [attr.aria-pressed]="track.mix.solo" [attr.aria-label]="'Solo : ' + track.name" [class.toggle-on]="track.mix.solo">S</button>
@@ -180,16 +222,15 @@
                   (pointerdown)="onClipPointerDown($event, clip)" (pointermove)="onClipPointerMove($event)" (pointerup)="onClipPointerUp($event)" (pointercancel)="onClipPointerCancel()">
                   <span>{{ clip.label }}{{ track.mix.muted ? ' · muette' : '' }}</span>
                   @if (clip.waveform; as wave) {
-                    <app-waveform class="clip-waveform" [buffer]="wave.buffer" [toSeconds]="wave.toSeconds" [color]="track.color" />
+                    <app-waveform class="clip-waveform" [buffer]="wave.buffer" [fromSeconds]="wave.fromSeconds" [toSeconds]="wave.toSeconds" [color]="track.color" />
                   } @else {
                     <span [class]="clip.pattern === 'note' ? 'note-pattern' : 'wave-pattern'" aria-hidden="true"></span>
                   }
                 </button>
               }
-              @if ((track.id === 'melody' || track.id === 'bass') && session.instrumentClips()[track.id].length === 0) {
+              @if (isInstrumentTrackId(track.id) && !session.instrumentClips()[track.id]?.length) {
                 <div class="lane-action">
-                  <button type="button" (click)="openInstrumentPicker($event)">＋ Ajouter un instrument</button>
-                  <small>{{ track.id === 'bass' ? 'Basse 808, basse électrique' : 'Piano, guitare, cordes, orgue…' }}</small>
+                  <button type="button" (click)="openInstrumentPicker(track.id, $event)">＋ Ajouter un instrument</button>
                 </div>
               } @else if (track.id === 'drums' && session.drumClips().length === 0) {
                 <p class="lane-hint">Aucun clip de batterie : placez la tête de lecture puis « ＋ Clip de batterie ».</p>
@@ -202,7 +243,8 @@
               } @else if (track.id === session.armedVocalTrackId() && !session.take()) {
                 <p class="lane-hint">Appuyez sur ● pour enregistrer une prise sur la prod.</p>
               }
-              @if (playheadPercent(); as left) { <span class="playhead" [style.left.%]="left" aria-hidden="true"></span> }
+              @let left = playheadPercent();
+              @if (left !== null) { <span class="playhead" [style.left.%]="left" aria-hidden="true"></span> }
             </div>
           </div>
         }

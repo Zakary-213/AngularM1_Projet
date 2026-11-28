@@ -23,7 +23,7 @@
       </select>
     </div>
     <div class="actions" aria-label="Gestion des pistes vocales">
-      <button type="button" (click)="addTrack()" [disabled]="session.micState() !== 'idle' || session.vocalTracks().length >= maxVocalTracks">Ajouter une piste vocale</button>
+      <button type="button" (click)="addTrack()" [disabled]="!session.canAddTrack() || session.micState() !== 'idle' || session.vocalTracks().length >= maxVocalTracks">Ajouter une piste vocale</button>
       <button type="button" (click)="startTrackRename()">Renommer la piste</button>
       <button type="button" (click)="trackAction.set('remove')" [disabled]="session.micState() !== 'idle' || studioProject.uploading() || session.vocalTracks().length <= 1">Supprimer la piste</button>
     </div>

@@ -172,10 +172,10 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [ ] Créer l'écran Studio : transport, bibliothèque, timeline, éditeur inférieur, inspecteur.
 - [x] Intégrer **Play, Pause, Stop, position courante, BPM, métronome**.
 - [x] Afficher des pistes avec titre, couleur, mute/solo et volume.
-- [ ] Permettre l'ajout, la sélection, le renommage et la suppression d'une piste.
-- [ ] Ajouter zoom horizontal, défilement, règles de mesures et sélection de position.
+- [x] Permettre l'ajout, la sélection, le renommage et la suppression d'une piste.
+- [x] Ajouter zoom horizontal, défilement, règles de mesures et sélection de position.
 - [x] Prévoir le passage entre **Drum Rack, Piano Roll et Mixer**. *(onglets Batterie, Piano Roll, Mixeur sous la timeline)*
-- [ ] Afficher l'état de sauvegarde et le bouton Export.
+- [x] Afficher l'état de sauvegarde et le bouton Export.
 
 **Livrable :** éditeur utilisable avec transport et pistes, même avant l'implémentation complète des outils.
 

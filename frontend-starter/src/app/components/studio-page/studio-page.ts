@@ -13,9 +13,9 @@ import { TakesPanelComponent } from '../takes-panel/takes-panel';
 import { WaveformComponent } from '../waveform/waveform';
 import { AUDIO_FILE_ACCEPT } from '../../shared/audio/audio-file';
 import { BEATS_PER_BAR, DEFAULT_BPM, MAX_BPM, MIN_BPM, STEPS_PER_BAR, barsToSeconds } from '../../shared/audio/music-time';
-import { InstrumentTrackId } from '../../shared/audio/melodic-pattern';
+import { InstrumentTrackId, isInstrumentTrackId } from '../../shared/audio/melodic-pattern';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
-import { StudioTrackInfo } from '../../shared/audio/studio-tracks';
+import { INSTRUMENT_TRACK_NAME_MAX_LENGTH, MAX_STUDIO_TRACKS, StudioTrackInfo } from '../../shared/audio/studio-tracks';
 import { isVocalTrackId } from '../../shared/audio/track-mix';
 import { TrackMix } from '../../shared/audio/track-mix';
 import { layoutClip, dragUnits } from '../../shared/audio/timeline-layout';
@@ -37,7 +37,7 @@ type ClipKind = 'drum' | InstrumentTrackId | 'instrumental' | 'take';
 
 /** Clips qui jouent un pattern en boucle : placés, allongés et dupliqués par mesure. */
 function isPatternKind(kind: ClipKind): kind is 'drum' | InstrumentTrackId {
-  return kind === 'drum' || kind === 'melody' || kind === 'bass';
+  return kind === 'drum' || isInstrumentTrackId(kind);
 }
 
 /** Clip affiché sur la timeline (position en % de la fenêtre visible). */
@@ -51,7 +51,7 @@ interface TimelineClip {
   readonly width: number;
   readonly pattern: 'note' | 'wave';
   /** Fichier à dessiner et fin de la portion visible (secondes), pour un clip audio. */
-  readonly waveform?: { readonly buffer: AudioBuffer; readonly toSeconds: number };
+  readonly waveform?: { readonly buffer: AudioBuffer; readonly fromSeconds: number; readonly toSeconds: number };
 }
 
 interface TimelineTrack extends StudioTrackInfo {
@@ -130,12 +130,45 @@ export class StudioPageComponent implements LeaveConfirmation {
     }, { injector: this.injector });
   }
 
-  /** Depuis une piste Mélodie ou Basse vide : ouvre le Piano Roll avec le choix d'instrument. */
-  openInstrumentPicker(event: Event): void {
-    // Le clic ne doit pas aussi déplacer la tête de lecture (gestionnaire de la piste).
-    event.stopPropagation();
-    this.session.instrumentPickerOpen.set(true);
+  readonly isInstrumentTrackId = isInstrumentTrackId;
+  readonly maxStudioTracks = MAX_STUDIO_TRACKS;
+  readonly instrumentNameLimit = INSTRUMENT_TRACK_NAME_MAX_LENGTH;
+  readonly instrumentTrackName = new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(INSTRUMENT_TRACK_NAME_MAX_LENGTH)] });
+  readonly instrumentTrackAction = signal<'rename' | 'remove' | null>(null);
+
+  openInstrumentPicker(target: InstrumentTrackId | 'new', event?: Event): void {
+    event?.stopPropagation();
+    this.instrumentTrackAction.set(null);
+    this.session.instrumentPickerTarget.set(target);
     this.activeTab.set('Piano Roll');
+  }
+
+  selectInstrumentTrack(id: string): void {
+    if (!isInstrumentTrackId(id)) return;
+    this.session.selectInstrumentTrack(id);
+    this.selectedClip.set(null);
+    this.instrumentTrackAction.set(null);
+    const clip = this.session.instrumentClips()[id]?.[0];
+    if (clip) this.session.selectMelodicPattern(clip.patternId);
+    this.activeTab.set('Piano Roll');
+  }
+
+  beginTrackRename(): void {
+    const track = this.session.selectedInstrumentTrack();
+    if (!track) return;
+    this.instrumentTrackName.setValue(track.name);
+    this.instrumentTrackAction.set('rename');
+  }
+
+  renameSelectedInstrumentTrack(event: Event): void {
+    event.preventDefault();
+    const track = this.session.selectedInstrumentTrack();
+    if (track && this.session.renameInstrumentTrack(track.id, this.instrumentTrackName.value)) this.instrumentTrackAction.set(null);
+  }
+
+  removeSelectedInstrumentTrack(): void {
+    const track = this.session.selectedInstrumentTrack();
+    if (track && this.session.removeInstrumentTrack(track.id)) this.instrumentTrackAction.set(null);
   }
   readonly audioAccept = AUDIO_FILE_ACCEPT;
   readonly minBpm = MIN_BPM;
@@ -161,11 +194,8 @@ export class StudioPageComponent implements LeaveConfirmation {
       return null;
     }
     const visibleSteps = this.visibleBars() * STEPS_PER_BAR;
-    const left = (100 * range.startStep) / visibleSteps;
-    if (left >= 100) {
-      return null;
-    }
-    return { left, width: Math.min(100 - left, (100 * (range.endStep - range.startStep)) / visibleSteps) };
+    const start = this.firstVisibleBar() * STEPS_PER_BAR;
+    return layoutClip(range.startStep - start, range.endStep - range.startStep, visibleSteps);
   });
 
   readonly bpmControl = new FormControl(DEFAULT_BPM, {
@@ -177,18 +207,27 @@ export class StudioPageComponent implements LeaveConfirmation {
   readonly visibleBars = computed(() => ZOOM_LEVELS[this.zoomIndex()]);
   readonly canZoomIn = computed(() => this.zoomIndex() > 0);
   readonly canZoomOut = computed(() => this.zoomIndex() < ZOOM_LEVELS.length - 1);
+  private readonly requestedFirstBar = signal(0);
+  readonly timelineBars = computed(() => Math.ceil(this.session.navigationEndStep() / STEPS_PER_BAR));
+  readonly lastFirstBar = computed(() => this.timelineBars() - this.visibleBars());
+  readonly firstVisibleBar = computed(() => Math.min(this.lastFirstBar(), this.requestedFirstBar()));
+  readonly timelineRange = computed(() => `Mesures ${this.firstVisibleBar() + 1} à ${this.firstVisibleBar() + this.visibleBars()}`);
   /** Numéros de mesure affichés sur la règle (8 repères répartis sur la fenêtre visible). */
   readonly rulerBars = computed(() => {
     const barsPerMark = this.visibleBars() / RULER_MARKS;
-    return Array.from({ length: RULER_MARKS }, (_, index) => index * barsPerMark + 1);
+    return Array.from({ length: RULER_MARKS }, (_, index) => {
+      const bar = this.firstVisibleBar() + index * barsPerMark + 1;
+      return Number.isInteger(bar) ? bar : null;
+    });
   });
   /** Tête de lecture en % de la fenêtre visible, ou `null` si elle est hors champ ou à l'arrêt. */
   readonly playheadPercent = computed(() => {
-    if (this.session.transportState() === 'stopped') {
+    if (this.session.transportState() === 'stopped' && this.session.songStep() === 0) {
       return null;
     }
-    const percent = (100 * this.session.songStep()) / (this.visibleBars() * STEPS_PER_BAR);
-    return percent <= 100 ? percent : null;
+    const step = this.session.songStep() - this.firstVisibleBar() * STEPS_PER_BAR;
+    const percent = (100 * step) / (this.visibleBars() * STEPS_PER_BAR);
+    return percent >= 0 && percent <= 100 ? percent : null;
   });
 
   /** Clip sélectionné pour l'édition (barre d'outils, clavier). */
@@ -202,15 +241,16 @@ export class StudioPageComponent implements LeaveConfirmation {
     const bpm = this.session.bpm();
     const visibleSeconds = barsToSeconds(this.visibleBars(), bpm);
     const barSeconds = barsToSeconds(1, bpm);
+    const firstSecond = this.firstVisibleBar() * barSeconds;
     const instrumental = this.session.instrumental();
     const mixer = this.session.mixer();
     return this.session.studioTracks().map(info => {
       const clips: TimelineClip[] = [];
       const take = isVocalTrackId(info.id) ? this.session.activeTakeFor(info.id) : null;
-      if (info.id === 'melody' || info.id === 'bass') {
+      if (isInstrumentTrackId(info.id)) {
         const names = new Map(this.session.melodicPatterns().map(entry => [entry.id, entry.name]));
-        for (const clip of this.session.instrumentClips()[info.id]) {
-          const box = layoutClip(clip.startBar * barSeconds, clip.lengthBars * barSeconds, visibleSeconds);
+        for (const clip of this.session.instrumentClips()[info.id] ?? []) {
+          const box = layoutClip(clip.startBar * barSeconds - firstSecond, clip.lengthBars * barSeconds, visibleSeconds);
           if (box) {
             const range = clip.lengthBars > 1 ? `mesures ${clip.startBar + 1} à ${clip.startBar + clip.lengthBars}` : `mesure ${clip.startBar + 1}`;
             const name = names.get(clip.patternId) ?? 'Pattern';
@@ -220,7 +260,7 @@ export class StudioPageComponent implements LeaveConfirmation {
       } else if (info.id === 'drums') {
         const names = new Map(this.session.patterns().map(entry => [entry.id, entry.name]));
         for (const clip of this.session.drumClips()) {
-          const box = layoutClip(clip.startBar * barSeconds, clip.lengthBars * barSeconds, visibleSeconds);
+          const box = layoutClip(clip.startBar * barSeconds - firstSecond, clip.lengthBars * barSeconds, visibleSeconds);
           if (box) {
             const range = clip.lengthBars > 1 ? `mesures ${clip.startBar + 1} à ${clip.startBar + clip.lengthBars}` : `mesure ${clip.startBar + 1}`;
             const name = names.get(clip.patternId) ?? 'Pattern';
@@ -228,23 +268,23 @@ export class StudioPageComponent implements LeaveConfirmation {
           }
         }
       } else if (info.id === 'instrumental' && instrumental) {
-        const start = this.session.instrumentalStartSeconds();
+        const start = this.session.instrumentalStartSeconds() - firstSecond;
         const box = layoutClip(start, instrumental.buffer.duration, visibleSeconds);
         if (box) {
           clips.push({
             kind: 'instrumental',
             id: 'instrumental',
             label: instrumental.name,
-            ariaLabel: `Instrumentale ${instrumental.name}, début ${describePosition(Math.round((start / barSeconds) * STEPS_PER_BAR))}`,
+            ariaLabel: `Instrumentale ${instrumental.name}, début ${describePosition(Math.round((this.session.instrumentalStartSeconds() / barSeconds) * STEPS_PER_BAR))}`,
             ...box,
             pattern: 'wave',
-            waveform: { buffer: instrumental.buffer, toSeconds: Math.max(0.01, Math.min(instrumental.buffer.duration, visibleSeconds - start)) },
+            waveform: { buffer: instrumental.buffer, fromSeconds: Math.max(0, -start), toSeconds: Math.min(instrumental.buffer.duration, visibleSeconds - start) },
           });
         }
       } else if (take) {
-        const box = layoutClip(take.startSeconds, take.buffer.duration, visibleSeconds);
+        const start = take.startSeconds - firstSecond;
+        const box = layoutClip(start, take.buffer.duration, visibleSeconds);
         if (box) {
-          const visibleTakeSeconds = Math.max(0.01, Math.min(take.buffer.duration, visibleSeconds - Math.max(0, take.startSeconds)));
           clips.push({
             kind: 'take',
             id: take.id,
@@ -252,7 +292,7 @@ export class StudioPageComponent implements LeaveConfirmation {
             ariaLabel: `Prise ${take.name}, début ${take.startSeconds.toFixed(2).replace('.', ',')} s`,
             ...box,
             pattern: 'wave',
-            waveform: { buffer: take.buffer, toSeconds: visibleTakeSeconds },
+            waveform: { buffer: take.buffer, fromSeconds: Math.max(0, -start), toSeconds: Math.min(take.buffer.duration, visibleSeconds - start) },
           });
         }
       }
@@ -291,6 +331,11 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   /** Clic sur la règle ou sur une piste : la tête de lecture se place au temps le plus proche. */
   onTimelineClick(event: MouseEvent): void {
+    const measure = (event.target as HTMLElement).dataset['measure'];
+    if (measure) {
+      void this.session.seek((Number(measure) - 1) * STEPS_PER_BAR);
+      return;
+    }
     const lane = (event.currentTarget as HTMLElement).closest('.timeline-inner')?.querySelector('.track-lane');
     if (!lane) {
       return;
@@ -299,14 +344,19 @@ export class StudioPageComponent implements LeaveConfirmation {
     if (event.clientX < rect.left) {
       return; // clic sur la colonne des noms de pistes
     }
-    void this.session.seek(stepFromFraction((event.clientX - rect.left) / rect.width, this.visibleBars()));
+    if (rect.width > 0) {
+      const fraction = (event.clientX - rect.left) / rect.width;
+      void this.session.seek(stepFromFraction(fraction, this.visibleBars(), this.firstVisibleBar(), this.session.navigationEndStep()));
+    }
   }
 
   /** Alternative clavier au clic : la règle est un curseur (flèches, Page, Début, Fin). */
   onRulerKey(event: KeyboardEvent): void {
-    const step = stepAfterKey(this.session.songStep(), event.key, this.session.songEndStep());
+    const step = stepAfterKey(this.session.songStep(), event.key, this.session.songEndStep(), this.session.navigationEndStep());
     if (step !== null) {
       event.preventDefault();
+      const bar = Math.floor(step / STEPS_PER_BAR);
+      if (bar < this.firstVisibleBar() || bar >= this.firstVisibleBar() + this.visibleBars()) this.setTimelineStart(bar);
       void this.session.seek(step);
     }
   }
@@ -337,6 +387,12 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   selectClip(clip: TimelineClip, event?: Event): void {
     event?.stopPropagation(); // un clic sur un clip ne déplace pas la tête de lecture
+    this.instrumentTrackAction.set(null);
+    if (isInstrumentTrackId(clip.kind)) {
+      this.session.selectInstrumentTrack(clip.kind);
+      const pattern = this.session.instrumentClips()[clip.kind]?.find(candidate => candidate.id === clip.id);
+      if (pattern) this.session.selectMelodicPattern(pattern.patternId);
+    }
     this.selectedClip.set({ kind: clip.kind, id: clip.id });
   }
 
@@ -350,7 +406,7 @@ export class StudioPageComponent implements LeaveConfirmation {
     }
     if (clip.kind === 'drum') {
       this.session.moveDrumClip(clip.id, units);
-    } else if (clip.kind === 'melody' || clip.kind === 'bass') {
+    } else if (isInstrumentTrackId(clip.kind)) {
       this.session.moveInstrumentClip(clip.kind, clip.id, units);
     } else if (clip.kind === 'instrumental') {
       this.session.moveInstrumental(units);
@@ -378,7 +434,7 @@ export class StudioPageComponent implements LeaveConfirmation {
     if (!selected || !isPatternKind(selected.kind)) {
       return null;
     }
-    const clips = selected.kind === 'drum' ? this.session.drumClips() : this.session.instrumentClips()[selected.kind];
+    const clips = selected.kind === 'drum' ? this.session.drumClips() : (this.session.instrumentClips()[selected.kind] ?? []);
     return clips.find(clip => clip.id === selected.id)?.patternId ?? null;
   });
 
@@ -393,7 +449,7 @@ export class StudioPageComponent implements LeaveConfirmation {
     const patternId = (event.target as HTMLSelectElement).value;
     if (clip?.kind === 'drum') {
       this.session.setDrumClipPattern(clip.id, patternId);
-    } else if (clip?.kind === 'melody' || clip?.kind === 'bass') {
+    } else if (clip && isInstrumentTrackId(clip.kind)) {
       this.session.setInstrumentClipPattern(clip.kind, clip.id, patternId);
     }
   }
@@ -402,7 +458,7 @@ export class StudioPageComponent implements LeaveConfirmation {
     const clip = this.selection();
     if (clip?.kind === 'drum') {
       this.session.resizeDrumClip(clip.id, deltaBars);
-    } else if (clip?.kind === 'melody' || clip?.kind === 'bass') {
+    } else if (clip && isInstrumentTrackId(clip.kind)) {
       this.session.resizeInstrumentClip(clip.kind, clip.id, deltaBars);
     }
   }
@@ -411,7 +467,7 @@ export class StudioPageComponent implements LeaveConfirmation {
     const clip = this.selection();
     if (clip?.kind === 'drum') {
       this.session.removeDrumClip(clip.id);
-    } else if (clip?.kind === 'melody' || clip?.kind === 'bass') {
+    } else if (clip && isInstrumentTrackId(clip.kind)) {
       this.session.removeInstrumentClip(clip.kind, clip.id);
     } else {
       return;
@@ -555,7 +611,17 @@ export class StudioPageComponent implements LeaveConfirmation {
   }
 
   zoom(direction: 'in' | 'out'): void {
+    const firstBar = this.firstVisibleBar();
     this.zoomIndex.update(index => Math.min(ZOOM_LEVELS.length - 1, Math.max(0, index + (direction === 'in' ? -1 : 1))));
+    this.setTimelineStart(firstBar);
+  }
+
+  setTimelineStart(bar: number): void {
+    if (Number.isFinite(bar)) this.requestedFirstBar.set(Math.max(0, Math.min(this.lastFirstBar(), Math.round(bar))));
+  }
+
+  onTimelineScroll(event: Event): void {
+    this.setTimelineStart((event.target as HTMLInputElement).valueAsNumber);
   }
 
   onInstrumentalSelected(event: Event): void {

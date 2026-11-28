@@ -100,6 +100,7 @@ export class StudioProjectService {
     const loaded = this.session.instrumental();
     const bpm = this.session.bpm();
     return {
+      instrumentTracks: this.session.instrumentTracks(),
       vocalTracks: this.session.vocalTracks(),
       armedVocalTrackId: this.session.armedVocalTrackId(),
       corrections: Object.values(this.correctionRefs()).map(ref => ({ ...ref, enabled: this.session.enabledCorrections()[ref.takeId] === true })),
@@ -598,6 +599,9 @@ export class StudioProjectService {
     this.session.projectKey.set(state.key);
     this.session.loadPatterns(state.patterns);
     this.session.loadMelodicPatterns(state.melodicPatterns);
+    this.session.instrumentTracks.set(state.instrumentTracks);
+    this.session.selectedInstrumentTrackId.set(null);
+    this.session.instrumentPickerTarget.set(null);
     this.session.mixer.set(state.mixer);
     this.session.masterVolume.set(state.masterVolume);
     this.session.loadArrangement(state.drumClips, state.instrumentalStartBeat, state.instrumentClips);

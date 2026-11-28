@@ -3,10 +3,10 @@ import type { LyricsLine, ProjectLyrics } from './lyrics.model';
 
 /**
  * Version du format de sauvegarde comprise par ce studio (voir « Contrat d'API »).
- * v3 (#64) : prises et réglages vocaux par piste, piste armée. Les projets v1/v2
- * restent lisibles et passent en v3 à leur prochaine sauvegarde.
+ * v4 (#68) : pistes d'instruments personnalisées. Les projets v1 à v3
+ * restent lisibles et passent en v4 à leur prochaine sauvegarde.
  */
-export const PROJECT_FORMAT_VERSION = 3;
+export const PROJECT_FORMAT_VERSION = 4;
 export const PROJECT_TITLE_MAX_LENGTH = 80;
 
 export type ProjectOrigin = 'create' | 'import';

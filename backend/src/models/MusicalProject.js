@@ -8,7 +8,8 @@ import { analyzeLyrics } from "../services/lyrics-analysis.js";
  * (réglages de correction vocale et styles personnels, M9) et la version
  * corrigée d'une prise (`clips[].correction`). La version 3 héberge la correction
  * à l'échelle de chaque piste vocale et la piste armée. Les anciens projets
- * restent lisibles et passent en v3 à leur prochaine sauvegarde.
+ * restent lisibles. La version 4 (#68) permet de sauvegarder les pistes
+ * d'instruments personnalisées en plus des pistes historiques.
  *
  * Unités : positions et durées des clips en temps (beats), pour qu'un
  * changement de BPM conserve l'arrangement ; décalage dans un fichier audio
@@ -19,9 +20,9 @@ import { analyzeLyrics } from "../services/lyrics-analysis.js";
  * document Track (audioFileId) dont le fichier reste sur le disque.
  */
 
-export const PROJECT_FORMAT_VERSION = 3;
+export const PROJECT_FORMAT_VERSION = 4;
 /** Versions que ce serveur sait relire (et réécrire dans la version courante). */
-export const SUPPORTED_FORMAT_VERSIONS = Object.freeze([1, 2, 3]);
+export const SUPPORTED_FORMAT_VERSIONS = Object.freeze([1, 2, 3, 4]);
 export const PROJECT_LIMITS = Object.freeze({
   titleMaxLength: 80,
   minBpm: 60,
@@ -393,6 +394,12 @@ schema.pre("validate", function () {
   if (this.tracks.some(track => track.vocal && track.type !== "vocal") ||
       vocalTracks.some(track => track.clips.some(clip => !clip.audioFileId))) {
     this.invalidate("tracks", "Une piste vocale contient des prises audio et ses propres réglages vocaux");
+  }
+  const instruments = this.tracks.filter(track => typeof track.id === "string" && track.id.startsWith("inst-"));
+  const melodicIds = new Set((this.patterns ?? []).filter(pattern => pattern?.instrument).map(pattern => pattern.id));
+  if (instruments.some(track => !/^inst-[A-Za-z0-9_-]{1,59}$/.test(track.id) || track.type !== "instrument" ||
+      track.clips.some(clip => !melodicIds.has(clip.patternId)))) {
+    this.invalidate("tracks", "Une piste d'instrument personnalisée contient uniquement des clips de parties mélodiques");
   }
 });
 

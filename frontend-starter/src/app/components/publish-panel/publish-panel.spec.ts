@@ -6,6 +6,7 @@ import { provideRouter } from '@angular/router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PublishPanelComponent, publishErrorMessage } from './publish-panel';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
+import { DEFAULT_INSTRUMENT_TRACKS } from '../../shared/audio/studio-tracks';
 import { StudioProjectService } from '../../shared/services/studio-project.service';
 import { PUBLICATION_LIMITS } from '../../shared/models/publication.model';
 
@@ -16,6 +17,7 @@ describe('PublishPanelComponent', () => {
   const content = signal<string[]>(['drums']);
   const renderWav = vi.fn();
   const session = {
+    instrumentTracks: signal(DEFAULT_INSTRUMENT_TRACKS),
     exportPlan: computed(() => ({ ok: planOk() })),
     tracksWithContent: content,
     exportProgress: signal<number | null>(null),

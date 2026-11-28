@@ -26,3 +26,4 @@ small { display: block; min-height: 1em; font-size: 12px; }
 progress { width: 100%; max-width: 320px; }
 .retry { margin-left: 8px; }
 .success { margin-top: 12px; }
+.facts .hint { margin-left: 6px; }

@@ -56,6 +56,7 @@ import {
 import { InputDevice, MicrophoneRecorder, describeMicrophoneError, takeStartSeconds, toInputDevices } from './microphone-recorder';
 import { DEFAULT_BPM, STEPS_PER_BAR, STEPS_PER_BEAT, isValidBpm, stepDurationSeconds } from './music-time';
 import { renderMix } from './offline-render';
+import { tracksWithContent } from './track-content';
 import { MixLevels } from './mixer-graph';
 import { PatternTransport, TrackClip } from './pattern-transport';
 import { NOTE_NAMES, SCALE_LABELS, midiToFrequency } from './pitch/musical-scale';
@@ -1216,6 +1217,18 @@ export class StudioSessionService implements OnDestroy {
     this.lastClipAt = 0;
     this.inputLevel.set(SILENT_LEVEL);
   }
+
+  /** Pistes qui contiennent du son (#80) : il en faut au moins une pour publier. */
+  readonly tracksWithContent = computed(() =>
+    tracksWithContent({
+      drumClips: this.drumClips(),
+      drumPatterns: this.patterns(),
+      instrumentClips: this.instrumentClips(),
+      melodicPatterns: this.melodicPatterns(),
+      hasInstrumental: this.instrumental() !== null,
+      hasTake: this.take() !== null,
+    }),
+  );
 
   /** Durée du morceau à exporter : tous les clips placés, durée réelle des fichiers et traîne des effets. */
   readonly exportPlan = computed(() => {

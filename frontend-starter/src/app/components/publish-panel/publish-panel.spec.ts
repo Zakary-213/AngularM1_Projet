@@ -13,9 +13,11 @@ describe('PublishPanelComponent', () => {
   let http: HttpTestingController;
   const saveState = signal<string>('saved');
   const planOk = signal(true);
+  const content = signal<string[]>(['drums']);
   const renderWav = vi.fn();
   const session = {
     exportPlan: computed(() => ({ ok: planOk() })),
+    tracksWithContent: content,
     exportProgress: signal<number | null>(null),
     exportError: signal<string | null>(null),
     exportReport: signal<unknown>(null),
@@ -31,6 +33,7 @@ describe('PublishPanelComponent', () => {
   beforeEach(() => {
     saveState.set('saved');
     planOk.set(true);
+    content.set(['drums']);
     renderWav.mockReset();
     renderWav.mockResolvedValue({ wav: new Blob(['RIFF'], { type: 'audio/wav' }), report: {} });
     TestBed.configureTestingModule({
@@ -58,6 +61,15 @@ describe('PublishPanelComponent', () => {
     expect(component.form.controls.title.value).toBe('Minuit');
   });
 
+  it('une seule piste avec du son suffit, sans instrumentale, et elle est annoncée', () => {
+    content.set(['melody']);
+    const { component, root } = render();
+    expect(component.blocker()).toBeNull();
+    expect(root.textContent).toContain('Pistes publiées : Mélodie');
+    content.set(['voice', 'bass']);
+    expect(component.publishedTracks()).toBe('Voix, Basse');
+  });
+
   it('bloque la publication d’un projet non sauvegardé ou vide', () => {
     const { component, fixture, root } = render();
     saveState.set('dirty');
@@ -65,8 +77,8 @@ describe('PublishPanelComponent', () => {
     expect(component.blocker()).toContain('Sauvegardez');
     expect(root.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled).toBe(true);
     saveState.set('saved');
-    planOk.set(false);
-    expect(component.blocker()).toContain('Rien à publier');
+    content.set([]);
+    expect(component.blocker()).toContain('au moins une piste avec du son');
   });
 
   it('rend le mix puis l’envoie avec le titre saisi et le projet ouvert', async () => {

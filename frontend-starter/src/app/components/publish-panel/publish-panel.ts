@@ -4,6 +4,7 @@ import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angula
 import { RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { StudioSessionService } from '../../shared/audio/studio-session.service';
+import { CONTENT_TRACK_LABELS } from '../../shared/audio/track-content';
 import { PUBLICATION_LIMITS, Publication } from '../../shared/models/publication.model';
 import { PublicationService } from '../../shared/services/publication.service';
 import { StudioProjectService } from '../../shared/services/studio-project.service';
@@ -59,9 +60,14 @@ export class PublishPanelComponent {
     if (!this.studioProject.project()) return 'Ouvrez un projet sauvegardé pour publier.';
     if (save === 'conflict') return 'Réglez d’abord le conflit de sauvegarde.';
     if (save !== 'saved') return 'Sauvegardez le projet avant de le publier.';
-    if (!this.session.exportPlan().ok) return 'Rien à publier : placez un clip, une instrumentale ou une prise sur la timeline.';
+    if (this.session.tracksWithContent().length === 0) {
+      return 'Rien à publier : il faut au moins une piste avec du son (un rythme de batterie, des notes de mélodie ou de basse, une instrumentale ou une prise de voix).';
+    }
     return null;
   });
+
+  /** Pistes qui seront entendues dans le morceau publié, en clair. */
+  readonly publishedTracks = computed(() => this.session.tracksWithContent().map(track => CONTENT_TRACK_LABELS[track]).join(', '));
 
   readonly form = new FormGroup({
     title: new FormControl('', { nonNullable: true, validators: [Validators.required, Validators.maxLength(PUBLICATION_LIMITS.titleMaxLength), Validators.pattern(/\S/)] }),

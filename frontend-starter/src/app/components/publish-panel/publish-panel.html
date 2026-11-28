@@ -34,6 +34,9 @@
         </label>
         <small id="publish-description-count" class="muted">{{ form.controls.description.value.length }} / {{ limits.descriptionMaxLength }} caractères</small>
 
+        @if (publishedTracks(); as tracks) {
+          <p class="facts">Pistes publiées : <b>{{ tracks }}</b> <span class="muted hint">(les pistes muettes dans le mixeur restent silencieuses)</span></p>
+        }
         <p class="muted facts">Tempo et tonalité du projet sauvegardé · WAV stéréo 16 bits · {{ maxMegabytes }} Mo maximum (environ 5 min 50 s).</p>
 
         @if (blocker(); as reason) {

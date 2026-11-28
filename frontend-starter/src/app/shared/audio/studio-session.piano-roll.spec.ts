@@ -116,4 +116,27 @@ describe('StudioSessionService — Piano Roll et pistes d’instruments (M4)', (
     }
     expect(session.addInstrument('flute')).toBeNull();
   });
+
+  it('copie une phrase d’une partie et la colle dans une autre (presse-papiers partagé)', () => {
+    const guitar = session.addInstrument('acousticGuitar')!;
+    const first = session.addNote(52, 0, 4) as { id: string };
+    const second = session.addNote(55, 4, 4) as { id: string };
+    expect(session.copyNotes(new Set([first.id, second.id]))).toBe(2);
+    const strings = session.addInstrument('strings')!;
+    expect(session.editedMelodicPattern().id).toBe(strings.patternId);
+    const pasted = session.pasteNotes(0)!;
+    expect(pasted.ids).toHaveLength(2);
+    expect(session.editedMelodicPattern().notes.map(n => [n.pitch, n.startStep])).toEqual([[52, 0], [55, 4]]);
+    expect(session.melodicPatterns().find(p => p.id === guitar.patternId)!.notes).toHaveLength(2);
+  });
+
+  it('déplace et supprime plusieurs notes à la fois', () => {
+    const a = session.addNote(60, 0, 4) as { id: string };
+    const b = session.addNote(64, 0, 4) as { id: string };
+    const ids = new Set([a.id, b.id]);
+    session.moveNotes(ids, 4, 12);
+    expect(session.editedMelodicPattern().notes.map(n => [n.pitch, n.startStep])).toEqual([[72, 4], [76, 4]]);
+    session.removeNotes(ids);
+    expect(session.editedMelodicPattern().notes).toEqual([]);
+  });
 });

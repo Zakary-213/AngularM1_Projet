@@ -136,3 +136,13 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px s
 @media (prefers-reduced-motion: reduce) {
   .note { transition: none; }
 }
+
+/* Sélection multiple (#77) */
+.selection-status { min-width: 12ch; }
+.lasso {
+  position: absolute;
+  z-index: 3;
+  border: 1px dashed #f5a623;
+  background: rgb(245 166 35 / 12%);
+  pointer-events: none;
+}

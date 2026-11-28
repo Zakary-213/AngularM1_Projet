@@ -213,6 +213,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [x] Permettre la lecture immédiate et en boucle de la mélodie. *(note entendue à la pose, « Écouter en boucle », modifications entendues pendant la lecture)*
 - [x] Associer chaque pattern à son instrument, son son et ses paramètres. *(instrument, brillance, relâchement, longueur de 1, 2 ou 4 mesures)*
 - [x] Enregistrer les notes, durées et vélocités (données de type MIDI). *(sauvegardées avec le projet et validées par le serveur)*
+- [x] Jouer les instruments en direct au clavier PC, au piano à l’écran et via Web MIDI (#83). *(MIDI vérifié avec deux entrées simulées.)*
 
 > Vérifié par les tests, l'analyse de l'export WAV et la programmation des notes dans le navigateur ; la qualité sonore et la synchronisation **à l'oreille** restent à confirmer par l'équipe.
 

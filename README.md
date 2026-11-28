@@ -413,6 +413,14 @@ Règles : l'auteur vient du JWT, jamais du corps ; seuls `projectId`, `title` et
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
 
+### 28 novembre 2026 — Jeu d’instruments en direct (M4, #83)
+
+- Dans le studio, l’onglet **Jouer en direct** propose les 12 instruments, un volume dédié et un clavier à l’écran de deux octaves jouables à la souris ou au toucher. Choisir un instrument rend immédiatement le clavier du PC jouable sur l’octave marquée. Le réglage AZERTY ou QWERTY adapte les indications. Page ↑ / ↓ change d’octave, ainsi que les flèches ↑ / ↓ lorsque le piano a le focus. Les champs de saisie conservent le clavier.
+- Les appuis à l’écran, au clavier PC et en MIDI utilisent le même moteur de synthèse que la lecture et l’export. Les notes se déclenchent sur l’horloge Web Audio. Le relâchement d’une touche ne coupe que sa voix. La perte de focus, le changement d’instrument et la fermeture du panneau coupent les notes tenues.
+- Le bouton **Brancher un clavier MIDI** demande l’accès au clic. Le périphérique sélectionné transmet la hauteur et la vélocité. En cas de débranchement, les notes MIDI sont coupées et la liste des entrées est actualisée.
+- `npm test` frontend réussi (390 tests) et build Angular réussi. Dans Chromium, contrôle du jeu dès la sélection de l’instrument, d’une note tenue et relâchée, des réglages, des raccourcis d’octave et de la fermeture du panneau. Les touches font au moins 24 px à 360 px de large. Le panneau reste utilisable à 640, 768 et 1280 px. Les tests simulent les accords, le tactile multi-doigts et deux entrées MIDI avec changement de périphérique et débranchement.
+- Latence relevée dans ce navigateur. La préparation a pris 46,8 ms au premier déclenchement, puis 0,2 à 0,4 ms sur cinq frappes à chaud. Le navigateur estimait alors le délai du chemin de sortie audio à 50 ms. L’écoute au casque, le zoom navigateur réel à 200 % et l’essai avec un appareil MIDI physique restent à vérifier.
+
 ### 28 novembre 2026 — Navigation dans la forme d’onde de l’instrumentale (M6, #69)
 
 - Un clic sur l’onde place la tête au pas de double-croche le plus proche dans la portion affichée. Le calcul tient compte du début du clip, du défilement, du zoom et du BPM. En lecture, le transport repart de la nouvelle position.

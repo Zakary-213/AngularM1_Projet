@@ -1,0 +1,93 @@
+<section class="live-panel" aria-labelledby="live-instrument-heading">
+  <h2 id="live-instrument-heading">Jouer en direct</h2>
+  <div class="live-controls">
+    <div class="live-field instrument-field">
+      <span>Instrument joué</span>
+      <details #instrumentPicker class="instrument-picker" (focusout)="onInstrumentPickerFocusOut($event)"
+        (keydown.escape)="instrumentPicker.open = false; instrumentToggle.focus()">
+        <summary #instrumentToggle [attr.aria-label]="'Instrument joué · ' + instrumentName()">{{ instrumentName() }}</summary>
+        <div class="instrument-options">
+          @for (group of instrumentGroups; track group.label) {
+            <div role="group" [attr.aria-label]="group.label">
+              <span aria-hidden="true">{{ group.label }}</span>
+              @for (option of group.instruments; track option.id) {
+                <button type="button" [attr.aria-pressed]="option.id === live.instrument()"
+                  (click)="selectInstrument(option.id)">{{ option.label }}</button>
+              }
+            </div>
+          }
+        </div>
+      </details>
+    </div>
+    <label class="live-field">
+      <span>Volume du jeu <output>{{ volumePercent() }} %</output></span>
+      <input #volume type="range" min="0" max="100" [value]="volumePercent()" (input)="live.setVolume(volume.valueAsNumber / 100)" />
+    </label>
+    <label class="live-field">
+      <span>Disposition du clavier PC</span>
+      <select #keyboardLayout (change)="selectLayout(keyboardLayout.value)">
+        <option>AZERTY</option>
+        <option>QWERTY</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="piano-toolbar">
+    <div class="octave-controls" role="group" aria-label="Octave du clavier">
+      <button type="button" aria-label="Descendre d’une octave" [disabled]="!canLower()" (click)="changeOctave(-1)">−</button>
+      <output aria-label="Plage de notes">{{ noteRange() }}</output>
+      <button type="button" aria-label="Monter d’une octave" [disabled]="!canRaise()" (click)="changeOctave(1)">+</button>
+    </div>
+    <p id="live-keyboard-help">Cliquez sur les deux octaves ou jouez les lettres affichées. Quand le piano a le focus, ↑ et ↓ changent d’octave. Page ↑ et Page ↓ fonctionnent aussi.</p>
+  </div>
+
+  <div #piano class="live-piano" role="group" tabindex="-1" aria-label="Piano à l’écran" aria-describedby="live-keyboard-help">
+    @for (octave of octaves(); track $index) {
+      <div class="piano-octave">
+        @for (note of octave; track note.pitch) {
+          <button type="button" class="piano-key" [class.black]="!note.white" [style.--key-position]="note.left + '%'"
+            [disabled]="!note.enabled" [attr.aria-label]="note.name + (note.label ? ', touche ' + note.label : '')"
+            [attr.aria-pressed]="live.activePitches().has(note.pitch)"
+            (pointerdown)="pointerDown($event, note.pitch)" (pointerup)="pointerUp($event)"
+            (pointercancel)="pointerUp($event)" (lostpointercapture)="pointerUp($event)"
+            (click)="activateKey($event, note.pitch)">
+            <span aria-hidden="true">{{ note.name }}</span>
+            @if (note.label) { <kbd aria-hidden="true">{{ note.label }}</kbd> }
+          </button>
+        }
+      </div>
+    }
+  </div>
+
+  @if (live.error(); as message) { <p class="error" role="alert">{{ message }}</p> }
+
+  <div class="midi-controls">
+    @if (!midi.supported) {
+      <p>Le MIDI est indisponible ici. Le piano à l’écran et le clavier du PC restent utilisables.</p>
+    } @else if (!midi.connected()) {
+      <button type="button" [disabled]="midi.requesting()" (click)="midi.connect()">
+        {{ midi.requesting() ? 'Connexion MIDI…' : 'Brancher un clavier MIDI' }}
+      </button>
+    } @else if (midi.inputs().length) {
+      <label class="live-field">
+        Entrée MIDI
+        <select #input (change)="midi.select(input.value)">
+          <option value="" [selected]="!midi.inputId()">Choisir un clavier</option>
+          @for (port of midi.inputs(); track port.id) {
+            <option [value]="port.id" [selected]="port.id === midi.inputId()">{{ port.name || 'Clavier MIDI' }}</option>
+          }
+        </select>
+      </label>
+    } @else {
+      <p role="status">Aucun clavier MIDI détecté. Branchez-le pour le voir apparaître ici.</p>
+    }
+    @if (midi.error(); as message) { <p class="error" role="alert">{{ message }}</p> }
+  </div>
+
+  @if (live.timing(); as timing) {
+    <details class="audio-timing">
+      <summary>Temps de réponse audio</summary>
+      <p>Préparation de la dernière note {{ timing.schedulingMs.toFixed(1) }} ms. Sortie audio estimée {{ timing.outputMs > 0 ? timing.outputMs.toFixed(1) + ' ms' : 'indisponible' }}.</p>
+    </details>
+  }
+</section>

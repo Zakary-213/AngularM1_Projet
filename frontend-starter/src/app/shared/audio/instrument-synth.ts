@@ -130,13 +130,11 @@ export function filterCutoffHz(instrument: InstrumentId, frequencyHz: number, to
   return Math.min(MAX_FILTER_HZ, frequencyHz * (min + tone * span));
 }
 
-function applyEnvelope(gain: AudioParam, time: number, durationSeconds: number, envelope: NoteEnvelope, peak: number): void {
+function attackNote(gain: AudioParam, time: number, envelope: NoteEnvelope, peak: number): void {
   const attackEnd = time + envelope.attackSeconds;
-  const releaseStart = time + Math.max(durationSeconds, envelope.attackSeconds);
   gain.setValueAtTime(0, time);
   gain.linearRampToValueAtTime(peak, attackEnd);
   gain.setTargetAtTime(peak * envelope.sustainLevel, attackEnd, envelope.decaySeconds);
-  gain.setTargetAtTime(0, releaseStart, envelope.releaseSeconds / RELEASE_TIME_CONSTANTS);
 }
 
 /* ---------- Corde pincée (Karplus-Strong) ---------- */
@@ -406,30 +404,77 @@ function buildVoice(voice: VoiceContext): Source[] {
   }
 }
 
-/**
- * Joue la note MIDI `pitch` à la date `time` (horloge du contexte), pendant
- * `durationSeconds`, puis la relâche. `velocity` (0 à 1) règle le gain linéaire.
- */
-export function playInstrumentNote(
+function startNoteVoice(
   context: BaseAudioContext,
   output: AudioNode,
   instrument: InstrumentId,
   pitch: number,
   time: number,
-  durationSeconds: number,
   velocity: number,
   params: InstrumentParams,
-): void {
+) {
   const frequency = midiToFrequency(pitch);
   const envelope = noteEnvelope(instrument, params);
-  const stopAt = noteStopTime(time, durationSeconds, envelope);
+  const peak = envelope.peakGain * Math.min(1, Math.max(0, velocity));
   const amp = context.createGain();
-  applyEnvelope(amp.gain, time, durationSeconds, envelope, envelope.peakGain * Math.min(1, Math.max(0, velocity)));
+  attackNote(amp.gain, time, envelope, peak);
   amp.connect(output);
 
   const sources = buildVoice({ context, instrument, frequency, time, params, amp });
-  sources.forEach(source => {
-    source.start(time);
-    source.stop(stopAt);
-  });
+  sources.forEach(source => source.start(time));
+  return { amp, sources, peak, envelope };
+}
+
+/** Joue une note programmée pour la lecture, la préécoute ou l'export. */
+export function playInstrumentNote(
+  context: BaseAudioContext, output: AudioNode, instrument: InstrumentId, pitch: number,
+  time: number, durationSeconds: number, velocity: number, params: InstrumentParams,
+): void {
+  const { amp, sources, envelope } = startNoteVoice(context, output, instrument, pitch, time, velocity, params);
+  const releaseStart = time + Math.max(durationSeconds, envelope.attackSeconds);
+  amp.gain.setTargetAtTime(0, releaseStart, envelope.releaseSeconds / RELEASE_TIME_CONSTANTS);
+  const stopAt = noteStopTime(time, durationSeconds, envelope);
+  sources.forEach(source => source.stop(stopAt));
+}
+
+export interface HeldInstrumentNote {
+  release(fast?: boolean): void;
+}
+
+/** Joue la même voix avec une durée déterminée au relâchement de la touche. */
+export function startHeldInstrumentNote(
+  context: BaseAudioContext, output: AudioNode, instrument: InstrumentId, pitch: number,
+  velocity: number, params: InstrumentParams,
+): HeldInstrumentNote {
+  const start = context.currentTime;
+  const { amp, sources, peak, envelope } = startNoteVoice(context, output, instrument, pitch, start, velocity, params);
+  let remaining = sources.length;
+  for (const source of sources) {
+    source.addEventListener('ended', () => {
+      source.disconnect();
+      remaining--;
+      if (remaining === 0) amp.disconnect();
+    }, { once: true });
+  }
+
+  let released = false;
+  const release = (fast = false): void => {
+    if (released || remaining === 0) return;
+    released = true;
+    const now = context.currentTime;
+    const heldSeconds = now - start;
+    const sustain = peak * envelope.sustainLevel;
+    amp.gain.cancelScheduledValues(now);
+    // Un appui bref peut se terminer avant le pic, notamment avec les nappes.
+    if (heldSeconds < envelope.attackSeconds) {
+      amp.gain.linearRampToValueAtTime(peak * heldSeconds / envelope.attackSeconds, now);
+    } else {
+      const level = sustain + (peak - sustain) * Math.exp((envelope.attackSeconds - heldSeconds) / envelope.decaySeconds);
+      amp.gain.setValueAtTime(level, now);
+    }
+    const releaseSeconds = fast ? 0.02 : envelope.releaseSeconds;
+    amp.gain.setTargetAtTime(0, now, releaseSeconds / RELEASE_TIME_CONSTANTS);
+    sources.forEach(source => source.stop(now + releaseSeconds));
+  };
+  return { release };
 }

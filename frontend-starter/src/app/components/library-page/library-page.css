@@ -1,1 +1,39 @@
 :host { display: block; min-width: 0; }
+
+/* Les cartes de catégorie sont des boutons de filtre. */
+.sound-category {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.sound-category:hover { border-color: #555; }
+.sound-category.selected { border-color: #f5a623; box-shadow: inset 0 0 0 1px #f5a623; }
+.sound-category:focus-visible, .icon-button:focus-visible, .library-search input:focus-visible {
+  outline: 2px solid #f5a623;
+  outline-offset: 2px;
+}
+
+.library-toolbar { flex-wrap: wrap; gap: 12px; }
+.library-search input { min-height: 44px; width: min(280px, 100%); }
+.library-search { flex: 0 1 280px; min-width: 0; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+.file-row > div { min-width: 0; }
+.file-detail { width: auto; margin-left: auto; text-align: right; }
+.icon-button.playing { background: #f5a623; color: #111; border-color: #f5a623; }
+
+.error { color: #ff8a80; font-size: 12px; }
+
+.library-empty { padding: 24px 0; display: grid; gap: 12px; justify-items: start; }
+.library-empty p { margin: 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .sound-category { transition: border-color 0.15s; }
+}

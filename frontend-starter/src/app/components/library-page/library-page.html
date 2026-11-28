@@ -1,3 +1,67 @@
-<section class="page-heading"><div><p class="eyebrow">LA MATIÈRE PREMIÈRE</p><h1>Bibliothèque<span>.</span></h1><p>Des textures, des rythmes et de quoi trouver l’inspiration.</p></div><button disabled>↥ Importer un fichier</button></section>
-<div class="category-grid"><article class="sound-category lime"><span>▦</span><h2>Drums & percussions</h2><p>Le rythme avant tout</p></article><article class="sound-category purple"><span>♬</span><h2>Instruments</h2><p>Donnez vie à vos mélodies</p></article><article class="sound-category peach"><span>≋</span><h2>Samples & textures</h2><p>La couleur de votre son</p></article></div>
-<div class="section-heading"><h2>Collection de sons</h2><span class="muted">Aperçu de la bibliothèque</span></div><section class="panel file-list">@for (sound of sounds; track sound.name) {<div class="file-row"><span class="file-icon">{{ sound.icon }}</span><div><h3>{{ sound.name }}</h3><p>{{ sound.type }}</p></div><div class="mini-wave" aria-hidden="true"></div><span class="file-detail">{{ sound.detail }}</span><button class="icon-button" disabled [attr.aria-label]="'Préécouter ' + sound.name">▷</button></div>}</section>
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">LA MATIÈRE PREMIÈRE</p>
+    <h1>Bibliothèque<span>.</span></h1>
+    <p>Les sons du studio : écoutez-les ici, puis utilisez-les dans un projet.</p>
+  </div>
+  <a class="button primary" routerLink="/projects">Utiliser dans un projet</a>
+</section>
+
+<div class="category-grid" role="group" aria-label="Filtrer par catégorie">
+  @for (category of categories; track category) {
+    <button
+      type="button"
+      class="sound-category {{ categoryInfo[category].color }}"
+      [class.selected]="selectedCategory() === category"
+      [attr.aria-pressed]="selectedCategory() === category"
+      (click)="toggleCategory(category)"
+    >
+      <span aria-hidden="true">{{ categoryInfo[category].icon }}</span>
+      <h2>{{ categoryInfo[category].label }}</h2>
+      <p>{{ categoryInfo[category].tagline }} · {{ counts[category] }} son{{ counts[category] > 1 ? 's' : '' }}</p>
+    </button>
+  }
+</div>
+
+<div class="section-heading library-toolbar">
+  <h2>Collection de sons</h2>
+  <label class="library-search">
+    <span class="visually-hidden">Rechercher un son</span>
+    <input type="search" [formControl]="search" [maxlength]="searchMaxLength" placeholder="Rechercher (kick, piano…)" />
+  </label>
+</div>
+
+@if (previewError(); as error) {
+  <p class="error" role="alert">{{ error }}</p>
+}
+
+<p class="visually-hidden" role="status">{{ sounds().length }} son{{ sounds().length > 1 ? "s" : "" }} affiché{{ sounds().length > 1 ? "s" : "" }}</p>
+
+<section class="panel file-list">
+  @for (sound of sounds(); track sound.id) {
+    <div class="file-row">
+      <span class="file-icon" aria-hidden="true">{{ categoryInfo[sound.category].icon }}</span>
+      <div>
+        <h3>{{ sound.name }}</h3>
+        <p>{{ sound.description }}</p>
+      </div>
+      <span class="file-detail">{{ categoryInfo[sound.category].whereInStudio }}</span>
+      <button
+        type="button"
+        class="icon-button"
+        [class.playing]="playingId() === sound.id"
+        [attr.aria-label]="(playingId() === sound.id ? 'Lecture en cours : ' : 'Préécouter ') + sound.name"
+        (click)="preview(sound)"
+      >{{ playingId() === sound.id ? '♪' : '▷' }}</button>
+    </div>
+  } @empty {
+    <div class="library-empty">
+      @if (selectedCategory() === 'samples' && search.value === '') {
+        <p>Pas encore de samples intégrés. Importez votre propre instrumentale MP3 ou WAV depuis le studio.</p>
+      } @else {
+        <p>Aucun son ne correspond à cette recherche.</p>
+      }
+      <button type="button" (click)="clearFilters()">Afficher tous les sons</button>
+    </div>
+  }
+</section>

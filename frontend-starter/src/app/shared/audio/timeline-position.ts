@@ -1,4 +1,4 @@
-import { STEPS_PER_BAR, STEPS_PER_BEAT } from './music-time';
+import { STEPS_PER_BAR, STEPS_PER_BEAT, stepDurationSeconds } from './music-time';
 
 /**
  * Positions sur la timeline, en pas absolus (doubles-croches depuis le début du
@@ -20,6 +20,12 @@ export function clampSongStep(step: number, limit = MAX_SONG_STEPS): number {
 export function stepFromFraction(fraction: number, visibleBars: number, firstBar = 0, limit = MAX_SONG_STEPS): number {
   const raw = (firstBar + Math.min(1, Math.max(0, fraction)) * visibleBars) * STEPS_PER_BAR;
   return clampSongStep(Math.round(raw / STEPS_PER_BEAT) * STEPS_PER_BEAT, limit);
+}
+
+/** Pas le plus proche du clic dans une portion de forme d'onde, dont les bornes sont en secondes du morceau. */
+export function stepFromWaveformFraction(fraction: number, fromSeconds: number, toSeconds: number, bpm: number): number {
+  const seconds = fromSeconds + Math.min(1, Math.max(0, fraction)) * (toSeconds - fromSeconds);
+  return Math.round(seconds / stepDurationSeconds(bpm));
 }
 
 export type PositionKey = 'ArrowLeft' | 'ArrowRight' | 'PageUp' | 'PageDown' | 'Home' | 'End';

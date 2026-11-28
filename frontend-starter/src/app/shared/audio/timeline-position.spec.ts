@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_SONG_STEPS, clampSongStep, describePosition, loopStepRange, stepAfterKey, stepFromFraction, validateLoopBars } from './timeline-position';
+import { MAX_SONG_STEPS, clampSongStep, describePosition, loopStepRange, stepAfterKey, stepFromFraction, stepFromWaveformFraction, validateLoopBars } from './timeline-position';
 import { collectDueSteps } from './step-scheduler';
 
 describe('position sur la timeline', () => {
@@ -8,6 +8,18 @@ describe('position sur la timeline', () => {
     expect(stepFromFraction(0.5, 16)).toBe(128); // milieu de 16 mesures = mesure 9
     expect(stepFromFraction(0.51, 16)).toBe(132); // arrondi au temps suivant
     expect(stepFromFraction(1.4, 8)).toBe(128); // clic hors de la piste : borné
+  });
+
+  it.each([
+    { fraction: 0.5, from: 6, to: 32, bpm: 120, step: 152 },
+    { fraction: 0.25, from: 64, to: 128, bpm: 120, step: 640 },
+    { fraction: 0.25, from: 64, to: 80, bpm: 120, step: 544 },
+    { fraction: 0.5, from: 2, to: 6, bpm: 90, step: 24 },
+    { fraction: 0.25, from: 2, to: 3, bpm: 120, step: 18 },
+    { fraction: -0.1, from: 6, to: 32, bpm: 120, step: 48 },
+    { fraction: 1.1, from: 256, to: 264, bpm: 120, step: 2112 },
+  ])('convertit la fraction $fraction de la portion $from–$to s à $bpm BPM en pas $step', ({ fraction, from, to, bpm, step }) => {
+    expect(stepFromWaveformFraction(fraction, from, to, bpm)).toBe(step);
   });
 
   it('déplace la position au clavier', () => {

@@ -250,7 +250,7 @@ Les données de projet sont stockées en base. **Les octets des MP3/WAV/enregist
 - [x] Uploader via une API protégée et afficher la progression.
 - [x] Conserver le fichier et ses métadonnées dans le stockage.
 - [x] Créer automatiquement une piste **Instrumentale** sur la timeline.
-- [ ] Afficher une **forme d'onde**, écouter, naviguer et régler le niveau sonore. *(forme d'onde, écoute et niveau faits ; navigation par clic sur la timeline restante)*
+- [x] Afficher une **forme d'onde**, écouter, naviguer et régler le niveau sonore. *(clic sur l’onde ou sur la règle, flèches pour déplacer la tête de lecture)*
 - [x] Ajouter un égaliseur **graves / médiums / aigus** sur la piste importée.
 - [x] Sauvegarder la position et les réglages de la piste.
 - [x] Autoriser l'ajout ultérieur de pistes vocales dans le même projet.

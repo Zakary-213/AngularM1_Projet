@@ -186,7 +186,7 @@
     </div>
     <div class="timeline-scroll">
       <div class="timeline-inner">
-        <div class="timeline-ruler" role="slider" tabindex="0" aria-label="Position de lecture" aria-describedby="ruler-help"
+        <div #timelineRuler class="timeline-ruler" role="slider" tabindex="0" aria-label="Position de lecture" aria-describedby="ruler-help"
           aria-valuemin="0" [attr.aria-valuemax]="session.navigationEndStep()" [attr.aria-valuenow]="session.songStep()" [attr.aria-valuetext]="positionText()"
           (click)="onTimelineClick($event)" (keydown)="onRulerKey($event)">
           <span>PISTES · {{ tracks().length }}</span>
@@ -195,7 +195,7 @@
           }
           @if (loopBand(); as band) { <span class="loop-band" [style.left]="rulerOffset(band.left)" [style.width]="rulerWidth(band.width)" aria-hidden="true"></span> }
         </div>
-        <p id="ruler-help" class="visually-hidden">Cliquez sur la règle ou une piste pour vous placer. Au clavier : flèches pour un temps, Page précédente et suivante pour une mesure, Début et Fin.</p>
+        <p id="ruler-help" class="visually-hidden">Cliquez sur la règle ou sur la forme d’onde de l’instrumentale pour vous placer. Au clavier : flèches pour un temps, Page précédente et suivante pour une mesure, Début et Fin.</p>
         @for (track of tracks(); track track.id) {
           <div class="timeline-row">
             <div class="track-label">
@@ -215,10 +215,10 @@
               @if (loopBand(); as band) { <span class="loop-band" [style.left.%]="band.left" [style.width.%]="band.width" aria-hidden="true"></span> }
               @for (clip of track.clips; track clip.kind + clip.id) {
                 <button type="button" [class]="'audio-clip timeline-clip ' + track.className" [class.is-muted]="track.mix.muted"
-                  [class.selected]="selection() === clip" [class.dragging]="dragPreview()?.id === clip.id"
+                  [class.selected]="selection() === clip" [class.dragging]="dragPreview()?.id === clip.id" [class.instrumental-clip]="clip.kind === 'instrumental'"
                   [style.left.%]="clip.left + (dragPreview()?.id === clip.id ? dragPreview()!.offsetPercent : 0)" [style.width.%]="clip.width"
                   [attr.aria-label]="clip.ariaLabel + (track.mix.muted ? ', piste muette' : '')" [attr.aria-pressed]="selection() === clip" aria-describedby="clip-help"
-                  (click)="selectClip(clip, $event)" (keydown)="onClipKey($event, clip)"
+                  (click)="onClipClick($event, clip)" (keydown)="onClipKey($event, clip)"
                   (pointerdown)="onClipPointerDown($event, clip)" (pointermove)="onClipPointerMove($event)" (pointerup)="onClipPointerUp($event)" (pointercancel)="onClipPointerCancel()">
                   <span>{{ clip.label }}{{ track.mix.muted ? ' · muette' : '' }}</span>
                   @if (clip.waveform; as wave) {
@@ -272,6 +272,9 @@
             }
           }
         </p>
+        @if (session.instrumental()) {
+          <small>Cliquez sur la forme d’onde pour placer la tête, puis utilisez ← et →. Cliquez sur le nom du clip pour le sélectionner.</small>
+        }
         @if (studioProject.upload(); as upload) {
           @if (upload.state === 'uploading') {
             <progress max="100" [value]="upload.progress" aria-label="Envoi de l'instrumentale">{{ upload.progress }} %</progress>

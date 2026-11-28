@@ -1,8 +1,8 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StudioPageComponent } from './studio-page';
 
 describe('Raccourci Exporter du studio', () => {
@@ -90,5 +90,79 @@ describe('Défilement de la timeline', () => {
     await fixture.whenStable();
     expect(submit.defaultPrevented).toBe(true);
     expect(root.querySelector('[aria-label="Sélectionner la piste Piano couplet"]')).not.toBeNull();
+  });
+});
+
+describe('Navigation dans la forme d’onde', () => {
+  let fixture: ComponentFixture<StudioPageComponent>;
+  let root: HTMLElement;
+
+  beforeEach(async () => {
+    vi.stubGlobal('ResizeObserver', class {
+      observe(): void { /* Aucun redimensionnement dans ce test. */ }
+      disconnect(): void { /* Aucune observation active. */ }
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    TestBed.configureTestingModule({
+      imports: [StudioPageComponent],
+      providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()],
+    });
+    fixture = TestBed.createComponent(StudioPageComponent);
+    root = fixture.nativeElement as HTMLElement;
+    const { session } = fixture.componentInstance;
+    session.setBpm(120);
+    session.setInstrumental({ name: 'Prod test.wav', buffer: { duration: 160 } as AudioBuffer, fileId: null });
+    session.moveInstrumental(12);
+    await fixture.whenStable();
+  });
+
+  afterEach(() => {
+    fixture.destroy();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('utilise la portion visible après défilement et active les flèches sans déplacer le clip', async () => {
+    root.querySelector<HTMLButtonElement>('[aria-label="Dézoomer la timeline"]')!.click();
+    await fixture.whenStable();
+    root.querySelector<HTMLButtonElement>('[aria-label="Mesures suivantes"]')!.click();
+    await fixture.whenStable();
+
+    const clip = root.querySelector<HTMLButtonElement>('.instrumental-clip')!;
+    const waveform = clip.querySelector('.clip-waveform')!;
+    vi.spyOn(waveform, 'getBoundingClientRect').mockReturnValue(new DOMRect(200, 320, 320, 34));
+    clip.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1, clientX: 280, clientY: 335 }));
+
+    const ruler = root.querySelector<HTMLElement>('.timeline-ruler')!;
+    const { session } = fixture.componentInstance;
+    expect(session.position()).toEqual({ bar: 41, beat: 1, sixteenth: 1 });
+    expect(document.activeElement).toBe(ruler);
+    expect(clip.getAttribute('aria-pressed')).toBe('false');
+    ruler.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    expect(session.position()).toEqual({ bar: 41, beat: 2, sixteenth: 1 });
+    expect(session.instrumentalStartSeconds()).toBe(6);
+  });
+
+  it('conserve l’édition depuis le nom du clip et le glissement sans déplacer la tête', async () => {
+    const clip = root.querySelector<HTMLButtonElement>('.instrumental-clip')!;
+    const waveform = clip.querySelector('.clip-waveform')!;
+    const lane = clip.parentElement!;
+    vi.spyOn(waveform, 'getBoundingClientRect').mockReturnValue(new DOMRect(200, 320, 320, 34));
+    vi.spyOn(lane, 'getBoundingClientRect').mockReturnValue(new DOMRect(140, 300, 640, 80));
+    Object.defineProperty(clip, 'setPointerCapture', { value: vi.fn() });
+    clip.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1, clientX: 235, clientY: 315 }));
+    await fixture.whenStable();
+    expect(clip.getAttribute('aria-pressed')).toBe('true');
+
+    clip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+    const { session } = fixture.componentInstance;
+    expect(session.instrumentalStartSeconds()).toBe(6.5);
+
+    clip.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: 240, clientY: 335 }));
+    clip.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, clientX: 260, clientY: 335 }));
+    clip.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1, clientX: 260, clientY: 335 }));
+
+    expect(session.instrumentalStartSeconds()).toBe(7.5);
+    expect(session.songStep()).toBe(0);
   });
 });

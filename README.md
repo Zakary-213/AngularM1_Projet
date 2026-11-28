@@ -413,6 +413,12 @@ Règles : l'auteur vient du JWT, jamais du corps ; seuls `projectId`, `title` et
 
 Choix techniques, fonctionnalités réalisées, tests exécutés et limites, mission par mission.
 
+### 28 novembre 2026 — Navigation dans la forme d’onde de l’instrumentale (M6, #69)
+
+- Un clic sur l’onde place la tête au pas de double-croche le plus proche dans la portion affichée. Le calcul tient compte du début du clip, du défilement, du zoom et du BPM. En lecture, le transport repart de la nouvelle position.
+- Le clic donne le focus à la règle sans faire défiler la page. Les flèches déplacent la tête d’un temps. La règle est également accessible avec Tab. Le nom du clip reste cliquable pour l’édition et le glisser-déposer déplace le clip.
+- `npm test` frontend 380/380 et build Angular réussi. Les tests couvrent les portions entières, défilées et recadrées, les bornes et la distinction entre clic, flèches et glissement. Sur un projet fictif avec un WAV synthétique et une API locale en mémoire, le clic au centre après défilement a repris à `49:01:01` en lecture. Le clavier fonctionne par Tab et après clic. Contrôle à 360, 640, 768 et 1280 px sans débordement de la page. L’écoute au casque et le zoom du navigateur à 200 % restent à vérifier.
+
 ### 28 novembre 2026 — Pistes d’instruments et défilement du studio (M2, #68)
 
 - Le studio permet d’ajouter, de sélectionner, de renommer et de retirer des pistes d’instruments. Chaque piste conserve ses clips et son mixage dans le format de projet 4. Les anciens projets gardent leurs pistes Mélodie et Basse.

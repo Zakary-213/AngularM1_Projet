@@ -97,6 +97,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #8bc8dd; outline-
 .track-lane .timeline-clip { position: absolute; top: 9px; display: block; min-height: 0; height: 64px; padding: 7px; border-radius: 4px; text-align: left; font: inherit; font-weight: 400; cursor: grab; touch-action: none; user-select: none; }
 .track-lane .timeline-clip > span { pointer-events: none; }
 .track-lane .timeline-clip app-waveform { pointer-events: none; }
+.track-lane .instrumental-clip:not(.dragging) app-waveform { pointer-events: auto; cursor: crosshair; }
 .track-lane .timeline-clip.selected { outline: 2px solid #f7f7f7; outline-offset: 1px; z-index: 2; }
 .track-lane .timeline-clip.dragging { cursor: grabbing; opacity: 0.85; z-index: 3; }
 .track-lane .timeline-clip:focus-visible { outline: 3px solid #8bc8dd; outline-offset: 1px; z-index: 2; }

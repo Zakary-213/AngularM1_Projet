@@ -19,7 +19,7 @@ import { INSTRUMENT_TRACK_NAME_MAX_LENGTH, MAX_STUDIO_TRACKS, StudioTrackInfo } 
 import { isVocalTrackId } from '../../shared/audio/track-mix';
 import { TrackMix } from '../../shared/audio/track-mix';
 import { layoutClip, dragUnits } from '../../shared/audio/timeline-layout';
-import { DEFAULT_LOOP_BARS, MAX_SONG_BARS, describePosition, stepAfterKey, stepFromFraction, validateLoopBars } from '../../shared/audio/timeline-position';
+import { DEFAULT_LOOP_BARS, MAX_SONG_BARS, describePosition, stepAfterKey, stepFromFraction, stepFromWaveformFraction, validateLoopBars } from '../../shared/audio/timeline-position';
 import { StudioProjectService } from '../../shared/services/studio-project.service';
 import { LeaveConfirmation } from '../../shared/guards/unsaved-changes.guard';
 
@@ -110,6 +110,7 @@ export class StudioPageComponent implements LeaveConfirmation {
   private readonly injector = inject(Injector);
   private readonly editorPanel = viewChild<ElementRef<HTMLElement>>('editorPanel');
   private readonly exportPanel = viewChild('exportPanel', { read: ElementRef<HTMLElement> });
+  private readonly timelineRuler = viewChild<ElementRef<HTMLElement>>('timelineRuler');
   /** Panneau « Publier le son » (#80), ouvert depuis l'en-tête d'un projet sauvegardé. */
   readonly publishOpen = signal(false);
 
@@ -235,6 +236,7 @@ export class StudioPageComponent implements LeaveConfirmation {
   /** Aperçu du glissement en cours : décalage en % appliqué au clip saisi. */
   readonly dragPreview = signal<{ readonly id: string; readonly offsetPercent: number } | null>(null);
   private drag: ClipDrag | null = null;
+  private skipWaveformClick = false;
 
   /** Pistes réelles de la session, placées sur la fenêtre visible de la timeline. */
   readonly tracks = computed<TimelineTrack[]>(() => {
@@ -331,9 +333,11 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   /** Clic sur la règle ou sur une piste : la tête de lecture se place au temps le plus proche. */
   onTimelineClick(event: MouseEvent): void {
-    const measure = (event.target as HTMLElement).dataset['measure'];
+    const target = event.target as HTMLElement;
+    if (target.closest('button, input, label')) return;
+    const measure = target.dataset['measure'];
     if (measure) {
-      void this.session.seek((Number(measure) - 1) * STEPS_PER_BAR);
+      this.placePlayhead((Number(measure) - 1) * STEPS_PER_BAR);
       return;
     }
     const lane = (event.currentTarget as HTMLElement).closest('.timeline-inner')?.querySelector('.track-lane');
@@ -346,8 +350,13 @@ export class StudioPageComponent implements LeaveConfirmation {
     }
     if (rect.width > 0) {
       const fraction = (event.clientX - rect.left) / rect.width;
-      void this.session.seek(stepFromFraction(fraction, this.visibleBars(), this.firstVisibleBar(), this.session.navigationEndStep()));
+      this.placePlayhead(stepFromFraction(fraction, this.visibleBars(), this.firstVisibleBar(), this.session.navigationEndStep()));
     }
+  }
+
+  private placePlayhead(step: number): void {
+    this.timelineRuler()?.nativeElement.focus({ preventScroll: true });
+    void this.session.seek(step);
   }
 
   /** Alternative clavier au clic : la règle est un curseur (flèches, Page, Début, Fin). */
@@ -385,8 +394,21 @@ export class StudioPageComponent implements LeaveConfirmation {
 
   // ——— Édition des clips (M5) ———
 
-  selectClip(clip: TimelineClip, event?: Event): void {
-    event?.stopPropagation(); // un clic sur un clip ne déplace pas la tête de lecture
+  onClipClick(event: MouseEvent, clip: TimelineClip): void {
+    event.stopPropagation();
+    if (clip.kind === 'instrumental' && clip.waveform && event.detail > 0 && !this.skipWaveformClick) {
+      const rect = (event.currentTarget as HTMLElement).querySelector('.clip-waveform')?.getBoundingClientRect();
+      if (rect && rect.width > 0 && event.clientY >= rect.top && event.clientY <= rect.bottom) {
+        const fraction = (event.clientX - rect.left) / rect.width;
+        const clipStart = this.session.instrumentalStartSeconds();
+        this.placePlayhead(stepFromWaveformFraction(fraction, clipStart + clip.waveform.fromSeconds, clipStart + clip.waveform.toSeconds, this.session.bpm()));
+        return;
+      }
+    }
+    this.selectClip(clip);
+  }
+
+  private selectClip(clip: TimelineClip): void {
     this.instrumentTrackAction.set(null);
     if (isInstrumentTrackId(clip.kind)) {
       this.session.selectInstrumentTrack(clip.kind);
@@ -518,6 +540,7 @@ export class StudioPageComponent implements LeaveConfirmation {
     if (!lane) {
       return;
     }
+    this.skipWaveformClick = false;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     this.drag = { clip, pointerId: event.pointerId, startX: event.clientX, laneWidth: lane.getBoundingClientRect().width };
   }
@@ -541,8 +564,10 @@ export class StudioPageComponent implements LeaveConfirmation {
       return;
     }
     this.drag = null;
-    this.dragPreview.set(null);
     const delta = event.clientX - drag.startX;
+    // Le navigateur émet un clic après le relâchement d'un pointeur capturé.
+    this.skipWaveformClick = this.dragPreview() !== null || Math.abs(delta) >= DRAG_THRESHOLD_PX;
+    this.dragPreview.set(null);
     if (Math.abs(delta) >= DRAG_THRESHOLD_PX) {
       this.selectedClip.set({ kind: drag.clip.kind, id: drag.clip.id });
       this.moveClip(drag.clip, dragUnits(delta, drag.laneWidth, this.unitsInWindow(drag.clip)));
@@ -552,6 +577,7 @@ export class StudioPageComponent implements LeaveConfirmation {
   onClipPointerCancel(): void {
     this.drag = null;
     this.dragPreview.set(null);
+    this.skipWaveformClick = true;
   }
 
   /** Nombre de mesures (patterns) ou de temps (audio) contenus dans la fenêtre visible. */
